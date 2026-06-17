@@ -7,6 +7,7 @@ O projeto `financial-vellun` é greenfield — atualmente só existe `docs/techn
 O objetivo é produzir **um único arquivo Markdown** contendo prompts incrementais — lógicos, sequenciais e coesos — que poderão ser executados, um a um, para implementar a aplicação posteriormente. Cada prompt deve ser autossuficiente o bastante para ser colado em um agente de codificação e produzir um passo concreto e verificável, construindo sobre o anterior.
 
 ### Decisões confirmadas com o usuário
+
 - **Idioma:** Português (BR), para manter consistência com o documento de requisitos.
 - **Granularidade:** Um prompt por etapa do roadmap (Fases 1–5 do §15). Resultado esperado: ~30–40 prompts focados.
 - **Defaults recomendados** (marcados como ajustáveis dentro dos prompts):
@@ -76,6 +77,7 @@ O objetivo é produzir **um único arquivo Markdown** contendo prompts increment
 ## Template de cada prompt
 
 Cada prompt terá:
+
 - **Título e ID** (ex.: `P2.7 — CRUD de Lançamentos (API)`).
 - **Objetivo** (1–2 frases).
 - **Pré-requisitos** (IDs de prompts anteriores).
@@ -88,6 +90,7 @@ Cada prompt terá:
 ## Verificação
 
 Como este entregável é um documento (não código executável), a verificação será:
+
 - Conferir que **todos os módulos do §5–§11 e todas as etapas do roadmap §15 têm prompt correspondente** (sem lacunas).
 - Conferir que **cada critério de aceite do MVP (§17) está coberto** por ao menos um prompt na seção final de checklist.
 - Conferir que a ordem é executável: nenhum prompt depende de algo criado por um prompt posterior (pré-requisitos sempre apontam para trás).

@@ -9,11 +9,22 @@
   "scripts": {
     "db:up": "docker compose -f infra/docker/docker-compose.yml up -d",
     "db:down": "docker compose -f infra/docker/docker-compose.yml down",
-    "lint": "pnpm -r lint",
-    "format": "pnpm -r format"
+    "lint": "eslint . --ext .ts,.tsx,.js,.jsx",
+    "lint:workspaces": "pnpm -r --if-present lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
   },
   "engines": {
     "node": ">=20",
     "pnpm": ">=9"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.3",
+    "@typescript-eslint/eslint-plugin": "^8.61.1",
+    "@typescript-eslint/parser": "^8.61.1",
+    "eslint": "^8.57.1",
+    "eslint-plugin-import": "^2.32.0",
+    "prettier": "^3.8.4",
+    "typescript": "^6.0.3"
   }
 }

@@ -5,6 +5,7 @@
 Execute os prompts **em ordem numérica**, um de cada vez, em um agente de codificação (ex.: Claude Code). Antes de avançar para o próximo prompt, valide o **critério de aceite** do prompt atual. Cada prompt é autossuficiente: contém todo o contexto necessário para ser executado de forma isolada.
 
 **Regras gerais:**
+
 - Nunca pule prompts sem confirmar que os pré-requisitos estão satisfeitos.
 - Cada prompt deve resultar em código funcional e comitável.
 - Testes manuais simples são suficientes nos primeiros prompts; adicione testes automatizados conforme a base estabiliza.
@@ -12,16 +13,16 @@ Execute os prompts **em ordem numérica**, um de cada vez, em um agente de codif
 
 ## Convenções globais (leia antes de executar qualquer prompt)
 
-| Item | Decisão | Ajustável? |
-|---|---|---|
-| Gerenciador de pacotes | pnpm workspaces | [ajustável] |
-| Autenticação | JWT access + refresh via cookies HTTP-only | [ajustável] |
-| Provedor de WhatsApp | Abstraído via adapter (sem acoplar Z-API/Twilio/Meta) | [ajustável] |
-| Provedor de LLM | OpenAI, atrás de interface `LlmProvider` | [ajustável] |
-| Banco de dados | PostgreSQL via Prisma ORM | não |
-| Linguagem API principal | TypeScript / NestJS | não |
-| Linguagem AI Agent | Python / FastAPI | não |
-| Frontend | Next.js + Tailwind CSS + shadcn/ui | não |
+| Item                    | Decisão                                               | Ajustável?  |
+| ----------------------- | ----------------------------------------------------- | ----------- |
+| Gerenciador de pacotes  | pnpm workspaces                                       | [ajustável] |
+| Autenticação            | JWT access + refresh via cookies HTTP-only            | [ajustável] |
+| Provedor de WhatsApp    | Abstraído via adapter (sem acoplar Z-API/Twilio/Meta) | [ajustável] |
+| Provedor de LLM         | OpenAI, atrás de interface `LlmProvider`              | [ajustável] |
+| Banco de dados          | PostgreSQL via Prisma ORM                             | não         |
+| Linguagem API principal | TypeScript / NestJS                                   | não         |
+| Linguagem AI Agent      | Python / FastAPI                                      | não         |
+| Frontend                | Next.js + Tailwind CSS + shadcn/ui                    | não         |
 
 **Tipos e enums compartilhados** (referência para todos os prompts):
 
@@ -34,6 +35,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 ```
 
 **Formato padrão de erro da API:**
+
 ```json
 { "statusCode": 400, "message": "...", "error": "Bad Request" }
 ```
@@ -44,19 +46,19 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 
 ## Tabela de rastreabilidade
 
-| Prompt | Requisito de origem |
-|---|---|
-| P1.1 – P1.8 | §3, §15 Fase 1 |
-| P2.1 – P2.2 | §4, §5.2 |
-| P2.3 | §5.1 |
-| P2.4 | §5.2, §12.1 |
-| P2.5 | §7 |
-| P2.6 | §8 |
-| P2.7 – P2.9 | §6 |
-| P2.10 | §5.3 |
-| P3.1 | §10 |
-| P3.2 – P3.7 | §9, §11.2, §11.3 |
-| P4.1 – P4.4 | §5.4, §15 Fase 4 |
+| Prompt      | Requisito de origem           |
+| ----------- | ----------------------------- |
+| P1.1 – P1.8 | §3, §15 Fase 1                |
+| P2.1 – P2.2 | §4, §5.2                      |
+| P2.3        | §5.1                          |
+| P2.4        | §5.2, §12.1                   |
+| P2.5        | §7                            |
+| P2.6        | §8                            |
+| P2.7 – P2.9 | §6                            |
+| P2.10       | §5.3                          |
+| P3.1        | §10                           |
+| P3.2 – P3.7 | §9, §11.2, §11.3              |
+| P4.1 – P4.4 | §5.4, §15 Fase 4              |
 | P5.1 – P5.6 | §15 Fase 5, §14 (fora do MVP) |
 
 ---
@@ -72,6 +74,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** Node.js ≥ 20, pnpm ≥ 9 instalados na máquina.
 
 **Escopo / tarefas:**
+
 - Inicializar `package.json` raiz com `"private": true` e `workspaces: ["apps/*", "packages/*"]`.
 - Criar `pnpm-workspace.yaml` listando `apps/*` e `packages/*`.
 - Criar a estrutura de diretórios:
@@ -94,6 +97,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - Criar `README.md` mínimo com nome do projeto e estrutura de diretórios.
 
 **Arquivos/áreas afetadas:**
+
 - `package.json` (raiz)
 - `pnpm-workspace.yaml`
 - `.gitignore`
@@ -102,6 +106,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - Diretórios `apps/`, `packages/`, `infra/`, `docs/`
 
 **Critério de aceite:**
+
 - `pnpm install` na raiz não retorna erros.
 - Todos os diretórios listados existem.
 - `git status` mostra apenas os arquivos criados intencionalmente.
@@ -119,6 +124,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** P1.1 concluído.
 
 **Escopo / tarefas:**
+
 - Em `packages/config`, criar:
   - `package.json` com nome `@financial-vellun/config`.
   - `tsconfig.base.json` com `strict: true`, `target: ES2022`, `module: NodeNext`, `moduleResolution: NodeNext`.
@@ -133,6 +139,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - Instalar devDependências necessárias: `typescript`, `eslint`, `prettier`, plugins TypeScript/ESLint.
 
 **Arquivos/áreas afetadas:**
+
 - `packages/config/`
 - `tsconfig.json` (raiz)
 - `.eslintrc.js` (raiz)
@@ -140,6 +147,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - `package.json` (raiz, scripts)
 
 **Critério de aceite:**
+
 - `pnpm lint` na raiz executa sem erros em arquivos existentes.
 - `pnpm format` formata arquivos sem quebrar nada.
 - `packages/config` está listado como workspace e pode ser referenciado por `@financial-vellun/config`.
@@ -157,6 +165,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** P1.2 concluído.
 
 **Escopo / tarefas:**
+
 - Em `packages/shared`, criar `package.json` com nome `@financial-vellun/shared` e `exports` apontando para `src/index.ts`.
 - Instalar `zod` como dependência.
 - Criar e exportar:
@@ -170,9 +179,11 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - `tsconfig.json` estendendo `@financial-vellun/config/tsconfig.base.json`.
 
 **Arquivos/áreas afetadas:**
+
 - `packages/shared/`
 
 **Critério de aceite:**
+
 - `pnpm --filter @financial-vellun/shared build` compila sem erros.
 - Os enums e schemas podem ser importados em um arquivo de teste TypeScript simples sem erros de tipo.
 
@@ -189,6 +200,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** Docker Desktop instalado; P1.1 concluído.
 
 **Escopo / tarefas:**
+
 - Criar `infra/docker/docker-compose.yml` com serviço `postgres`:
   - Imagem: `postgres:16-alpine`.
   - Variáveis de ambiente via `.env` (usando `env_file`).
@@ -201,12 +213,14 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - Documentar no `README.md` como iniciar o banco.
 
 **Arquivos/áreas afetadas:**
+
 - `infra/docker/docker-compose.yml`
 - `infra/docker/.env.example`
 - `infra/docker/.env` (não comitado)
 - `package.json` (raiz, scripts)
 
 **Critério de aceite:**
+
 - `pnpm db:up` inicia o container sem erros.
 - `docker ps` mostra o container `postgres` em estado `healthy`.
 - É possível conectar ao banco via `psql` ou DBeaver usando as credenciais do `.env`.
@@ -224,6 +238,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** P1.2, P1.3, P1.4 concluídos; banco rodando.
 
 **Escopo / tarefas:**
+
 - Scaffoldar NestJS com `@nestjs/cli` dentro de `apps/api`.
 - Instalar e configurar:
   - `@nestjs/config` para leitura de `.env`.
@@ -240,12 +255,14 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - Adicionar script `"api:dev"` no `package.json` raiz.
 
 **Arquivos/áreas afetadas:**
+
 - `apps/api/` (estrutura completa NestJS)
 - `apps/api/prisma/schema.prisma`
 - `apps/api/.env.example`
 - `package.json` (raiz, scripts)
 
 **Critério de aceite:**
+
 - `pnpm api:dev` inicia o servidor em `http://localhost:3001` (ou porta configurada).
 - `GET /` retorna `{"status": "ok"}`.
 - `GET /api/docs` abre o Swagger UI.
@@ -264,6 +281,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** P1.5 concluído; banco rodando.
 
 **Escopo / tarefas:**
+
 - Definir no `prisma/schema.prisma` os models completos de acordo com §4, §6, §7, §8 e §11:
   - `User`, `IndividualProfile`, `BusinessProfile`
   - `Account`, `Category`, `Transaction`
@@ -277,6 +295,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - Registrar `PrismaModule` como global no `AppModule`.
 
 **Arquivos/áreas afetadas:**
+
 - `apps/api/prisma/schema.prisma`
 - `apps/api/prisma/migrations/`
 - `apps/api/prisma/seed.ts`
@@ -284,6 +303,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - `apps/api/src/prisma/prisma.service.ts`
 
 **Critério de aceite:**
+
 - `prisma migrate status` mostra a migration `init` aplicada.
 - `pnpm db:seed` insere as categorias padrão sem erros.
 - Consulta SQL `SELECT count(*) FROM categories WHERE is_default = true` retorna o total esperado (20 categorias: 10 individual + 10 business).
@@ -301,6 +321,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** P1.2, P1.3 concluídos.
 
 **Escopo / tarefas:**
+
 - Scaffoldar Next.js 14+ com App Router, TypeScript e Tailwind em `apps/web`.
 - Instalar e inicializar shadcn/ui.
 - Instalar `react-hook-form` e `zod` (para validação client-side).
@@ -314,12 +335,14 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - Página raiz `/` exibindo apenas `<h1>Financial Vellun</h1>` como placeholder.
 
 **Arquivos/áreas afetadas:**
+
 - `apps/web/` (estrutura completa Next.js)
 - `apps/web/src/lib/api-client.ts`
 - `apps/web/.env.local.example`
 - `package.json` (raiz, scripts)
 
 **Critério de aceite:**
+
 - `pnpm web:dev` inicia em `http://localhost:3000`.
 - A página raiz renderiza sem erros.
 - `api-client.ts` exporta uma função tipada e importa tipos de `@financial-vellun/shared`.
@@ -338,6 +361,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** Python ≥ 3.11 instalado; P1.5 concluído.
 
 **Escopo / tarefas:**
+
 - Criar `apps/ai-agent/` com:
   - `pyproject.toml` (gerenciado com `uv` ou `pip` + `requirements.txt`).
   - `.python-version` com versão do Python.
@@ -362,6 +386,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - Adicionar script `"agent:dev"` no `package.json` raiz chamando `uvicorn src.main:app --reload`.
 
 **Arquivos/áreas afetadas:**
+
 - `apps/ai-agent/` (estrutura completa)
 - `apps/ai-agent/src/main.py`
 - `apps/ai-agent/src/config.py`
@@ -369,6 +394,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - `apps/ai-agent/.env.example`
 
 **Critério de aceite:**
+
 - `pnpm agent:dev` inicia em `http://localhost:8000`.
 - `GET /health` retorna `{"status": "ok"}`.
 - `config.py` carrega variáveis sem erros quando `.env` está presente.
@@ -390,6 +416,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** P1.5, P1.6 concluídos.
 
 **Escopo / tarefas:**
+
 - Instalar `@nestjs/jwt`, `@nestjs/passport`, `passport-jwt`, `bcrypt`, `cookie-parser`.
 - Criar `AuthModule` com:
   - `AuthService`: `register(dto)`, `login(dto)`, `logout()`, `refresh(refreshToken)`, `me(userId)`.
@@ -408,6 +435,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - Configurar `cookie-parser` no `main.ts`.
 
 **Arquivos/áreas afetadas:**
+
 - `apps/api/src/auth/`
 - `apps/api/src/auth/auth.module.ts`
 - `apps/api/src/auth/auth.service.ts`
@@ -417,6 +445,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - `apps/api/src/auth/dto/`
 
 **Critério de aceite:**
+
 - `POST /auth/register` cria usuário e retorna dados sem `password_hash`.
 - `POST /auth/login` com credenciais válidas seta os dois cookies.
 - `GET /auth/me` sem cookie retorna `401`.
@@ -437,6 +466,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** P2.1 concluído.
 
 **Escopo / tarefas:**
+
 - Criar `UsersModule` com:
   - `GET /users/me/profile` — retorna o perfil completo (individual ou business).
   - `POST /users/me/profile/individual` — cria/atualiza `IndividualProfile` (CPF, data de nascimento).
@@ -447,6 +477,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - Isolamento por usuário: `user_id` sempre extraído do JWT, nunca do body.
 
 **Arquivos/áreas afetadas:**
+
 - `apps/api/src/users/`
 - `apps/api/src/users/users.module.ts`
 - `apps/api/src/users/users.service.ts`
@@ -454,6 +485,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - `apps/api/src/users/dto/`
 
 **Critério de aceite:**
+
 - `POST /auth/register` + `POST /users/me/profile/individual` cria perfil sem erros.
 - `GET /auth/me` retorna `profile_type: "individual"` e `has_profile: true`.
 - Um usuário não consegue acessar o perfil de outro (retorna `403` ou dados filtrados).
@@ -471,6 +503,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** P1.7 concluído.
 
 **Escopo / tarefas:**
+
 - Criar layout raiz em `apps/web/src/app/layout.tsx` com fontes e Tailwind.
 - Criar `apps/web/src/app/page.tsx` (landing page) com:
   - Seção hero: nome do produto, tagline, CTAs "Entrar" e "Criar conta".
@@ -481,11 +514,13 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - Responsiva (mobile-first).
 
 **Arquivos/áreas afetadas:**
+
 - `apps/web/src/app/page.tsx`
 - `apps/web/src/app/layout.tsx`
 - `apps/web/src/components/landing/`
 
 **Critério de aceite:**
+
 - `http://localhost:3000` renderiza a landing page.
 - Os botões "Entrar" e "Criar conta" existem (podem ser links placeholder ainda).
 - Página responsiva em viewport mobile (375px) e desktop (1280px).
@@ -503,6 +538,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** P2.1, P2.3 concluídos.
 
 **Escopo / tarefas:**
+
 - Criar páginas:
   - `apps/web/src/app/(auth)/login/page.tsx` — formulário com email/senha, React Hook Form + Zod.
   - `apps/web/src/app/(auth)/cadastro/page.tsx` — formulário com nome, email, senha, confirmar senha, seleção de `profile_type`.
@@ -518,6 +554,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - Criar páginas placeholder vazias para `/app/pessoal/dashboard` e `/app/empresa/dashboard`.
 
 **Arquivos/áreas afetadas:**
+
 - `apps/web/src/app/(auth)/`
 - `apps/web/src/app/app/`
 - `apps/web/src/lib/auth.ts`
@@ -525,6 +562,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - `apps/web/src/contexts/auth-context.tsx`
 
 **Critério de aceite:**
+
 - Cadastro com dados válidos cria conta e redireciona para a área correta.
 - Login com credenciais inválidas exibe mensagem de erro.
 - Acessar `/app/pessoal/dashboard` sem estar logado redireciona para `/login`.
@@ -545,6 +583,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Escopo / tarefas:**
 
 **API (`apps/api`):**
+
 - Criar `CategoriesModule` com endpoints:
   - `GET /categories` — listar categorias do usuário + categorias padrão (`is_default: true`) filtradas por `profile_type`.
   - `POST /categories` — criar categoria personalizada.
@@ -554,6 +593,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - `user_id` extraído do JWT; categorias de outros usuários retornam `403`.
 
 **Web (`apps/web`):**
+
 - Criar página `/app/pessoal/categorias` com:
   - Tabela de categorias (nome, tipo, cor, ícone, padrão/personalizada).
   - Botão "Nova categoria".
@@ -562,11 +602,13 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - Criar componentes reutilizáveis: `CategoryForm`, `CategoryTable`.
 
 **Arquivos/áreas afetadas:**
+
 - `apps/api/src/categories/`
 - `apps/web/src/app/app/pessoal/categorias/`
 - `apps/web/src/components/categories/`
 
 **Critério de aceite:**
+
 - `GET /categories` retorna as categorias padrão do seed + categorias do usuário logado.
 - Criar, editar e excluir categoria funcionam ponta a ponta.
 - Tentar excluir categoria com lançamentos vinculados retorna erro descritivo.
@@ -587,6 +629,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Escopo / tarefas:**
 
 **API (`apps/api`):**
+
 - Criar `AccountsModule` com endpoints:
   - `GET /accounts` — listar contas ativas do usuário.
   - `GET /accounts/:id` — detalhes de uma conta.
@@ -597,6 +640,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - Isolamento por `user_id`.
 
 **Web (`apps/web`):**
+
 - Criar página `/app/pessoal/contas` com:
   - Cards de contas exibindo nome, tipo, saldo atual.
   - Botão "Nova conta".
@@ -604,11 +648,13 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
   - Ação de desativar conta.
 
 **Arquivos/áreas afetadas:**
+
 - `apps/api/src/accounts/`
 - `apps/web/src/app/app/pessoal/contas/`
 - `apps/web/src/components/accounts/`
 
 **Critério de aceite:**
+
 - `GET /accounts` lista apenas as contas do usuário autenticado.
 - Criar conta com `initial_balance: 1000` e nenhum lançamento retorna `current_balance: 1000`.
 - Editar e desativar conta funcionam sem erros.
@@ -626,6 +672,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** P2.5, P2.6 concluídos.
 
 **Escopo / tarefas:**
+
 - Criar `TransactionsModule` com endpoints:
   - `GET /transactions` — listar com filtros obrigatórios (§6): `period` (start/end date), `type`, `category_id`, `account_id`, `status`, `source`, `search` (texto na description). Paginação: `page`, `limit`. Ordenação: `sort_by`, `order`.
   - `GET /transactions/:id` — detalhes.
@@ -641,6 +688,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - Resposta paginada no formato `PaginatedResponse<Transaction>` de `@financial-vellun/shared`.
 
 **Arquivos/áreas afetadas:**
+
 - `apps/api/src/transactions/`
 - `apps/api/src/transactions/transactions.module.ts`
 - `apps/api/src/transactions/transactions.service.ts`
@@ -648,6 +696,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - `apps/api/src/transactions/dto/`
 
 **Critério de aceite:**
+
 - `GET /transactions?type=expense&page=1&limit=10` retorna resposta paginada.
 - `GET /transactions?search=mercado` filtra por texto na description.
 - Criar lançamento `expense` de R$50 numa conta com saldo R$1000 atualiza o saldo para R$950.
@@ -666,6 +715,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** P2.7 concluído.
 
 **Escopo / tarefas:**
+
 - Criar página `/app/pessoal/lancamentos` com:
   - Tabela de lançamentos (shadcn/ui `Table`) exibindo: data, descrição, categoria, conta, tipo, valor, status, origem.
   - Painel de filtros: seletor de período (data início/fim), tipo, categoria, conta, status, origem, campo de busca por texto.
@@ -678,12 +728,14 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - Badge de `source` para identificar lançamentos criados por IA.
 
 **Arquivos/áreas afetadas:**
+
 - `apps/web/src/app/app/pessoal/lancamentos/page.tsx`
 - `apps/web/src/components/transactions/TransactionTable.tsx`
 - `apps/web/src/components/transactions/TransactionFilters.tsx`
 - `apps/web/src/hooks/useTransactions.ts`
 
 **Critério de aceite:**
+
 - Tabela renderiza lançamentos paginados da API.
 - Filtro por tipo (`income`/`expense`) recarrega a tabela corretamente.
 - Busca por texto filtra por descrição.
@@ -703,6 +755,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** P2.8 concluído.
 
 **Escopo / tarefas:**
+
 - Criar componente `TransactionForm` (modal ou página lateral) com campos:
   - Tipo (`income` / `expense` / `transfer`) — altera dinamicamente campos disponíveis.
   - Valor (número, formato moeda).
@@ -718,10 +771,12 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - Feedback visual de loading e erros da API.
 
 **Arquivos/áreas afetadas:**
+
 - `apps/web/src/components/transactions/TransactionForm.tsx`
 - `apps/web/src/app/app/pessoal/lancamentos/page.tsx` (botão "Novo lançamento")
 
 **Critério de aceite:**
+
 - Criar lançamento de despesa de R$100 aparece na tabela imediatamente.
 - Editar a descrição de um lançamento salva corretamente.
 - Tentar salvar sem valor exibe erro de validação sem chamar a API.
@@ -742,6 +797,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Escopo / tarefas:**
 
 **API (`apps/api`):**
+
 - Criar `DashboardModule` com endpoint:
   - `GET /dashboard/summary?period_start=&period_end=` — retorna:
     - `total_balance`: soma de saldos de todas as contas ativas.
@@ -753,6 +809,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
     - `monthly_comparison`: receitas e despesas dos últimos 3 meses (para gráfico).
 
 **Web (`apps/web`):**
+
 - Criar página `/app/pessoal/dashboard` com:
   - Cards: saldo atual, total de receitas, total de despesas, resultado do mês.
   - Gráfico de pizza/donut: distribuição por categoria (usar `recharts` ou `chart.js`).
@@ -761,11 +818,13 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
   - Seletor de período (mês atual como default).
 
 **Arquivos/áreas afetadas:**
+
 - `apps/api/src/dashboard/`
 - `apps/web/src/app/app/pessoal/dashboard/page.tsx`
 - `apps/web/src/components/dashboard/`
 
 **Critério de aceite:**
+
 - `GET /dashboard/summary` com lançamentos existentes retorna valores corretos.
 - Dashboard renderiza os cards com valores reais da API.
 - Mudar o período recalcula todos os indicadores.
@@ -788,6 +847,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** P2.7 concluído.
 
 **Escopo / tarefas:**
+
 - Criar `InternalModule` com controller prefixado em `/internal`.
 - Criar guard `InternalApiKeyGuard` que valida o header `x-internal-api-key` contra `INTERNAL_API_KEY` do `.env`.
 - Implementar endpoints:
@@ -798,12 +858,14 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - Nunca expor esses endpoints no Swagger público (usar tag separada ou desabilitar).
 
 **Arquivos/áreas afetadas:**
+
 - `apps/api/src/internal/`
 - `apps/api/src/internal/internal.module.ts`
 - `apps/api/src/internal/guards/internal-api-key.guard.ts`
 - `apps/api/src/internal/controllers/`
 
 **Critério de aceite:**
+
 - `GET /internal/whatsapp/contacts/:phone` sem header retorna `401`.
 - `GET /internal/whatsapp/contacts/:phone` com `x-internal-api-key` correto retorna dados do usuário (ou `404` se não encontrado).
 - `POST /internal/transactions/from-ai` cria lançamento com `source: "ai"`.
@@ -822,6 +884,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** P1.8, P3.1 concluídos.
 
 **Escopo / tarefas:**
+
 - Criar `apps/ai-agent/src/routers/webhook.py` com:
   - `POST /webhook/whatsapp` — recebe payload de mensagem (simulado no MVP, formato a definir).
   - Validação de assinatura HMAC do `WHATSAPP_WEBHOOK_SECRET` (mesmo que com payload simulado).
@@ -833,11 +896,13 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - Criar `apps/ai-agent/src/services/contact_service.py` encapsulando a chamada ao `ApiClient`.
 
 **Arquivos/áreas afetadas:**
+
 - `apps/ai-agent/src/routers/webhook.py`
 - `apps/ai-agent/src/schemas/webhook.py`
 - `apps/ai-agent/src/services/contact_service.py`
 
 **Critério de aceite:**
+
 - `POST /webhook/whatsapp` com payload `{"phone": "+5511999999999", "message": "gastei 100 no mercado", "timestamp": ..., "message_id": ...}` retorna `200`.
 - Com número não cadastrado, o serviço tenta notificar o usuário (log da tentativa).
 - Com número cadastrado, o `user_id` é recuperado corretamente da API.
@@ -855,6 +920,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** P3.2 concluído.
 
 **Escopo / tarefas:**
+
 - Criar `apps/ai-agent/src/schemas/financial_intent.py` com modelo Pydantic `FinancialIntent` contendo todos os campos do §9.3:
   - `intent`, `transaction_type`, `amount`, `description`, `category_name`, `account_name`, `transaction_date`, `confidence` (float 0.0–1.0), `needs_confirmation`, `confirmation_question`.
 - Criar `apps/ai-agent/src/services/intent_classifier.py`:
@@ -864,11 +930,13 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - Criar testes unitários para o classificador com exemplos do §9 (ex.: "gastei 100 no mercado" → `expense`, `amount: 100`, `category: Mercado`).
 
 **Arquivos/áreas afetadas:**
+
 - `apps/ai-agent/src/schemas/financial_intent.py`
 - `apps/ai-agent/src/services/intent_classifier.py`
 - `apps/ai-agent/tests/test_intent_classifier.py`
 
 **Critério de aceite:**
+
 - `classify("gastei 100 no mercado", {})` retorna `FinancialIntent(transaction_type="expense", amount=100, category_name="Mercado", confidence≥0.8)`.
 - `classify("recebi 5000 de salário", {})` retorna `transaction_type="income"`.
 - `classify("paguei 300", {})` retorna `needs_confirmation=True` (sem categoria clara).
@@ -887,6 +955,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** P3.3 concluído; `OPENAI_API_KEY` configurada.
 
 **Escopo / tarefas:**
+
 - Criar interface (ABC) `LlmProvider` em `apps/ai-agent/src/services/llm/base.py` com método `extract_intent(message: str, context: dict) -> FinancialIntent`.
 - Criar `OpenAiProvider` em `apps/ai-agent/src/services/llm/openai_provider.py`:
   - Usar `openai` SDK com `structured outputs` (function calling / response_format com JSON Schema).
@@ -898,11 +967,13 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - Criar `apps/ai-agent/src/services/llm/factory.py` que instancia o provider correto com base em variável de ambiente `LLM_PROVIDER`.
 
 **Arquivos/áreas afetadas:**
+
 - `apps/ai-agent/src/services/llm/`
 - `apps/ai-agent/src/services/intent_classifier.py` (atualizado)
 - `apps/ai-agent/src/config.py` (adicionar `LLM_PROVIDER`, `OPENAI_MODEL`)
 
 **Critério de aceite:**
+
 - Com `OPENAI_API_KEY` válida, `classify("gastei 47,50 no almoço ontem", {})` retorna resultado estruturado com data correta (ontem).
 - Se `OPENAI_API_KEY` estiver ausente ou inválida, o fallback de regras é acionado sem quebrar o fluxo.
 - Trocar `LLM_PROVIDER=rules` usa apenas regras; `LLM_PROVIDER=openai` usa o LLM.
@@ -920,6 +991,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** P3.4 concluído.
 
 **Escopo / tarefas:**
+
 - Criar `apps/ai-agent/src/services/conversation_manager.py`:
   - Armazenar estado de conversa em memória (dict por `phone`) com TTL de 30 minutos.
   - Estado: `pending_intent: FinancialIntent | None`, `awaiting_confirmation: bool`, `last_message_at`.
@@ -938,11 +1010,13 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
   - Após confirmação, prosseguir para criação do lançamento.
 
 **Arquivos/áreas afetadas:**
+
 - `apps/ai-agent/src/services/conversation_manager.py`
 - `apps/ai-agent/src/services/confirmation_rules.py`
 - `apps/ai-agent/src/routers/webhook.py` (integração)
 
 **Critério de aceite:**
+
 - Enviar "paguei 300" → receber pergunta de confirmação de categoria.
 - Responder "aluguel" → o lançamento é criado com categoria Aluguel.
 - Enviar "gastei 100 no mercado" → lançamento criado diretamente sem confirmação.
@@ -961,6 +1035,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** P3.5, P3.1 concluídos.
 
 **Escopo / tarefas:**
+
 - Criar `apps/ai-agent/src/services/transaction_creator.py`:
   - Método `create_from_intent(intent: FinancialIntent, user_id: str, raw_message: str) -> dict`.
   - Resolver `category_name` para `category_id` consultando a API (ou cache curto).
@@ -971,10 +1046,12 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - Formatar resposta de sucesso para o usuário: "Lançamento criado! Despesa de R$100,00 em Mercado em 17/06/2026."
 
 **Arquivos/áreas afetadas:**
+
 - `apps/ai-agent/src/services/transaction_creator.py`
 - `apps/ai-agent/src/routers/webhook.py` (integração final)
 
 **Critério de aceite:**
+
 - Enviar "gastei 100 no mercado" via `POST /webhook/whatsapp` resulta em lançamento criado em `apps/api` com `source: "ai"`, `raw_input: "gastei 100 no mercado"`.
 - Lançamento aparece na tela de lançamentos do web com badge de origem "IA".
 - Falha na API retorna mensagem amigável ao usuário em vez de stacktrace.
@@ -992,6 +1069,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** P3.6 concluído.
 
 **Escopo / tarefas:**
+
 - Criar `apps/ai-agent/src/services/audit_service.py`:
   - `log_message(conversation_id, direction, content, metadata)` — chamar `POST /internal/ai-events`.
   - `log_extraction(user_id, raw_input, extracted_payload, confidence, status, transaction_id?)`.
@@ -1004,11 +1082,13 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - Criar endpoint (protegido por JWT) `GET /transactions/:id/ai-audit` que retorna a extração de IA associada ao lançamento.
 
 **Arquivos/áreas afetadas:**
+
 - `apps/ai-agent/src/services/audit_service.py`
 - `apps/api/src/internal/` (atualizar `POST /internal/ai-events`)
 - `apps/api/src/transactions/` (endpoint de auditoria)
 
 **Critério de aceite:**
+
 - Após processar "gastei 100 no mercado", existe registro em `ai_extracted_transactions` com `raw_input`, `extracted_payload`, `confidence` e `transaction_id`.
 - `GET /transactions/:id/ai-audit` retorna a extração associada.
 - Mensagem ambígua que gerou confirmação também fica registrada com `status: "pending"`.
@@ -1032,6 +1112,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Escopo / tarefas:**
 
 **API (`apps/api`):**
+
 - Estender `DashboardModule` com endpoint `GET /dashboard/business/summary` retornando:
   - Saldo total de contas ativas.
   - Total de receitas e despesas no período.
@@ -1041,6 +1122,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
   - Contas a pagar (lançamentos `expense` com `status: "pending"`).
 
 **Web (`apps/web`):**
+
 - Criar página `/app/empresa/dashboard` com:
   - Cards de saldo, receitas, despesas, resultado.
   - Gráfico de linha/área do fluxo de caixa.
@@ -1048,11 +1130,13 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
   - Seletor de período.
 
 **Arquivos/áreas afetadas:**
+
 - `apps/api/src/dashboard/` (atualizado)
 - `apps/web/src/app/app/empresa/dashboard/page.tsx`
 - `apps/web/src/components/dashboard/business/`
 
 **Critério de aceite:**
+
 - `GET /dashboard/business/summary` retorna fluxo de caixa diário correto.
 - Dashboard empresarial renderiza sem erros com dados reais.
 - Usuário `individual` não acessa `/app/empresa/*` (middleware redireciona).
@@ -1070,6 +1154,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** P4.1 concluído.
 
 **Escopo / tarefas:**
+
 - Reutilizar `GET /transactions` com filtros `type=expense&status=pending` (contas a pagar) e `type=income&status=pending` (contas a receber).
 - Criar páginas no web:
   - `/app/empresa/contas-a-pagar` — lista de despesas pendentes com ação "Marcar como pago".
@@ -1079,10 +1164,12 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - Total pendente em destaque no topo de cada tela.
 
 **Arquivos/áreas afetadas:**
+
 - `apps/web/src/app/app/empresa/contas-a-pagar/`
 - `apps/web/src/app/app/empresa/contas-a-receber/`
 
 **Critério de aceite:**
+
 - Lançamento `expense + pending` aparece em contas a pagar.
 - "Marcar como pago" atualiza status para `confirmed` e remove da lista de pendentes.
 - Total pendente no topo é a soma dos valores filtrados.
@@ -1102,24 +1189,28 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Escopo / tarefas:**
 
 **API (`apps/api`):**
+
 - Criar `ContactsModule` com model `Contact`:
   - Campos: `id`, `user_id`, `name`, `type` (`client` | `supplier`), `document` (CNPJ/CPF), `email`, `phone`, `notes`, `is_active`, `created_at`, `updated_at`.
 - Endpoints: `GET /contacts`, `POST /contacts`, `PATCH /contacts/:id`, `DELETE /contacts/:id`.
 - Filtro por `type` (`client` / `supplier`) e busca por nome.
 
 **Web (`apps/web`):**
+
 - Criar páginas:
   - `/app/empresa/clientes` — lista de clientes com busca e ações CRUD.
   - `/app/empresa/fornecedores` — lista de fornecedores com busca e ações CRUD.
 - Modal de criação/edição compartilhado (com campo `type` preenchido por contexto).
 
 **Arquivos/áreas afetadas:**
+
 - `apps/api/src/contacts/`
 - `apps/api/prisma/schema.prisma` (novo model `Contact` + migration)
 - `apps/web/src/app/app/empresa/clientes/`
 - `apps/web/src/app/app/empresa/fornecedores/`
 
 **Critério de aceite:**
+
 - Criar cliente com nome e CNPJ aparece na lista.
 - Busca por nome filtra em tempo real.
 - Fornecedor não aparece na lista de clientes e vice-versa.
@@ -1137,6 +1228,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** P2.5, P4.1 concluídos.
 
 **Escopo / tarefas:**
+
 - Adicionar campo `cost_center` (string, opcional) ao model `Category` no Prisma + migration.
 - Confirmar que o seed do P1.6 inclui as 10 categorias padrão para `business` (Vendas, Serviços, Fornecedores, Impostos, Folha de pagamento, Aluguel, Marketing, Software, Transporte, Outros).
 - Atualizar formulário de categoria no web para incluir campo "Centro de custo" (visível apenas para usuários `business`).
@@ -1144,6 +1236,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - Endpoint `GET /categories` deve filtrar por `profile_type` do usuário logado para não misturar categorias pessoais com empresariais.
 
 **Arquivos/áreas afetadas:**
+
 - `apps/api/prisma/schema.prisma` (campo `cost_center`)
 - `apps/api/prisma/migrations/`
 - `apps/api/src/categories/` (atualizar filtro)
@@ -1151,6 +1244,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 - `apps/web/src/components/categories/CategoryForm.tsx` (campo condicional)
 
 **Critério de aceite:**
+
 - Usuário `business` vê categorias empresariais padrão ao acessar `/app/empresa/categorias`.
 - Usuário `individual` não vê categorias empresariais na sua lista.
 - Criar categoria com centro de custo "TI" salva o campo corretamente.
@@ -1174,6 +1268,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** MVP completo (P1–P4).
 
 **Escopo / tarefas:**
+
 - Adicionar campos ao model `Transaction`: `is_recurring` (boolean), `recurrence_rule` (string, formato iCal RRULE), `parent_transaction_id`.
 - Criar worker/cron job em `apps/api` para gerar ocorrências futuras com base na regra de recorrência.
 - Tela web: formulário de criação com opção "Repetir" (frequência + data de término).
@@ -1190,6 +1285,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** MVP completo.
 
 **Escopo / tarefas:**
+
 - Criar model `Budget`: `user_id`, `category_id`, `period` (monthly/yearly), `amount`, `start_date`.
 - Endpoint `GET /budgets/status` retornando progresso (gasto vs orçado por categoria).
 - Widget de orçamentos no dashboard mostrando barras de progresso.
@@ -1206,6 +1302,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** MVP completo.
 
 **Escopo / tarefas:**
+
 - Endpoints de relatórios: por categoria, por conta, por período, DRE simplificado (business).
 - Exportação para CSV.
 - Tela de relatórios com filtros e visualização.
@@ -1222,6 +1319,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** MVP completo.
 
 **Escopo / tarefas:**
+
 - Endpoint `POST /transactions/import` aceitando multipart com arquivo OFX ou CSV.
 - Parser de OFX e CSV mapeando campos para o modelo `Transaction`.
 - Tela de importação com preview dos lançamentos antes de confirmar.
@@ -1238,6 +1336,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** P5.2 concluído.
 
 **Escopo / tarefas:**
+
 - Criar `NotificationsModule` com tabela `notifications`.
 - Tipos: conta a vencer em N dias, orçamento ≥ 80%, resumo semanal.
 - Canal inicial: e-mail (via `nodemailer` ou serviço como Resend).
@@ -1254,6 +1353,7 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 **Pré-requisitos:** MVP completo; P5.5 concluído.
 
 **Escopo / tarefas:**
+
 - Separar conceito de `Organization` de `User`.
 - Model `OrganizationMember` com roles (`owner`, `admin`, `viewer`).
 - Todos os recursos (contas, lançamentos, categorias) passam a ser escopados por `organization_id` em vez de `user_id`.
@@ -1268,14 +1368,14 @@ AccountType: checking | savings | cash | credit_card | digital_wallet | investme
 
 Mapeamento de cada critério de aceite para o(s) prompt(s) que o satisfaz(em):
 
-| Critério de aceite (§17) | Prompt(s) |
-|---|---|
-| Usuário consegue criar conta e fazer login | P2.1, P2.4 |
-| Usuários individual e business são direcionados para áreas distintas | P2.2, P2.4 |
-| Usuário pessoa física consegue criar, editar, listar e filtrar lançamentos | P2.7, P2.8, P2.9 |
-| Dashboard exibe indicadores coerentes com os lançamentos | P2.10 |
-| Agente Python recebe uma mensagem simulada de WhatsApp | P3.2 |
-| Mensagem "gastei 100 no mercado" gera lançamento de despesa | P3.3, P3.4, P3.6 |
-| Lançamento criado pela IA fica identificado com origem apropriada | P3.6, P3.7 |
-| Mensagens ambíguas não criam lançamento sem confirmação | P3.5 |
-| Dados de um usuário não ficam acessíveis para outro usuário | P2.1, P2.7 (isolamento por `user_id`) |
+| Critério de aceite (§17)                                                   | Prompt(s)                             |
+| -------------------------------------------------------------------------- | ------------------------------------- |
+| Usuário consegue criar conta e fazer login                                 | P2.1, P2.4                            |
+| Usuários individual e business são direcionados para áreas distintas       | P2.2, P2.4                            |
+| Usuário pessoa física consegue criar, editar, listar e filtrar lançamentos | P2.7, P2.8, P2.9                      |
+| Dashboard exibe indicadores coerentes com os lançamentos                   | P2.10                                 |
+| Agente Python recebe uma mensagem simulada de WhatsApp                     | P3.2                                  |
+| Mensagem "gastei 100 no mercado" gera lançamento de despesa                | P3.3, P3.4, P3.6                      |
+| Lançamento criado pela IA fica identificado com origem apropriada          | P3.6, P3.7                            |
+| Mensagens ambíguas não criam lançamento sem confirmação                    | P3.5                                  |
+| Dados de um usuário não ficam acessíveis para outro usuário                | P2.1, P2.7 (isolamento por `user_id`) |
