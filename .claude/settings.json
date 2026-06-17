@@ -9,7 +9,9 @@
       "Bash(pnpm list *)",
       "Bash(pnpm -r list)",
       "Bash(pnpm --filter @financial-vellun/shared build)",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(pnpm db:up)",
+      "Bash(docker exec *)"
     ]
   }
 }
