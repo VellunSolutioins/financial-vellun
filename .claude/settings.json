@@ -7,7 +7,9 @@
       "Bash(pnpm format:check)",
       "Bash(pnpm format *)",
       "Bash(pnpm list *)",
-      "Bash(pnpm -r list)"
+      "Bash(pnpm -r list)",
+      "Bash(pnpm --filter @financial-vellun/shared build)",
+      "Bash(node -e ' *)"
     ]
   }
 }
