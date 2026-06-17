@@ -6,3 +6,244 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+// ── Enums ─────────────────────────────────────────────────────────────────────
+
+enum ProfileType {
+  individual
+  business
+}
+
+enum TransactionType {
+  income
+  expense
+  transfer
+}
+
+enum TransactionStatus {
+  confirmed
+  pending
+  cancelled
+}
+
+enum TransactionSource {
+  manual
+  whatsapp
+  ai
+  import
+  recurring
+}
+
+enum AccountType {
+  checking
+  savings
+  cash
+  credit_card
+  digital_wallet
+  investment
+  other
+}
+
+enum AiConversationStatus {
+  active
+  completed
+  abandoned
+}
+
+enum AiMessageDirection {
+  inbound
+  outbound
+}
+
+enum AiExtractionStatus {
+  pending
+  confirmed
+  rejected
+}
+
+// ── Core ──────────────────────────────────────────────────────────────────────
+
+model User {
+  id           String      @id @default(uuid())
+  name         String
+  email        String      @unique
+  passwordHash String      @map("password_hash")
+  profileType  ProfileType @map("profile_type")
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+
+  individualProfile       IndividualProfile?
+  businessProfile         BusinessProfile?
+  accounts                Account[]
+  categories              Category[]
+  transactions            Transaction[]
+  whatsappContacts        WhatsappContact[]
+  aiConversations         AiConversation[]
+  aiExtractedTransactions AiExtractedTransaction[]
+
+  @@map("users")
+}
+
+model IndividualProfile {
+  id        String    @id @default(uuid())
+  userId    String    @unique @map("user_id")
+  cpf       String    @unique
+  birthDate DateTime? @map("birth_date")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("individual_profiles")
+}
+
+model BusinessProfile {
+  id          String   @id @default(uuid())
+  userId      String   @unique @map("user_id")
+  companyName String   @map("company_name")
+  tradeName   String?  @map("trade_name")
+  cnpj        String   @unique
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("business_profiles")
+}
+
+// ── Financial ─────────────────────────────────────────────────────────────────
+
+model Account {
+  id             String      @id @default(uuid())
+  userId         String      @map("user_id")
+  name           String
+  type           AccountType
+  initialBalance Decimal     @default(0) @map("initial_balance") @db.Decimal(15, 2)
+  currentBalance Decimal     @default(0) @map("current_balance") @db.Decimal(15, 2)
+  currency       String      @default("BRL")
+  isActive       Boolean     @default(true) @map("is_active")
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+
+  @@index([userId])
+  @@map("accounts")
+}
+
+model Category {
+  id          String          @id @default(uuid())
+  userId      String?         @map("user_id")
+  name        String
+  type        TransactionType
+  color       String?
+  icon        String?
+  profileType ProfileType     @map("profile_type")
+  isDefault   Boolean         @default(false) @map("is_default")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  user         User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+
+  @@index([userId])
+  @@map("categories")
+}
+
+model Transaction {
+  id              String            @id @default(uuid())
+  userId          String            @map("user_id")
+  accountId       String            @map("account_id")
+  categoryId      String?           @map("category_id")
+  type            TransactionType
+  amount          Decimal           @db.Decimal(15, 2)
+  description     String
+  transactionDate DateTime          @map("transaction_date") @db.Date
+  status          TransactionStatus @default(confirmed)
+  source          TransactionSource @default(manual)
+  rawInput        String?           @map("raw_input")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account  Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  category Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  aiExtractedTransactions AiExtractedTransaction[]
+
+  @@index([userId])
+  @@index([transactionDate])
+  @@index([type])
+  @@index([categoryId])
+  @@index([accountId])
+  @@map("transactions")
+}
+
+// ── WhatsApp ──────────────────────────────────────────────────────────────────
+
+model WhatsappContact {
+  id          String   @id @default(uuid())
+  userId      String?  @map("user_id")
+  phoneNumber String   @unique @map("phone_number")
+  provider    String?
+  isVerified  Boolean  @default(false) @map("is_verified")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user            User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  aiConversations AiConversation[]
+
+  @@map("whatsapp_contacts")
+}
+
+// ── AI ────────────────────────────────────────────────────────────────────────
+
+model AiConversation {
+  id                String               @id @default(uuid())
+  userId            String?              @map("user_id")
+  whatsappContactId String               @map("whatsapp_contact_id")
+  status            AiConversationStatus @default(active)
+  lastMessageAt     DateTime?            @map("last_message_at")
+  createdAt         DateTime             @default(now()) @map("created_at")
+  updatedAt         DateTime             @updatedAt @map("updated_at")
+
+  user            User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  whatsappContact WhatsappContact @relation(fields: [whatsappContactId], references: [id], onDelete: Cascade)
+  messages        AiMessage[]
+
+  @@map("ai_conversations")
+}
+
+model AiMessage {
+  id             String             @id @default(uuid())
+  conversationId String             @map("conversation_id")
+  direction      AiMessageDirection
+  content        String
+  metadata       Json?
+  createdAt      DateTime           @default(now()) @map("created_at")
+
+  conversation            AiConversation          @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  aiExtractedTransactions AiExtractedTransaction[]
+
+  @@map("ai_messages")
+}
+
+model AiExtractedTransaction {
+  id               String             @id @default(uuid())
+  userId           String             @map("user_id")
+  transactionId    String?            @map("transaction_id")
+  sourceMessageId  String?            @map("source_message_id")
+  rawInput         String             @map("raw_input")
+  extractedPayload Json               @map("extracted_payload")
+  confidence       Float
+  status           AiExtractionStatus @default(pending)
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  sourceMessage AiMessage?   @relation(fields: [sourceMessageId], references: [id], onDelete: SetNull)
+
+  @@map("ai_extracted_transactions")
+}
