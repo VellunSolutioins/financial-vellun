@@ -7,6 +7,7 @@
     "packages/*"
   ],
   "scripts": {
+    "api:dev": "pnpm --filter @financial-vellun/api dev",
     "db:up": "docker compose -f infra/docker/docker-compose.yml up -d",
     "db:down": "docker compose -f infra/docker/docker-compose.yml down",
     "lint": "eslint . --ext .ts,.tsx,.js,.jsx",
@@ -17,6 +18,15 @@
   "engines": {
     "node": ">=20",
     "pnpm": ">=9"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@nestjs/core",
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma",
+      "@scarf/scarf"
+    ]
   },
   "devDependencies": {
     "@types/node": "^25.9.3",
