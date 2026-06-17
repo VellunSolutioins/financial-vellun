@@ -19,7 +19,8 @@
       "Bash(rm -f tsconfig.build.tsbuildinfo tsconfig.tsbuildinfo)",
       "Bash(find dist *)",
       "Bash(pnpm db:seed)",
-      "Bash(pnpm build *)"
+      "Bash(pnpm build *)",
+      "Bash(pnpm dlx *)"
     ]
   }
 }
