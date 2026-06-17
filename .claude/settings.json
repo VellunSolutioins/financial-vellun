@@ -28,7 +28,8 @@
       "Bash(.venv/Scripts/python -c \"from src.main import app; print\\('imports OK'\\); print\\('rotas:', [r.path for r in app.routes]\\)\")",
       "Bash(.venv/Scripts/uvicorn src.main:app --port 8000)",
       "Bash(curl -s http://localhost:8000/health)",
-      "Bash(kill %1)"
+      "Bash(kill %1)",
+      "Bash(dir)"
     ]
   }
 }
