@@ -9,6 +9,7 @@
   "scripts": {
     "api:dev": "pnpm --filter @financial-vellun/api dev",
     "web:dev": "pnpm --filter @financial-vellun/web dev",
+    "agent:dev": "cd apps/ai-agent && .venv/Scripts/uvicorn src.main:app --reload --port 8000",
     "db:up": "docker compose -f infra/docker/docker-compose.yml up -d",
     "db:down": "docker compose -f infra/docker/docker-compose.yml down",
     "lint": "eslint . --ext .ts,.tsx,.js,.jsx",
