@@ -143,6 +143,21 @@ export class TransactionsService {
     return { message: 'Lançamento removido com sucesso' };
   }
 
+  async findAiAudit(userId: string, id: string) {
+    await this.findOne(userId, id);
+
+    const extractions = await this.prisma.aiExtractedTransaction.findMany({
+      where: { transactionId: id, userId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (extractions.length === 0) {
+      throw new NotFoundException('Nenhuma extração de IA associada a este lançamento');
+    }
+
+    return extractions;
+  }
+
   private async validateOwnership(userId: string, accountId?: string, categoryId?: string) {
     if (accountId) {
       const account = await this.prisma.account.findUnique({ where: { id: accountId } });

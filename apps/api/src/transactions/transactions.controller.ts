@@ -37,6 +37,12 @@ export class TransactionsController {
     return this.transactionsService.findOne(user.id, id);
   }
 
+  @Get(':id/ai-audit')
+  findAiAudit(@Req() req: Request, @Param('id') id: string) {
+    const user = req.user as any;
+    return this.transactionsService.findAiAudit(user.id, id);
+  }
+
   @Post()
   create(@Req() req: Request, @Body() dto: CreateTransactionDto) {
     const user = req.user as any;

@@ -72,7 +72,7 @@ cp apps/ai-agent/.env.example apps/ai-agent/.env
 
 | Variável                  | Descrição                                        |
 | ------------------------- | ------------------------------------------------ |
-| `AI_AGENT_PORT`           | Porta do agente (padrão: `8000`)                 |
+| `AI_AGENT_PORT`           | Porta do agente (padrão: `8010`)                 |
 | `MAIN_API_URL`            | URL da API (padrão: `http://localhost:3001`)     |
 | `INTERNAL_API_KEY`        | Mesma chave configurada na API                   |
 | `OPENAI_API_KEY`          | Chave da OpenAI (necessária para a Fase 3)       |
@@ -130,7 +130,7 @@ pnpm api:dev
 # Terminal 2 — Web (porta 3000)
 pnpm web:dev
 
-# Terminal 3 — Agente de IA (porta 8000)
+# Terminal 3 — Agente de IA (porta 8010)
 pnpm agent:dev
 ```
 
@@ -139,8 +139,8 @@ pnpm agent:dev
 | Web        | http://localhost:3000                    |
 | API        | http://localhost:3001                    |
 | Swagger    | http://localhost:3001/api/docs           |
-| AI Agent   | http://localhost:8000                    |
-| Health     | http://localhost:8000/health             |
+| AI Agent   | http://localhost:8010                    |
+| Health     | http://localhost:8010/health             |
 
 ---
 

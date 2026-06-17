@@ -7,9 +7,10 @@
     "packages/*"
   ],
   "scripts": {
+    "dev": "pnpm db:up && concurrently -n api,web,agent -c blue,green,magenta \"pnpm api:dev\" \"pnpm web:dev\" \"pnpm agent:dev\"",
     "api:dev": "pnpm --filter @financial-vellun/api dev",
     "web:dev": "pnpm --filter @financial-vellun/web dev",
-    "agent:dev": "cd apps/ai-agent && .venv/Scripts/uvicorn src.main:app --reload --port 8000",
+    "agent:dev": "cd apps/ai-agent && .venv\\Scripts\\python.exe -m uvicorn src.main:app --reload --port 8010",
     "db:up": "docker compose -f infra/docker/docker-compose.yml up -d",
     "db:down": "docker compose -f infra/docker/docker-compose.yml down",
     "lint": "eslint . --ext .ts,.tsx,.js,.jsx",
@@ -32,6 +33,7 @@
     ]
   },
   "devDependencies": {
+    "concurrently": "^9.1.0",
     "@types/node": "^25.9.3",
     "@typescript-eslint/eslint-plugin": "^8.61.1",
     "@typescript-eslint/parser": "^8.61.1",

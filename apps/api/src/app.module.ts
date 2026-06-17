@@ -10,6 +10,7 @@ import { CategoriesModule } from './categories/categories.module';
 import { AccountsModule } from './accounts/accounts.module';
 import { TransactionsModule } from './transactions/transactions.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { InternalModule } from './internal/internal.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
     AccountsModule,
     TransactionsModule,
     DashboardModule,
+    InternalModule,
   ],
   controllers: [AppController],
   providers: [AppService],

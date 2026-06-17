@@ -8,12 +8,20 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    ai_agent_port: int = 8000
+    ai_agent_port: int = 8010
     main_api_url: str = "http://localhost:3001"
     internal_api_key: str
     openai_api_key: str = ""
     whatsapp_provider_token: str = ""
     whatsapp_webhook_secret: str = ""
+
+    # LLM
+    llm_provider: str = "rules"  # "openai" | "rules"
+    openai_model: str = "gpt-4o-mini"
+
+    # Diálogo / confirmação
+    confidence_threshold: float = 0.7
+    conversation_ttl_minutes: int = 30
 
 
 settings = Settings()
