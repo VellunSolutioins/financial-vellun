@@ -34,6 +34,15 @@ relativas ("hoje", "ontem") usando a data atual fornecida.
 - `needs_confirmation`: true quando faltar valor, tipo, ou houver ambiguidade.
 - `confirmation_question`: pergunta a fazer ao usuário quando \
 needs_confirmation for true.
+
+Uso do histórico (quando fornecido):
+- Use o "Histórico recente" apenas como contexto para interpretar a "Mensagem \
+atual consolidada"; foque sempre na mensagem atual.
+- Não duplique um lançamento que já foi confirmado/criado no histórico.
+- Se a mensagem atual for uma correção do último lançamento, use \
+"correct_last"; se for um cancelamento, use "cancel_last".
+- Em respostas curtas a uma pergunta anterior (ex.: só "Nubank" ou "internet"), \
+complete os campos que faltavam combinando o histórico com a mensagem atual.
 """
 
 
@@ -48,13 +57,22 @@ class OpenAiProvider(LlmProvider):
         today = context.get("today") or date.today().isoformat()
         categories = context.get("categories") or []
         accounts = context.get("accounts") or []
+        recent_messages = context.get("recent_messages") or []
+
+        history_block = self._format_history(recent_messages)
 
         user_prompt = (
             f"Data atual: {today}\n"
             f"Categorias disponíveis: {', '.join(categories) or 'nenhuma informada'}\n"
             f"Contas disponíveis: {', '.join(accounts) or 'nenhuma informada'}\n\n"
-            f"Mensagem do usuário: {message}"
+            f"{history_block}"
+            f"Mensagem atual consolidada: {message}"
         )
+
+        # Limite de segurança no tamanho total do prompt (§13).
+        max_chars = settings.conversation_context_max_chars
+        if len(user_prompt) > max_chars:
+            user_prompt = user_prompt[-max_chars:]
 
         completion = await self._client.beta.chat.completions.parse(
             model=self._model,
@@ -69,3 +87,24 @@ class OpenAiProvider(LlmProvider):
         if parsed is None:
             raise ValueError("LLM não retornou um resultado estruturado")
         return parsed
+
+    @staticmethod
+    def _format_history(recent_messages: list[dict]) -> str:
+        """Formata o histórico recente como bloco textual para o prompt."""
+        if not recent_messages:
+            return ""
+
+        # Limite de segurança no número de mensagens de contexto (§13).
+        limit = settings.conversation_context_message_limit
+        recent = recent_messages[-limit:]
+
+        lines = []
+        for msg in recent:
+            who = "Usuário" if msg.get("direction") == "inbound" else "Assistente"
+            content = (msg.get("content") or "").strip()
+            if content:
+                lines.append(f"- {who}: {content}")
+
+        if not lines:
+            return ""
+        return "Histórico recente:\n" + "\n".join(lines) + "\n\n"

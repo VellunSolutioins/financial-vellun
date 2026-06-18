@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
 import { InternalApiKeyGuard } from '../guards/internal-api-key.guard';
 import { InternalService } from '../internal.service';
 import { CreateAiTransactionDto } from '../dto/create-ai-transaction.dto';
 import { AiEventDto } from '../dto/ai-event.dto';
+import { ListMessagesQueryDto } from '../dto/list-messages.dto';
 
 @ApiExcludeController()
 @UseGuards(InternalApiKeyGuard)
@@ -14,6 +15,11 @@ export class InternalController {
   @Get('whatsapp/contacts/:phone')
   findContact(@Param('phone') phone: string) {
     return this.internalService.findContactByPhone(phone);
+  }
+
+  @Get('whatsapp/contacts/:phone/messages')
+  listRecentMessages(@Param('phone') phone: string, @Query() query: ListMessagesQueryDto) {
+    return this.internalService.listRecentMessagesByPhone(phone, query.limit);
   }
 
   @Get('users/:userId/categories')

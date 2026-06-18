@@ -29,6 +29,24 @@ class AuditService:
         result = await self._post(payload)
         return result.get("id") if result else None
 
+    async def log_message_detailed(
+        self,
+        phone: str,
+        direction: str,
+        content: str,
+        metadata: dict | None = None,
+    ) -> dict | None:
+        """Como :meth:`log_message`, mas retorna o resultado completo da API
+        (``{id, conversationId, duplicate?}``) para suportar idempotência."""
+        payload = {
+            "eventType": "message",
+            "phone": phone,
+            "direction": direction,
+            "content": content,
+            "metadata": metadata or {},
+        }
+        return await self._post(payload)
+
     async def log_extraction(
         self,
         user_id: str,

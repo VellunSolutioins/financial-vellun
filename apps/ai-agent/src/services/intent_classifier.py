@@ -7,11 +7,13 @@ funcionando mesmo sem `OPENAI_API_KEY`.
 
 import logging
 import re
+import time
 from datetime import date, timedelta
 
 from ..schemas.financial_intent import FinancialIntent, IntentType, TransactionTypeEnum
 from .llm.base import LlmProvider
 from .llm.factory import create_llm_provider
+from .metrics import metrics
 
 logger = logging.getLogger(__name__)
 
@@ -105,13 +107,20 @@ class IntentClassifier:
             self._provider = provider  # type: ignore[assignment]
 
     async def classify(self, message: str, user_context: dict | None = None) -> FinancialIntent:
+        # `context` carrega `recent_messages` (histórico) além de categorias/
+        # contas/data; é repassado integralmente ao provider de LLM. O fallback
+        # de regras ignora o histórico, mas não quebra com ele presente.
         context = user_context or {}
 
         if self._provider is not None:
+            started = time.monotonic()
             try:
                 intent = await self._provider.extract_intent(message, context)
+                metrics.incr("llm_success")
+                metrics.observe_ms("llm_latency_ms", (time.monotonic() - started) * 1000)
                 return self._finalize(intent)
             except Exception:  # noqa: BLE001 — falha do LLM aciona o fallback
+                metrics.incr("llm_fallback")
                 logger.warning("LLM falhou; usando fallback de regras", exc_info=True)
 
         return self._classify_with_rules(message, context)

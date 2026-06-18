@@ -54,6 +54,48 @@ export class InternalService {
     });
   }
 
+  /**
+   * Lista as mensagens recentes da conversa ativa de um contato (ordem
+   * cronológica), para uso como contexto pela IA. Retorna vazio quando o
+   * contato ou a conversa ativa não existem.
+   */
+  async listRecentMessagesByPhone(phone: string, limit = 15) {
+    const take = Math.min(Math.max(limit, 1), 50);
+
+    const contact = await this.prisma.whatsappContact.findUnique({
+      where: { phoneNumber: normalizePhone(phone) },
+    });
+    if (!contact) {
+      return { conversationId: null, messages: [] };
+    }
+
+    const conversation = await this.prisma.aiConversation.findFirst({
+      where: { whatsappContactId: contact.id, status: 'active' },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!conversation) {
+      return { conversationId: null, messages: [] };
+    }
+
+    const messages = await this.prisma.aiMessage.findMany({
+      where: { conversationId: conversation.id },
+      orderBy: { createdAt: 'desc' },
+      take,
+      select: {
+        id: true,
+        direction: true,
+        content: true,
+        metadata: true,
+        createdAt: true,
+      },
+    });
+
+    return {
+      conversationId: conversation.id,
+      messages: messages.reverse(),
+    };
+  }
+
   /** Cria um lançamento originado pela IA/WhatsApp e atualiza a rastreabilidade. */
   async createTransactionFromAi(dto: CreateAiTransactionDto) {
     const account = await this.prisma.account.findUnique({ where: { id: dto.accountId } });
@@ -111,6 +153,23 @@ export class InternalService {
       throw new BadRequestException('phone, direction e content são obrigatórios para mensagens');
     }
 
+    // Idempotência: o provedor pode reenviar o mesmo webhook. Se já temos a
+    // mensagem com este providerMessageId, devolvemos a existente sem duplicar.
+    const metadata = (dto.metadata ?? {}) as Record<string, unknown>;
+    const providerMessageId =
+      typeof metadata.messageId === 'string' ? metadata.messageId : undefined;
+    const providerTimestamp =
+      typeof metadata.timestamp === 'number' ? new Date(metadata.timestamp * 1000) : undefined;
+
+    if (providerMessageId) {
+      const existing = await this.prisma.aiMessage.findUnique({
+        where: { providerMessageId },
+      });
+      if (existing) {
+        return { id: existing.id, conversationId: existing.conversationId, duplicate: true };
+      }
+    }
+
     const contact = await this.prisma.whatsappContact.upsert({
       where: { phoneNumber: normalizePhone(dto.phone) },
       update: {},
@@ -138,16 +197,34 @@ export class InternalService {
       });
     }
 
-    const message = await this.prisma.aiMessage.create({
-      data: {
-        conversationId: conversation.id,
-        direction: dto.direction,
-        content: dto.content,
-        metadata: (dto.metadata as Prisma.InputJsonValue) ?? undefined,
-      },
-    });
-
-    return { id: message.id, conversationId: conversation.id };
+    try {
+      const message = await this.prisma.aiMessage.create({
+        data: {
+          conversationId: conversation.id,
+          direction: dto.direction,
+          content: dto.content,
+          metadata: (dto.metadata as Prisma.InputJsonValue) ?? undefined,
+          providerMessageId,
+          providerTimestamp,
+        },
+      });
+      return { id: message.id, conversationId: conversation.id };
+    } catch (err) {
+      // Corrida no unique providerMessageId: outro request criou primeiro.
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002' &&
+        providerMessageId
+      ) {
+        const existing = await this.prisma.aiMessage.findUnique({
+          where: { providerMessageId },
+        });
+        if (existing) {
+          return { id: existing.id, conversationId: existing.conversationId, duplicate: true };
+        }
+      }
+      throw err;
+    }
   }
 
   private async recordExtraction(dto: AiEventDto) {

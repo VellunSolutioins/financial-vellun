@@ -9,11 +9,19 @@ class Settings(BaseSettings):
     )
 
     ai_agent_port: int = 8010
+    environment: str = "development"  # "development" | "production"
     main_api_url: str = "http://localhost:3001"
     internal_api_key: str
     openai_api_key: str = ""
     whatsapp_provider_token: str = ""
     whatsapp_webhook_secret: str = ""
+    whatsapp_provider: str = "log"  # "log" | "cloud-api" (Etapa 5)
+    whatsapp_phone_number_id: str = ""
+    whatsapp_api_base_url: str = "https://graph.facebook.com/v18.0"
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment.lower() in ("production", "prod")
 
     # LLM
     llm_provider: str = "rules"  # "openai" | "rules"
@@ -22,6 +30,24 @@ class Settings(BaseSettings):
     # Diálogo / confirmação
     confidence_threshold: float = 0.7
     conversation_ttl_minutes: int = 30
+
+    # Buffer / debounce de mensagens fragmentadas
+    message_buffer_debounce_seconds: int = 5
+    message_buffer_max_messages: int = 10
+    message_buffer_max_age_seconds: int = 30
+    message_buffer_backend: str = "memory"  # "memory" | "redis" (Etapa 5)
+
+    # Redis / fila distribuída (Etapa 5)
+    redis_url: str = "redis://localhost:6379/0"
+    redis_lock_ttl_seconds: int = 30
+    worker_poll_interval_seconds: float = 1.0
+    message_buffer_max_retries: int = 3
+    message_buffer_retry_base_seconds: float = 1.0
+
+    # Contexto conversacional fornecido ao LLM
+    conversation_context_message_limit: int = 15
+    conversation_context_max_chars: int = 4000
+    message_max_chars: int = 2000
 
 
 settings = Settings()

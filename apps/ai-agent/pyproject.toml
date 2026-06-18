@@ -13,7 +13,15 @@ dependencies = [
     "openai>=1.58.0",
 ]
 
+[project.optional-dependencies]
+# Backend de buffer distribuído (MESSAGE_BUFFER_BACKEND=redis). Instale com
+# `pip install -e .[redis]` em produção.
+redis = [
+    "redis>=5.0.0",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.3.0",
+    "pytest-asyncio>=0.24.0",
 ]

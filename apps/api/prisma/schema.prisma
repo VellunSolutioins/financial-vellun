@@ -243,16 +243,20 @@ model AiConversation {
 }
 
 model AiMessage {
-  id             String             @id @default(uuid())
-  conversationId String             @map("conversation_id")
-  direction      AiMessageDirection
-  content        String
-  metadata       Json?
-  createdAt      DateTime           @default(now()) @map("created_at")
+  id                String             @id @default(uuid())
+  conversationId    String             @map("conversation_id")
+  direction         AiMessageDirection
+  content           String
+  metadata          Json?
+  providerMessageId String?            @unique @map("provider_message_id")
+  providerTimestamp DateTime?          @map("provider_timestamp")
+  processedAt       DateTime?          @map("processed_at")
+  createdAt         DateTime           @default(now()) @map("created_at")
 
   conversation            AiConversation          @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   aiExtractedTransactions AiExtractedTransaction[]
 
+  @@index([conversationId, createdAt])
   @@map("ai_messages")
 }
 
