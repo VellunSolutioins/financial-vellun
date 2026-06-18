@@ -52,7 +52,11 @@
       "PowerShell($ok=$false; for \\($i=0; $i -lt 15; $i++\\) { Start-Sleep -Seconds 2; try { $r = Invoke-RestMethod -Uri http://localhost:3001/api/docs-json -TimeoutSec 3; $paths = $r.paths.PSObject.Properties.Name; if \\($paths.Count -gt 1\\) { Write-Output \\(\"rotas: \" + $paths.Count\\); $paths | Sort-Object | ForEach-Object { Write-Output $_ }; $ok=$true; break } } catch {} }; if \\(-not $ok\\) { Write-Output \"TIMEOUT - API nao subiu com rotas\" })",
       "Bash(curl -s -X POST http://localhost:8010/webhook/whatsapp -H \"Content-Type: application/json\" -d '{\"phone\":\"+5500000000000\",\"message\":\"gastei 50 no mercado\",\"timestamp\":1,\"message_id\":\"x1\"}')",
       "Bash(curl -s -X POST http://localhost:3001/auth/register -H 'Content-Type: application/json' -d '{\"name\":\"Cors Test\",\"email\":\"__TRACKED_VAR__\",\"password\":\"senha12345\",\"profileType\":\"individual\"}')",
-      "Bash(curl -s -i -X POST http://localhost:3001/auth/login -H 'Origin: http://localhost:3000' -H 'Content-Type: application/json' -d '{\"email\":\"__TRACKED_VAR__\",\"password\":\"senha12345\"}' -m 5)"
+      "Bash(curl -s -i -X POST http://localhost:3001/auth/login -H 'Origin: http://localhost:3000' -H 'Content-Type: application/json' -d '{\"email\":\"__TRACKED_VAR__\",\"password\":\"senha12345\"}' -m 5)",
+      "Bash(npx prisma *)",
+      "PowerShell(Get-Process node -ErrorAction SilentlyContinue | Select-Object Id, StartTime, @{n='CommandLine';e={\\(Get-CimInstance Win32_Process -Filter \"ProcessId=$\\($_.Id\\)\"\\).CommandLine}} | Format-Table -AutoSize -Wrap)",
+      "PowerShell(Stop-Process -Id 1512,18120,16716,2832 -Force -ErrorAction SilentlyContinue)",
+      "PowerShell(\"API dev processes stopped\")"
     ]
   }
 }

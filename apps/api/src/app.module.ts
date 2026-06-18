@@ -8,6 +8,7 @@ import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { CategoriesModule } from './categories/categories.module';
 import { AccountsModule } from './accounts/accounts.module';
+import { ContactsModule } from './contacts/contacts.module';
 import { TransactionsModule } from './transactions/transactions.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { InternalModule } from './internal/internal.module';
@@ -23,6 +24,7 @@ import { InternalModule } from './internal/internal.module';
     UsersModule,
     CategoriesModule,
     AccountsModule,
+    ContactsModule,
     TransactionsModule,
     DashboardModule,
     InternalModule,

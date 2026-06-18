@@ -17,6 +17,8 @@ const navItems = {
     { href: '/app/pessoal/lancamentos', label: 'Lançamentos' },
     { href: '/app/empresa/contas-a-receber', label: 'Contas a Receber' },
     { href: '/app/empresa/contas-a-pagar', label: 'Contas a Pagar' },
+    { href: '/app/empresa/clientes', label: 'Clientes' },
+    { href: '/app/empresa/fornecedores', label: 'Fornecedores' },
     { href: '/app/pessoal/contas', label: 'Contas' },
     { href: '/app/pessoal/categorias', label: 'Categorias' },
   ],
