@@ -20,4 +20,14 @@ export class DashboardController {
     const user = req.user as any;
     return this.dashboardService.getSummary(user.id, periodStart, periodEnd);
   }
+
+  @Get('business/summary')
+  getBusinessSummary(
+    @Req() req: Request,
+    @Query('period_start') periodStart?: string,
+    @Query('period_end') periodEnd?: string,
+  ) {
+    const user = req.user as any;
+    return this.dashboardService.getBusinessSummary(user.id, periodStart, periodEnd);
+  }
 }

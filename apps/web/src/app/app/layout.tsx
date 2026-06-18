@@ -26,8 +26,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
 
   useEffect(() => {
-    if (!loading && !user) router.push('/login');
-  }, [user, loading, router]);
+    if (loading) return;
+    if (!user) {
+      router.push('/login');
+      return;
+    }
+    // Profile-based area isolation: individual users cannot access /app/empresa/*
+    if (user.profileType === 'individual' && pathname.startsWith('/app/empresa')) {
+      router.push('/app/pessoal/dashboard');
+    } else if (user.profileType === 'business' && pathname.startsWith('/app/pessoal/dashboard')) {
+      router.push('/app/empresa/dashboard');
+    }
+  }, [user, loading, router, pathname]);
 
   if (loading) {
     return (
