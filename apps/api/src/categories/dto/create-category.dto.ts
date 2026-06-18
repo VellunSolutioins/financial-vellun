@@ -20,4 +20,9 @@ export class CreateCategoryDto {
   @IsOptional()
   @IsString()
   icon?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  costCenter?: string;
 }

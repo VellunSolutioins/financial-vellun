@@ -20,7 +20,7 @@ const navItems = {
     { href: '/app/empresa/clientes', label: 'Clientes' },
     { href: '/app/empresa/fornecedores', label: 'Fornecedores' },
     { href: '/app/pessoal/contas', label: 'Contas' },
-    { href: '/app/pessoal/categorias', label: 'Categorias' },
+    { href: '/app/empresa/categorias', label: 'Categorias' },
   ],
 };
 

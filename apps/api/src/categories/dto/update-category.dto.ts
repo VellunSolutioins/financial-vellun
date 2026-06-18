@@ -22,4 +22,9 @@ export class UpdateCategoryDto {
   @IsOptional()
   @IsString()
   icon?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
+  costCenter?: string;
 }

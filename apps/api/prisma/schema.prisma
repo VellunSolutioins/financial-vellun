@@ -145,6 +145,7 @@ model Category {
   type        TransactionType
   color       String?
   icon        String?
+  costCenter  String?         @map("cost_center")
   profileType ProfileType     @map("profile_type")
   isDefault   Boolean         @default(false) @map("is_default")
   createdAt   DateTime        @default(now()) @map("created_at")
