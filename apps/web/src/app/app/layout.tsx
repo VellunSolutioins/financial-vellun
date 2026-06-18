@@ -15,6 +15,8 @@ const navItems = {
   business: [
     { href: '/app/empresa/dashboard', label: 'Dashboard' },
     { href: '/app/pessoal/lancamentos', label: 'Lançamentos' },
+    { href: '/app/empresa/contas-a-receber', label: 'Contas a Receber' },
+    { href: '/app/empresa/contas-a-pagar', label: 'Contas a Pagar' },
     { href: '/app/pessoal/contas', label: 'Contas' },
     { href: '/app/pessoal/categorias', label: 'Categorias' },
   ],
