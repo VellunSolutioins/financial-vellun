@@ -10,6 +10,7 @@ import { Select } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
 import { apiClient } from '@/lib/api-client';
+import { CURRENCY_REGEX, currencyToNumber, maskCurrency } from '@/lib/masks';
 
 interface Account {
   id: string;
@@ -33,8 +34,16 @@ const accountTypeLabels: Record<string, string> = {
 
 const schema = z.object({
   name: z.string().min(1, 'Nome obrigatório'),
-  type: z.enum(['checking', 'savings', 'cash', 'credit_card', 'digital_wallet', 'investment', 'other']),
-  initialBalance: z.coerce.number().min(0),
+  type: z.enum([
+    'checking',
+    'savings',
+    'cash',
+    'credit_card',
+    'digital_wallet',
+    'investment',
+    'other',
+  ]),
+  initialBalance: z.string().regex(CURRENCY_REGEX, 'Valor inválido').optional(),
 });
 type FormData = z.infer<typeof schema>;
 
@@ -53,10 +62,11 @@ export default function ContasPage() {
     register,
     handleSubmit,
     reset,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
-    defaultValues: { type: 'checking', initialBalance: 0 },
+    defaultValues: { type: 'checking', initialBalance: '0,00' },
   });
 
   const load = () =>
@@ -72,7 +82,7 @@ export default function ContasPage() {
 
   const openNew = () => {
     setEditing(null);
-    reset({ type: 'checking', initialBalance: 0 });
+    reset({ type: 'checking', initialBalance: '0,00' });
     setModalOpen(true);
   };
   const openEdit = (a: Account) => {
@@ -87,7 +97,11 @@ export default function ContasPage() {
       if (editing) {
         await apiClient.patch(`/accounts/${editing.id}`, { name: data.name, type: data.type });
       } else {
-        await apiClient.post('/accounts', data);
+        await apiClient.post('/accounts', {
+          name: data.name,
+          type: data.type,
+          initialBalance: currencyToNumber(data.initialBalance ?? '0'),
+        });
       }
       setModalOpen(false);
       void load();
@@ -124,7 +138,9 @@ export default function ContasPage() {
             <Card key={acc.id}>
               <CardHeader className="pb-2">
                 <CardTitle className="text-base">{acc.name}</CardTitle>
-                <p className="text-xs text-muted-foreground">{accountTypeLabels[acc.type] ?? acc.type}</p>
+                <p className="text-xs text-muted-foreground">
+                  {accountTypeLabels[acc.type] ?? acc.type}
+                </p>
               </CardHeader>
               <CardContent>
                 <p
@@ -175,10 +191,24 @@ export default function ContasPage() {
           {!editing && (
             <div className="space-y-1">
               <Label>Saldo inicial (R$)</Label>
-              <Input type="number" step="0.01" defaultValue={0} {...register('initialBalance')} />
+              <Input
+                inputMode="decimal"
+                placeholder="0,00"
+                {...register('initialBalance')}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                  const masked = maskCurrency(e.target.value);
+                  e.target.value = masked;
+                  setValue('initialBalance', masked, { shouldDirty: true });
+                }}
+              />
+              {errors.initialBalance && (
+                <p className="text-xs text-destructive">{errors.initialBalance.message}</p>
+              )}
             </div>
           )}
-          {error && <p className="text-sm text-destructive bg-destructive/10 rounded p-2">{error}</p>}
+          {error && (
+            <p className="text-sm text-destructive bg-destructive/10 rounded p-2">{error}</p>
+          )}
           <div className="flex gap-2">
             <Button type="submit" disabled={isSubmitting} className="flex-1">
               {isSubmitting ? 'Salvando...' : 'Salvar'}

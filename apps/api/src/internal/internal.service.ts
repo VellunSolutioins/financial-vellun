@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AccountsService } from '../accounts/accounts.service';
 import { CreateAiTransactionDto } from './dto/create-ai-transaction.dto';
 import { AiEventDto } from './dto/ai-event.dto';
+import { normalizePhone } from '../common/phone.util';
 
 @Injectable()
 export class InternalService {
@@ -15,7 +16,7 @@ export class InternalService {
   /** Busca um usuário pelo número de telefone vinculado no WhatsApp. */
   async findContactByPhone(phone: string) {
     const contact = await this.prisma.whatsappContact.findUnique({
-      where: { phoneNumber: phone },
+      where: { phoneNumber: normalizePhone(phone) },
       include: { user: true },
     });
 
@@ -111,9 +112,9 @@ export class InternalService {
     }
 
     const contact = await this.prisma.whatsappContact.upsert({
-      where: { phoneNumber: dto.phone },
+      where: { phoneNumber: normalizePhone(dto.phone) },
       update: {},
-      create: { phoneNumber: dto.phone },
+      create: { phoneNumber: normalizePhone(dto.phone) },
     });
 
     let conversation = await this.prisma.aiConversation.findFirst({

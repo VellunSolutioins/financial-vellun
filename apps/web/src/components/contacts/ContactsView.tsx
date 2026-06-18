@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog } from '@/components/ui/dialog';
 import { apiClient } from '@/lib/api-client';
+import { CPF_CNPJ_REGEX, PHONE_REGEX, maskCpfCnpj, maskPhone } from '@/lib/masks';
 
 export interface Contact {
   id: string;
@@ -21,9 +22,9 @@ export interface Contact {
 
 const schema = z.object({
   name: z.string().min(1, 'Nome obrigatório'),
-  document: z.string().optional(),
+  document: z.string().regex(CPF_CNPJ_REGEX, 'CPF/CNPJ inválido').optional().or(z.literal('')),
   email: z.string().email('E-mail inválido').optional().or(z.literal('')),
-  phone: z.string().optional(),
+  phone: z.string().regex(PHONE_REGEX, 'Telefone inválido').optional().or(z.literal('')),
   notes: z.string().optional(),
 });
 type FormData = z.infer<typeof schema>;
@@ -47,6 +48,8 @@ export function ContactsView({ type, title, singular }: Props) {
     register,
     handleSubmit,
     reset,
+    setValue,
+    trigger,
     formState: { errors, isSubmitting },
   } = useForm<FormData>({ resolver: zodResolver(schema) });
 
@@ -75,9 +78,9 @@ export function ContactsView({ type, title, singular }: Props) {
     setEditing(c);
     reset({
       name: c.name,
-      document: c.document ?? '',
+      document: c.document ? maskCpfCnpj(c.document) : '',
       email: c.email ?? '',
-      phone: c.phone ?? '',
+      phone: c.phone ? maskPhone(c.phone) : '',
       notes: c.notes ?? '',
     });
     setError('');
@@ -187,24 +190,50 @@ export function ContactsView({ type, title, singular }: Props) {
           </div>
           <div className="space-y-1">
             <Label>Documento (CNPJ/CPF)</Label>
-            <Input placeholder="00.000.000/0000-00" {...register('document')} />
+            <Input
+              placeholder="00.000.000/0000-00"
+              {...register('document')}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                const masked = maskCpfCnpj(e.target.value);
+                e.target.value = masked;
+                setValue('document', masked, { shouldDirty: true });
+              }}
+            />
+            {errors.document && (
+              <p className="text-xs text-destructive">{errors.document.message}</p>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1">
               <Label>E-mail</Label>
-              <Input type="email" placeholder="email@exemplo.com" {...register('email')} />
+              <Input
+                type="email"
+                placeholder="email@exemplo.com"
+                {...register('email', { onBlur: () => void trigger('email') })}
+              />
               {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
             </div>
             <div className="space-y-1">
               <Label>Telefone</Label>
-              <Input placeholder="(00) 00000-0000" {...register('phone')} />
+              <Input
+                placeholder="(00) 00000-0000"
+                {...register('phone')}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                  const masked = maskPhone(e.target.value);
+                  e.target.value = masked;
+                  setValue('phone', masked, { shouldDirty: true });
+                }}
+              />
+              {errors.phone && <p className="text-xs text-destructive">{errors.phone.message}</p>}
             </div>
           </div>
           <div className="space-y-1">
             <Label>Observações</Label>
             <Input placeholder="Notas internas..." {...register('notes')} />
           </div>
-          {error && <p className="text-sm text-destructive bg-destructive/10 rounded p-2">{error}</p>}
+          {error && (
+            <p className="text-sm text-destructive bg-destructive/10 rounded p-2">{error}</p>
+          )}
           <div className="flex gap-2">
             <Button type="submit" disabled={isSubmitting} className="flex-1">
               {isSubmitting ? 'Salvando...' : 'Salvar'}

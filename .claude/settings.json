@@ -56,7 +56,12 @@
       "Bash(npx prisma *)",
       "PowerShell(Get-Process node -ErrorAction SilentlyContinue | Select-Object Id, StartTime, @{n='CommandLine';e={\\(Get-CimInstance Win32_Process -Filter \"ProcessId=$\\($_.Id\\)\"\\).CommandLine}} | Format-Table -AutoSize -Wrap)",
       "PowerShell(Stop-Process -Id 1512,18120,16716,2832 -Force -ErrorAction SilentlyContinue)",
-      "PowerShell(\"API dev processes stopped\")"
+      "PowerShell(\"API dev processes stopped\")",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Select-Object ProcessId, @{n='Cmd';e={$_.CommandLine}} | Format-Table -AutoSize -Wrap)",
+      "PowerShell($ok=$false; for\\($i=0;$i -lt 20;$i++\\){ try { $r=Invoke-WebRequest -Uri \"http://localhost:3001/api\" -UseBasicParsing -TimeoutSec 2; $ok=$true; break } catch { if\\($_.Exception.Response.StatusCode.value__\\){ $ok=$true; break } ; Start-Sleep -Seconds 2 } }; if\\($ok\\){\"API responding on 3001\"}else{\"API not responding yet\"})",
+      "Bash(pnpm api:dev)",
+      "PowerShell($ok=$false; for\\($i=0;$i -lt 30;$i++\\){ try { Invoke-WebRequest -Uri \"http://localhost:3001/api/docs\" -UseBasicParsing -TimeoutSec 2 | Out-Null; $ok=$true; break } catch { if\\($_.Exception.Response.StatusCode.value__\\){ $ok=$true; break }; Start-Sleep -Seconds 2 } }; if\\($ok\\){\"API up on 3001\"}else{\"still down\"})",
+      "Read(//c/Users/Bruno Faboci/OneDrive/Documentos/projetos/floriu/Floriu/**)"
     ]
   }
 }

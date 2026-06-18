@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateIndividualProfileDto } from './dto/create-individual-profile.dto';
 import { CreateBusinessProfileDto } from './dto/create-business-profile.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { normalizePhone } from '../common/phone.util';
 
 @Injectable()
 export class UsersService {
@@ -62,10 +63,54 @@ export class UsersService {
   }
 
   async updateUser(userId: string, dto: UpdateUserDto) {
+    if (dto.email) {
+      const emailOwner = await this.prisma.user.findUnique({ where: { email: dto.email } });
+      if (emailOwner && emailOwner.id !== userId) {
+        throw new ConflictException('Email já cadastrado');
+      }
+    }
+
+    if (dto.phone !== undefined) {
+      await this.linkWhatsappContact(userId, dto.phone);
+    }
+
     return this.prisma.user.update({
       where: { id: userId },
-      data: { name: dto.name },
-      select: { id: true, name: true, email: true, profileType: true, createdAt: true, updatedAt: true },
+      data: {
+        name: dto.name,
+        email: dto.email,
+        phone: dto.phone,
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        profileType: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+  }
+
+  /**
+   * Mantém o número informado em "Minha Conta" vinculado ao usuário na tabela
+   * `whatsapp_contacts` (formato canônico E.164), que é a fonte usada pelo
+   * webhook do WhatsApp para identificar o remetente.
+   */
+  private async linkWhatsappContact(userId: string, rawPhone: string) {
+    const phoneNumber = normalizePhone(rawPhone);
+    if (!phoneNumber) return;
+
+    const existing = await this.prisma.whatsappContact.findUnique({ where: { phoneNumber } });
+    if (existing && existing.userId && existing.userId !== userId) {
+      throw new ConflictException('Número de WhatsApp já vinculado a outra conta');
+    }
+
+    await this.prisma.whatsappContact.upsert({
+      where: { phoneNumber },
+      update: { userId, isVerified: true },
+      create: { phoneNumber, userId, isVerified: true },
     });
   }
 }

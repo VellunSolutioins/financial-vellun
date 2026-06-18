@@ -9,10 +9,15 @@ import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { apiClient } from '@/lib/api-client';
 import type { Transaction } from '@/hooks/useTransactions';
+import { CURRENCY_REGEX, currencyToNumber, formatCurrencyInput, maskCurrency } from '@/lib/masks';
 
 const schema = z.object({
   type: z.enum(['income', 'expense', 'transfer']),
-  amount: z.coerce.number().positive('Valor deve ser positivo'),
+  amount: z
+    .string()
+    .min(1, 'Valor obrigatório')
+    .regex(CURRENCY_REGEX, 'Valor inválido')
+    .refine((v) => currencyToNumber(v) > 0, 'Valor deve ser positivo'),
   description: z.string().min(1, 'Descrição obrigatória'),
   accountId: z.string().min(1, 'Conta obrigatória'),
   categoryId: z.string().optional(),
@@ -37,12 +42,13 @@ export function TransactionForm({ transaction, onSuccess, onCancel }: Props) {
     register,
     handleSubmit,
     watch,
+    setValue,
     formState: { errors },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: {
       type: transaction?.type ?? 'expense',
-      amount: transaction ? Number(transaction.amount) : undefined,
+      amount: transaction ? formatCurrencyInput(Number(transaction.amount)) : '',
       description: transaction?.description ?? '',
       accountId: transaction?.accountId ?? '',
       categoryId: transaction?.categoryId ?? '',
@@ -59,20 +65,23 @@ export function TransactionForm({ transaction, onSuccess, onCancel }: Props) {
     Promise.all([
       apiClient.get<{ id: string; name: string }[]>('/accounts'),
       apiClient.get<{ id: string; name: string; type: string }[]>('/categories'),
-    ]).then(([acc, cat]) => {
-      setAccounts(acc);
-      setCategories(cat);
-    }).catch(console.error);
+    ])
+      .then(([acc, cat]) => {
+        setAccounts(acc);
+        setCategories(cat);
+      })
+      .catch(console.error);
   }, []);
 
   const onSubmit = async (data: FormData) => {
     setSubmitting(true);
     setError('');
+    const payload = { ...data, amount: currencyToNumber(data.amount) };
     try {
       if (transaction) {
-        await apiClient.patch(`/transactions/${transaction.id}`, data);
+        await apiClient.patch(`/transactions/${transaction.id}`, payload);
       } else {
-        await apiClient.post('/transactions', data);
+        await apiClient.post('/transactions', payload);
       }
       onSuccess();
     } catch (e: unknown) {
@@ -119,13 +128,24 @@ export function TransactionForm({ transaction, onSuccess, onCancel }: Props) {
       </div>
       <div className="space-y-1">
         <Label>Valor (R$)</Label>
-        <Input type="number" step="0.01" placeholder="0,00" {...register('amount')} />
+        <Input
+          inputMode="decimal"
+          placeholder="0,00"
+          {...register('amount')}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+            const masked = maskCurrency(e.target.value);
+            e.target.value = masked;
+            setValue('amount', masked, { shouldDirty: true });
+          }}
+        />
         {errors.amount && <p className="text-xs text-destructive">{errors.amount.message}</p>}
       </div>
       <div className="space-y-1">
         <Label>Descrição</Label>
         <Input placeholder="Ex: Supermercado, Salário..." {...register('description')} />
-        {errors.description && <p className="text-xs text-destructive">{errors.description.message}</p>}
+        {errors.description && (
+          <p className="text-xs text-destructive">{errors.description.message}</p>
+        )}
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1">
@@ -138,7 +158,9 @@ export function TransactionForm({ transaction, onSuccess, onCancel }: Props) {
               </option>
             ))}
           </Select>
-          {errors.accountId && <p className="text-xs text-destructive">{errors.accountId.message}</p>}
+          {errors.accountId && (
+            <p className="text-xs text-destructive">{errors.accountId.message}</p>
+          )}
         </div>
         <div className="space-y-1">
           <Label>Categoria</Label>
@@ -155,7 +177,9 @@ export function TransactionForm({ transaction, onSuccess, onCancel }: Props) {
       <div className="space-y-1">
         <Label>Data</Label>
         <Input type="date" {...register('transactionDate')} />
-        {errors.transactionDate && <p className="text-xs text-destructive">{errors.transactionDate.message}</p>}
+        {errors.transactionDate && (
+          <p className="text-xs text-destructive">{errors.transactionDate.message}</p>
+        )}
       </div>
       {error && <p className="text-sm text-destructive bg-destructive/10 rounded p-2">{error}</p>}
       <div className="flex gap-2 pt-2">

@@ -36,6 +36,7 @@ export default function CadastroPage() {
   const {
     register,
     handleSubmit,
+    trigger,
     formState: { errors, isSubmitting },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -52,7 +53,9 @@ export default function CadastroPage() {
       });
       const user = await login({ email: data.email, password: data.password });
       setUser(user);
-      router.push(user.profileType === 'individual' ? '/app/pessoal/dashboard' : '/app/empresa/dashboard');
+      router.push(
+        user.profileType === 'individual' ? '/app/pessoal/dashboard' : '/app/empresa/dashboard',
+      );
     } catch (e) {
       if (e instanceof ApiClientError) setError(e.message);
       else setError('Ocorreu um erro. Tente novamente.');
@@ -74,18 +77,26 @@ export default function CadastroPage() {
           </div>
           <div className="space-y-1">
             <Label>Email</Label>
-            <Input type="email" placeholder="seu@email.com" {...register('email')} />
+            <Input
+              type="email"
+              placeholder="seu@email.com"
+              {...register('email', { onBlur: () => void trigger('email') })}
+            />
             {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
           </div>
           <div className="space-y-1">
             <Label>Senha</Label>
             <Input type="password" placeholder="Mínimo 8 caracteres" {...register('password')} />
-            {errors.password && <p className="text-xs text-destructive">{errors.password.message}</p>}
+            {errors.password && (
+              <p className="text-xs text-destructive">{errors.password.message}</p>
+            )}
           </div>
           <div className="space-y-1">
             <Label>Confirmar senha</Label>
             <Input type="password" placeholder="Repita a senha" {...register('confirmPassword')} />
-            {errors.confirmPassword && <p className="text-xs text-destructive">{errors.confirmPassword.message}</p>}
+            {errors.confirmPassword && (
+              <p className="text-xs text-destructive">{errors.confirmPassword.message}</p>
+            )}
           </div>
           <div className="space-y-1">
             <Label>Tipo de conta</Label>
@@ -94,9 +105,13 @@ export default function CadastroPage() {
               <option value="individual">Pessoa Física</option>
               <option value="business">Pessoa Jurídica</option>
             </Select>
-            {errors.profileType && <p className="text-xs text-destructive">{errors.profileType.message}</p>}
+            {errors.profileType && (
+              <p className="text-xs text-destructive">{errors.profileType.message}</p>
+            )}
           </div>
-          {error && <p className="text-sm text-destructive bg-destructive/10 rounded p-2">{error}</p>}
+          {error && (
+            <p className="text-sm text-destructive bg-destructive/10 rounded p-2">{error}</p>
+          )}
           <Button type="submit" className="w-full" disabled={isSubmitting}>
             {isSubmitting ? 'Criando conta...' : 'Criar conta'}
           </Button>

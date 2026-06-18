@@ -4,6 +4,7 @@ export interface User {
   id: string;
   name: string;
   email: string;
+  phone?: string | null;
   profileType: 'individual' | 'business';
   hasProfile: boolean;
   createdAt: string;
@@ -29,4 +30,12 @@ export async function logout(): Promise<void> {
 
 export async function getMe(): Promise<User> {
   return apiClient.get<User>('/auth/me');
+}
+
+export async function updateMe(data: {
+  name?: string;
+  email?: string;
+  phone?: string | null;
+}): Promise<User> {
+  return apiClient.patch<User>('/users/me', data);
 }

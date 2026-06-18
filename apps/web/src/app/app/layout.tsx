@@ -77,7 +77,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </Link>
           ))}
         </nav>
-        <div className="p-4 border-t">
+        <div className="p-4 border-t space-y-1">
+          <Link
+            href="/app/conta"
+            className={`block px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+              pathname === '/app/conta'
+                ? 'bg-primary text-primary-foreground'
+                : 'text-gray-700 hover:bg-gray-100'
+            }`}
+          >
+            Minha Conta
+          </Link>
           <Button variant="ghost" className="w-full justify-start text-sm" onClick={logout}>
             Sair
           </Button>
