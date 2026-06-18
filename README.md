@@ -97,6 +97,13 @@ pnpm --filter @financial-vellun/api exec prisma migrate deploy
 pnpm --filter @financial-vellun/api db:seed
 ```
 
+O seed tambem cria um usuario demo para desenvolvimento:
+
+```txt
+Email: vellunsolutions2026@gmail.com
+Senha: qwerty23
+```
+
 > Para resetar o banco em desenvolvimento: `pnpm --filter @financial-vellun/api exec prisma migrate reset`
 
 ### 5. Configurar o agente de IA (Python)
@@ -104,18 +111,27 @@ pnpm --filter @financial-vellun/api db:seed
 ```bash
 cd apps/ai-agent
 
-# Criar ambiente virtual
+# Criar ambiente virtual na primeira configuracao
 python -m venv .venv
 
-# Ativar (Windows)
+# Se a pasta .venv ja existir, nao recrie por cima.
+# Use a venv existente ou pare os processos Python/uvicorn antes de remove-la e recria-la.
+
+# Instalar dependencias usando o Python da propria venv
+.venv\Scripts\python.exe -m pip install -e .
+```
+
+A ativacao manual da venv e opcional. Ela so e necessaria quando voce quiser executar comandos Python diretamente dentro de `apps/ai-agent`, como `pytest`, `python` ou `pip`.
+
+```bash
+# Ativar manualmente no Windows, se necessario
 .venv\Scripts\activate
 
-# Ativar (macOS/Linux)
+# Ativar manualmente no macOS/Linux, se necessario
 source .venv/bin/activate
-
-# Instalar dependências
-pip install -e .
 ```
+
+Para iniciar o agente pelo monorepo, nao precisa ativar a venv manualmente. O script `pnpm agent:dev` ja usa `.venv\Scripts\python.exe` diretamente.
 
 ---
 
@@ -155,6 +171,21 @@ pnpm agent:dev
 | `pnpm agent:dev`     | Inicia o agente de IA em modo desenvolvimento|
 | `pnpm lint`          | Lint em todos os workspaces                  |
 | `pnpm format`        | Formata todos os arquivos com Prettier       |
+
+---
+
+## Problemas comuns
+
+### Porta da API em uso
+
+Se `pnpm dev` falhar com `EADDRINUSE` na porta `3001`, ja existe outro processo usando a porta da API. No Windows, encontre e encerre o processo:
+
+```powershell
+netstat -ano | findstr :3001
+taskkill /PID <PID> /F
+```
+
+Outra opcao e alterar `API_PORT` em `apps/api/.env` e atualizar `NEXT_PUBLIC_API_URL` em `apps/web/.env.local` para a mesma porta.
 
 ---
 

@@ -10,6 +10,11 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  app.enableCors({
+    origin: process.env.WEB_URL ?? 'http://localhost:3000',
+    credentials: true,
+  });
+
   app.use(cookieParser());
 
   app.useGlobalPipes(
@@ -31,7 +36,19 @@ async function bootstrap() {
   SwaggerModule.setup('api/docs', app, document);
 
   const port = process.env.API_PORT ?? 3001;
-  await app.listen(port);
+
+  try {
+    await app.listen(port);
+  } catch (error) {
+    const nodeError = error as NodeJS.ErrnoException;
+
+    if (nodeError.code === 'EADDRINUSE') {
+      console.error(`A porta ${port} ja esta em uso. Encerre o processo existente ou altere API_PORT.`);
+      process.exit(1);
+    }
+
+    throw error;
+  }
 
   console.log(`API rodando em http://localhost:${port}`);
   console.log(`Swagger disponível em http://localhost:${port}/api/docs`);

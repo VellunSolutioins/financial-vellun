@@ -1,6 +1,15 @@
-import { PrismaClient, ProfileType, TransactionType } from '@prisma/client';
+import { AccountType, PrismaClient, ProfileType, TransactionType } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
+
+const demoUser = {
+  name: 'Vellun Solutions',
+  email: 'vellunsolutions2026@gmail.com',
+  password: 'qwerty123',
+  cpf: '00000000191',
+  whatsappPhone: '+5511999999999',
+};
 
 const individualCategories = [
   { name: 'Alimentação', type: TransactionType.expense, color: '#FF6B6B', profileType: ProfileType.individual },
@@ -42,6 +51,82 @@ async function main() {
   });
 
   console.log(`${created.count} categorias padrao inseridas.`);
+
+  console.log('Criando usuario demo...');
+
+  const passwordHash = await bcrypt.hash(demoUser.password, 12);
+
+  const user = await prisma.user.upsert({
+    where: { email: demoUser.email },
+    update: {
+      name: demoUser.name,
+      passwordHash,
+      profileType: ProfileType.individual,
+    },
+    create: {
+      name: demoUser.name,
+      email: demoUser.email,
+      passwordHash,
+      profileType: ProfileType.individual,
+    },
+  });
+
+  await prisma.individualProfile.upsert({
+    where: { userId: user.id },
+    update: {
+      cpf: demoUser.cpf,
+    },
+    create: {
+      userId: user.id,
+      cpf: demoUser.cpf,
+    },
+  });
+
+  const existingAccount = await prisma.account.findFirst({
+    where: {
+      userId: user.id,
+      name: 'Conta Principal',
+    },
+  });
+
+  if (existingAccount) {
+    await prisma.account.update({
+      where: { id: existingAccount.id },
+      data: {
+        type: AccountType.checking,
+        currency: 'BRL',
+        isActive: true,
+      },
+    });
+  } else {
+    await prisma.account.create({
+      data: {
+        userId: user.id,
+        name: 'Conta Principal',
+        type: AccountType.checking,
+        initialBalance: 0,
+        currentBalance: 0,
+        currency: 'BRL',
+      },
+    });
+  }
+
+  await prisma.whatsappContact.upsert({
+    where: { phoneNumber: demoUser.whatsappPhone },
+    update: {
+      userId: user.id,
+      provider: 'development',
+      isVerified: true,
+    },
+    create: {
+      userId: user.id,
+      phoneNumber: demoUser.whatsappPhone,
+      provider: 'development',
+      isVerified: true,
+    },
+  });
+
+  console.log(`Usuario demo disponivel: ${demoUser.email} / ${demoUser.password}`);
 }
 
 main()

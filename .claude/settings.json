@@ -50,7 +50,9 @@
       "PowerShell(Stop-Process -Id 15000 -Force; Start-Sleep -Seconds 2; $stillUp = Get-NetTCPConnection -LocalPort 3001 -State Listen -ErrorAction SilentlyContinue; if \\($stillUp\\) { Write-Output \"porta 3001 ainda ocupada por PID $\\($stillUp.OwningProcess\\)\" } else { Write-Output \"porta 3001 livre\" })",
       "Bash(node dist/main.js)",
       "PowerShell($ok=$false; for \\($i=0; $i -lt 15; $i++\\) { Start-Sleep -Seconds 2; try { $r = Invoke-RestMethod -Uri http://localhost:3001/api/docs-json -TimeoutSec 3; $paths = $r.paths.PSObject.Properties.Name; if \\($paths.Count -gt 1\\) { Write-Output \\(\"rotas: \" + $paths.Count\\); $paths | Sort-Object | ForEach-Object { Write-Output $_ }; $ok=$true; break } } catch {} }; if \\(-not $ok\\) { Write-Output \"TIMEOUT - API nao subiu com rotas\" })",
-      "Bash(curl -s -X POST http://localhost:8010/webhook/whatsapp -H \"Content-Type: application/json\" -d '{\"phone\":\"+5500000000000\",\"message\":\"gastei 50 no mercado\",\"timestamp\":1,\"message_id\":\"x1\"}')"
+      "Bash(curl -s -X POST http://localhost:8010/webhook/whatsapp -H \"Content-Type: application/json\" -d '{\"phone\":\"+5500000000000\",\"message\":\"gastei 50 no mercado\",\"timestamp\":1,\"message_id\":\"x1\"}')",
+      "Bash(curl -s -X POST http://localhost:3001/auth/register -H 'Content-Type: application/json' -d '{\"name\":\"Cors Test\",\"email\":\"__TRACKED_VAR__\",\"password\":\"senha12345\",\"profileType\":\"individual\"}')",
+      "Bash(curl -s -i -X POST http://localhost:3001/auth/login -H 'Origin: http://localhost:3000' -H 'Content-Type: application/json' -d '{\"email\":\"__TRACKED_VAR__\",\"password\":\"senha12345\"}' -m 5)"
     ]
   }
 }
