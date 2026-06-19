@@ -21,6 +21,12 @@ export class DashboardController {
     return this.dashboardService.getSummary(user.id, periodStart, periodEnd);
   }
 
+  @Get('daily')
+  getDaily(@Req() req: Request, @Query('month') month?: string) {
+    const user = req.user as any;
+    return this.dashboardService.getDailyBreakdown(user.id, month);
+  }
+
   @Get('business/summary')
   getBusinessSummary(
     @Req() req: Request,

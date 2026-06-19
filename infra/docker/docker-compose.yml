@@ -4,6 +4,9 @@ services:
     container_name: financial-vellun-db
     env_file:
       - .env
+    environment:
+      TZ: America/Sao_Paulo
+      PGTZ: America/Sao_Paulo
     ports:
       - '5432:5432'
     volumes:

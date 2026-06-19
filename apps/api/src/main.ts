@@ -7,6 +7,11 @@ import cookieParser from 'cookie-parser';
 
 import { AppModule } from './app.module';
 
+// Fuso horário da aplicação: Brasil (America/Sao_Paulo). Definido antes do
+// bootstrap para que `new Date()`, timestamps e os cálculos do dashboard usem
+// o horário de Brasília.
+process.env.TZ = process.env.TZ ?? 'America/Sao_Paulo';
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 

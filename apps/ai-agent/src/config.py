@@ -1,4 +1,14 @@
+import os
+import time
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Fuso horário da aplicação: Brasil (America/Sao_Paulo). Garante que
+# `date.today()`/`datetime.now()` (ex.: parsing de "hoje/ontem") usem o horário
+# de Brasília. `tzset` só existe em sistemas Unix.
+os.environ.setdefault("TZ", "America/Sao_Paulo")
+if hasattr(time, "tzset"):
+    time.tzset()
 
 
 class Settings(BaseSettings):

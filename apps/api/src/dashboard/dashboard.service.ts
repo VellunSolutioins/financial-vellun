@@ -54,8 +54,8 @@ export class DashboardService {
       percentage: totalExpense > 0 ? (Number(e._sum.amount ?? 0) / totalExpense) * 100 : 0,
     }));
 
-    // Monthly comparison (last 3 months)
-    const monthlyComparison = await this.getMonthlyComparison(userId, 3);
+    // Monthly comparison (last 12 months) — usado no gráfico de evolução mensal
+    const monthlyComparison = await this.getMonthlyComparison(userId, 12);
 
     return {
       totalBalance,
@@ -162,6 +162,59 @@ export class DashboardService {
       topExpenseCategories,
       accountsReceivable: { total: totalReceivable, items: accountsReceivable },
       accountsPayable: { total: totalPayable, items: accountsPayable },
+    };
+  }
+
+  /**
+   * Lançamentos diários (confirmados) de um mês. Retorna um ponto por dia do
+   * mês (income/expense, zero quando não há). ``month`` no formato ``YYYY-MM``;
+   * sem ele, usa o mês atual. Cálculo em UTC para casar com a data armazenada.
+   */
+  async getDailyBreakdown(userId: string, month?: string) {
+    const now = new Date();
+    let year: number;
+    let monthIndex: number;
+    if (month && /^\d{4}-\d{2}$/.test(month)) {
+      const [y, m] = month.split('-').map(Number);
+      year = y;
+      monthIndex = m - 1;
+    } else {
+      year = now.getUTCFullYear();
+      monthIndex = now.getUTCMonth();
+    }
+
+    const start = new Date(Date.UTC(year, monthIndex, 1));
+    const end = new Date(Date.UTC(year, monthIndex + 1, 0, 23, 59, 59, 999));
+    const daysInMonth = end.getUTCDate();
+
+    const transactions = await this.prisma.transaction.findMany({
+      where: {
+        userId,
+        status: 'confirmed',
+        type: { in: ['income', 'expense'] },
+        transactionDate: { gte: start, lte: end },
+      },
+      select: { type: true, amount: true, transactionDate: true },
+    });
+
+    const byDay = new Map<number, { income: number; expense: number }>();
+    for (let d = 1; d <= daysInMonth; d++) byDay.set(d, { income: 0, expense: 0 });
+
+    for (const t of transactions) {
+      const day = Number(t.transactionDate.toISOString().slice(8, 10));
+      const entry = byDay.get(day);
+      if (!entry) continue;
+      if (t.type === 'income') entry.income += Number(t.amount);
+      else entry.expense += Number(t.amount);
+    }
+
+    return {
+      month: start.toISOString().slice(0, 7),
+      days: [...byDay.entries()].map(([day, v]) => ({
+        day,
+        income: v.income,
+        expense: v.expense,
+      })),
     };
   }
 
