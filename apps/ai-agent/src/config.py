@@ -14,7 +14,8 @@ class Settings(BaseSettings):
     internal_api_key: str
     openai_api_key: str = ""
     whatsapp_provider_token: str = ""
-    whatsapp_webhook_secret: str = ""
+    whatsapp_webhook_secret: str = ""  # App Secret (valida X-Hub-Signature-256)
+    whatsapp_verify_token: str = ""  # token do handshake GET de verificação (Meta)
     whatsapp_provider: str = "log"  # "log" | "cloud-api" (Etapa 5)
     whatsapp_phone_number_id: str = ""
     whatsapp_api_base_url: str = "https://graph.facebook.com/v18.0"
