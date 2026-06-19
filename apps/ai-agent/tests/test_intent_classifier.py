@@ -27,11 +27,28 @@ def test_expense_with_category():
     assert result.needs_confirmation is False
 
 
+def test_expense_with_purchase_noun():
+    result = classify("compra de 25 reais de gasolina")
+    assert result.intent == IntentType.create_transaction
+    assert result.transaction_type == TransactionTypeEnum.expense
+    assert result.amount == 25
+    assert result.category_name == "Transporte"
+    assert result.needs_confirmation is False
+
+
 def test_income_salary():
     result = classify("recebi 5000 de salário")
     assert result.transaction_type == TransactionTypeEnum.income
     assert result.amount == 5000
     assert result.category_name == "Salário"
+
+
+def test_income_with_sale_noun():
+    result = classify("venda de 85 reais")
+    assert result.intent == IntentType.create_transaction
+    assert result.transaction_type == TransactionTypeEnum.income
+    assert result.amount == 85
+    assert result.category_name == "Vendas"
 
 
 def test_expense_without_category_needs_confirmation():

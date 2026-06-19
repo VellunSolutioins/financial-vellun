@@ -8,6 +8,9 @@ import { Select } from '@/components/ui/select';
 import { Dialog } from '@/components/ui/dialog';
 import { TransactionForm } from '@/components/transactions/TransactionForm';
 import { useTransactions, type Transaction } from '@/hooks/useTransactions';
+import { apiClient } from '@/lib/api-client';
+import { useToast } from '@/components/ui/toast';
+import { useConfirm } from '@/components/ui/confirm';
 
 function formatCurrency(v: number) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
@@ -29,6 +32,8 @@ const sourceLabels: Record<string, string> = {
 function TransacoesContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const toast = useToast();
+  const confirm = useConfirm();
   const [modalOpen, setModalOpen] = useState(false);
   const [editingTx, setEditingTx] = useState<Transaction | undefined>();
 
@@ -65,6 +70,22 @@ function TransacoesContent() {
   const handleSuccess = () => {
     closeModal();
     void refetch();
+  };
+  const handleDelete = async (tx: Transaction) => {
+    const ok = await confirm({
+      title: 'Excluir lançamento',
+      description: `Excluir o lançamento "${tx.description}"? Esta ação não pode ser desfeita.`,
+      confirmText: 'Excluir',
+      variant: 'destructive',
+    });
+    if (!ok) return;
+    try {
+      await apiClient.delete(`/transactions/${tx.id}?hard_delete=true`);
+      toast.success('Lançamento excluído.');
+      void refetch();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao excluir lançamento');
+    }
   };
 
   return (
@@ -161,9 +182,17 @@ function TransacoesContent() {
                     {tx.type === 'income' ? '+' : tx.type === 'expense' ? '-' : ''}
                     {formatCurrency(Number(tx.amount))}
                   </td>
-                  <td className="p-3">
+                  <td className="p-3 text-right whitespace-nowrap">
                     <Button size="sm" variant="ghost" onClick={() => openEdit(tx)}>
                       Editar
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-destructive"
+                      onClick={() => void handleDelete(tx)}
+                    >
+                      Excluir
                     </Button>
                   </td>
                 </tr>

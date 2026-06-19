@@ -8,6 +8,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog } from '@/components/ui/dialog';
 import { apiClient } from '@/lib/api-client';
+import { useToast } from '@/components/ui/toast';
+import { useConfirm } from '@/components/ui/confirm';
 import { CPF_CNPJ_REGEX, PHONE_REGEX, maskCpfCnpj, maskPhone } from '@/lib/masks';
 
 export interface Contact {
@@ -42,7 +44,9 @@ export function ContactsView({ type, title, singular }: Props) {
   const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Contact | null>(null);
-  const [error, setError] = useState('');
+  const toast = useToast();
+  const confirm = useConfirm();
+  const Singular = singular.charAt(0).toUpperCase() + singular.slice(1);
 
   const {
     register,
@@ -71,7 +75,6 @@ export function ContactsView({ type, title, singular }: Props) {
   const openNew = () => {
     setEditing(null);
     reset({ name: '', document: '', email: '', phone: '', notes: '' });
-    setError('');
     setModalOpen(true);
   };
   const openEdit = (c: Contact) => {
@@ -83,12 +86,10 @@ export function ContactsView({ type, title, singular }: Props) {
       phone: c.phone ? maskPhone(c.phone) : '',
       notes: c.notes ?? '',
     });
-    setError('');
     setModalOpen(true);
   };
 
   const onSubmit = async (data: FormData) => {
-    setError('');
     const payload = {
       ...data,
       type,
@@ -100,23 +101,32 @@ export function ContactsView({ type, title, singular }: Props) {
     try {
       if (editing) {
         await apiClient.patch(`/contacts/${editing.id}`, payload);
+        toast.success(`${Singular} atualizado com sucesso.`);
       } else {
         await apiClient.post('/contacts', payload);
+        toast.success(`${Singular} cadastrado com sucesso.`);
       }
       setModalOpen(false);
       void load();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : `Erro ao salvar ${singular}`);
+      toast.error(e instanceof Error ? e.message : `Erro ao salvar ${singular}`);
     }
   };
 
   const remove = async (id: string) => {
-    if (!confirm(`Excluir este ${singular}?`)) return;
+    const ok = await confirm({
+      title: `Excluir ${singular}`,
+      description: `Tem certeza que deseja excluir este ${singular}?`,
+      confirmText: 'Excluir',
+      variant: 'destructive',
+    });
+    if (!ok) return;
     try {
       await apiClient.delete(`/contacts/${id}`);
+      toast.success(`${Singular} excluído.`);
       void load();
     } catch (e: unknown) {
-      if (e instanceof Error) alert(e.message);
+      toast.error(e instanceof Error ? e.message : `Erro ao excluir ${singular}`);
     }
   };
 
@@ -231,9 +241,6 @@ export function ContactsView({ type, title, singular }: Props) {
             <Label>Observações</Label>
             <Input placeholder="Notas internas..." {...register('notes')} />
           </div>
-          {error && (
-            <p className="text-sm text-destructive bg-destructive/10 rounded p-2">{error}</p>
-          )}
           <div className="flex gap-2">
             <Button type="submit" disabled={isSubmitting} className="flex-1">
               {isSubmitting ? 'Salvando...' : 'Salvar'}

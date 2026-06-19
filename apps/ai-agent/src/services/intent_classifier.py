@@ -18,10 +18,10 @@ from .metrics import metrics
 logger = logging.getLogger(__name__)
 
 EXPENSE_KEYWORDS = (
-    "gastei", "paguei", "comprei", "gasto", "despesa", "gastando", "pagamento",
+    "gastei", "paguei", "comprei", "compra", "gasto", "despesa", "gastando", "pagamento",
 )
 INCOME_KEYWORDS = (
-    "recebi", "ganhei", "recebimento", "entrou", "receita", "caiu", "vendi",
+    "recebi", "ganhei", "recebimento", "entrou", "receita", "caiu", "vendi", "venda",
 )
 QUERY_KEYWORDS = ("resumo", "saldo", "quanto", "balanço", "balanco", "relatório", "relatorio")
 HELP_KEYWORDS = ("ajuda", "help", "socorro", "como funciona", "o que voce faz", "o que você faz")

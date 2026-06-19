@@ -16,6 +16,11 @@ export async function register(data: {
   email: string;
   password: string;
   profileType: 'individual' | 'business';
+  cpf?: string;
+  birthDate?: string;
+  companyName?: string;
+  tradeName?: string;
+  cnpj?: string;
 }): Promise<User> {
   return apiClient.post<User>('/auth/register', data);
 }

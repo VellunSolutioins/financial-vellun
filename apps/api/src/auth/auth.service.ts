@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { AccountType, ProfileType } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { RegisterDto } from './dto/register.dto';
@@ -22,14 +23,56 @@ export class AuthService {
     const exists = await this.prisma.user.findUnique({ where: { email: dto.email } });
     if (exists) throw new ConflictException('Email já cadastrado');
 
+    if (dto.profileType === ProfileType.individual) {
+      const cpfExists = await this.prisma.individualProfile.findUnique({ where: { cpf: dto.cpf } });
+      if (cpfExists) throw new ConflictException('CPF já cadastrado');
+    } else {
+      const cnpjExists = await this.prisma.businessProfile.findUnique({ where: { cnpj: dto.cnpj } });
+      if (cnpjExists) throw new ConflictException('CNPJ já cadastrado');
+    }
+
     const passwordHash = await bcrypt.hash(dto.password, 12);
-    const user = await this.prisma.user.create({
-      data: {
-        name: dto.name,
-        email: dto.email,
-        passwordHash,
-        profileType: dto.profileType,
-      },
+    const user = await this.prisma.$transaction(async (tx) => {
+      const createdUser = await tx.user.create({
+        data: {
+          name: dto.name,
+          email: dto.email,
+          passwordHash,
+          profileType: dto.profileType,
+        },
+      });
+
+      if (dto.profileType === ProfileType.individual) {
+        await tx.individualProfile.create({
+          data: {
+            userId: createdUser.id,
+            cpf: dto.cpf!,
+            birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined,
+          },
+        });
+      } else {
+        await tx.businessProfile.create({
+          data: {
+            userId: createdUser.id,
+            companyName: dto.companyName!,
+            tradeName: dto.tradeName,
+            cnpj: dto.cnpj!,
+          },
+        });
+      }
+
+      await tx.account.create({
+        data: {
+          userId: createdUser.id,
+          name: 'Conta Principal',
+          type: AccountType.checking,
+          initialBalance: 0,
+          currentBalance: 0,
+          currency: 'BRL',
+        },
+      });
+
+      return createdUser;
     });
 
     const { passwordHash: _, ...result } = user;

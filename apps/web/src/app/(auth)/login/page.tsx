@@ -1,5 +1,4 @@
 'use client';
-import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
@@ -10,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/auth-context';
+import { useToast } from '@/components/ui/toast';
 import { login } from '@/lib/auth';
 import { ApiClientError } from '@/lib/api-client';
 
@@ -22,7 +22,7 @@ type FormData = z.infer<typeof schema>;
 export default function LoginPage() {
   const router = useRouter();
   const { setUser } = useAuth();
-  const [error, setError] = useState('');
+  const toast = useToast();
 
   const {
     register,
@@ -33,14 +33,13 @@ export default function LoginPage() {
   });
 
   const onSubmit = async (data: FormData) => {
-    setError('');
     try {
       const user = await login(data);
       setUser(user);
+      toast.success('Login realizado com sucesso!');
       router.push(user.profileType === 'individual' ? '/app/pessoal/dashboard' : '/app/empresa/dashboard');
     } catch (e) {
-      if (e instanceof ApiClientError) setError(e.message);
-      else setError('Ocorreu um erro. Tente novamente.');
+      toast.error(e instanceof ApiClientError ? e.message : 'Ocorreu um erro. Tente novamente.');
     }
   };
 
@@ -62,7 +61,6 @@ export default function LoginPage() {
             <Input id="password" type="password" placeholder="••••••••" {...register('password')} />
             {errors.password && <p className="text-xs text-destructive">{errors.password.message}</p>}
           </div>
-          {error && <p className="text-sm text-destructive bg-destructive/10 rounded p-2">{error}</p>}
           <Button type="submit" className="w-full" disabled={isSubmitting}>
             {isSubmitting ? 'Entrando...' : 'Entrar'}
           </Button>

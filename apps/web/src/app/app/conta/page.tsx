@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/auth-context';
+import { useToast } from '@/components/ui/toast';
 import { updateMe } from '@/lib/auth';
 import { PHONE_REGEX, maskPhone } from '@/lib/masks';
 
@@ -25,8 +26,7 @@ const profileTypeLabels: Record<string, string> = {
 
 export default function MinhaContaPage() {
   const { user, setUser } = useAuth();
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState(false);
+  const toast = useToast();
 
   const {
     register,
@@ -47,8 +47,6 @@ export default function MinhaContaPage() {
   }, [user, reset]);
 
   const onSubmit = async (data: FormData) => {
-    setError('');
-    setSuccess(false);
     try {
       const updated = await updateMe({
         name: data.name,
@@ -57,10 +55,9 @@ export default function MinhaContaPage() {
       });
       setUser({ ...user!, ...updated });
       reset({ name: updated.name, email: updated.email, phone: updated.phone ?? '' });
-      setSuccess(true);
+      toast.success('Dados atualizados com sucesso.');
     } catch (e: unknown) {
-      if (e instanceof Error) setError(e.message);
-      else setError('Erro ao atualizar dados');
+      toast.error(e instanceof Error ? e.message : 'Erro ao atualizar dados');
     }
   };
 
@@ -114,15 +111,6 @@ export default function MinhaContaPage() {
               />
               {errors.phone && <p className="text-xs text-destructive">{errors.phone.message}</p>}
             </div>
-
-            {error && (
-              <p className="text-sm text-destructive bg-destructive/10 rounded p-2">{error}</p>
-            )}
-            {success && (
-              <p className="text-sm text-green-700 bg-green-100 rounded p-2">
-                Dados atualizados com sucesso.
-              </p>
-            )}
 
             <div className="flex gap-2">
               <Button type="submit" disabled={isSubmitting || !isDirty}>

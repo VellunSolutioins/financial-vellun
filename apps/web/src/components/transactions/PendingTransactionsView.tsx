@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { apiClient } from '@/lib/api-client';
+import { useToast } from '@/components/ui/toast';
 import { useTransactions } from '@/hooks/useTransactions';
 
 function formatCurrency(v: number) {
@@ -22,6 +23,7 @@ export function PendingTransactionsView({ type, title, actionLabel }: Props) {
   const [categories, setCategories] = useState<{ id: string; name: string; type: string }[]>([]);
   const [accounts, setAccounts] = useState<{ id: string; name: string }[]>([]);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const toast = useToast();
 
   const [periodStart, setPeriodStart] = useState('');
   const [periodEnd, setPeriodEnd] = useState('');
@@ -61,9 +63,10 @@ export function PendingTransactionsView({ type, title, actionLabel }: Props) {
     setUpdatingId(id);
     try {
       await apiClient.patch(`/transactions/${id}`, { status: 'confirmed' });
+      toast.success(type === 'income' ? 'Recebimento confirmado.' : 'Pagamento confirmado.');
       await refetch();
     } catch (e) {
-      console.error(e);
+      toast.error(e instanceof Error ? e.message : 'Erro ao confirmar lançamento');
     } finally {
       setUpdatingId(null);
     }

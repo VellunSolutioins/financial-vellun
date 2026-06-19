@@ -10,6 +10,8 @@ import { Select } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
 import { apiClient } from '@/lib/api-client';
+import { useToast } from '@/components/ui/toast';
+import { useConfirm } from '@/components/ui/confirm';
 import { CURRENCY_REGEX, currencyToNumber, maskCurrency } from '@/lib/masks';
 
 interface Account {
@@ -56,7 +58,8 @@ export default function ContasPage() {
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Account | null>(null);
-  const [error, setError] = useState('');
+  const toast = useToast();
+  const confirm = useConfirm();
 
   const {
     register,
@@ -92,32 +95,39 @@ export default function ContasPage() {
   };
 
   const onSubmit = async (data: FormData) => {
-    setError('');
     try {
       if (editing) {
         await apiClient.patch(`/accounts/${editing.id}`, { name: data.name, type: data.type });
+        toast.success('Conta atualizada com sucesso.');
       } else {
         await apiClient.post('/accounts', {
           name: data.name,
           type: data.type,
           initialBalance: currencyToNumber(data.initialBalance ?? '0'),
         });
+        toast.success('Conta criada com sucesso.');
       }
       setModalOpen(false);
       void load();
     } catch (e: unknown) {
-      if (e instanceof Error) setError(e.message);
-      else setError('Erro ao salvar conta');
+      toast.error(e instanceof Error ? e.message : 'Erro ao salvar conta');
     }
   };
 
   const deactivate = async (id: string) => {
-    if (!confirm('Desativar esta conta?')) return;
+    const ok = await confirm({
+      title: 'Desativar conta',
+      description: 'Tem certeza que deseja desativar esta conta?',
+      confirmText: 'Desativar',
+      variant: 'destructive',
+    });
+    if (!ok) return;
     try {
       await apiClient.delete(`/accounts/${id}`);
+      toast.success('Conta desativada.');
       void load();
     } catch (e: unknown) {
-      if (e instanceof Error) alert(e.message);
+      toast.error(e instanceof Error ? e.message : 'Erro ao desativar conta');
     }
   };
 
@@ -205,9 +215,6 @@ export default function ContasPage() {
                 <p className="text-xs text-destructive">{errors.initialBalance.message}</p>
               )}
             </div>
-          )}
-          {error && (
-            <p className="text-sm text-destructive bg-destructive/10 rounded p-2">{error}</p>
           )}
           <div className="flex gap-2">
             <Button type="submit" disabled={isSubmitting} className="flex-1">

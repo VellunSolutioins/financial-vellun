@@ -10,6 +10,8 @@ import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Dialog } from '@/components/ui/dialog';
 import { apiClient } from '@/lib/api-client';
+import { useToast } from '@/components/ui/toast';
+import { useConfirm } from '@/components/ui/confirm';
 
 interface Category {
   id: string;
@@ -47,7 +49,8 @@ export function CategoriesView({ showCostCenter = false }: Props) {
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<Category | null>(null);
-  const [error, setError] = useState('');
+  const toast = useToast();
+  const confirm = useConfirm();
 
   const {
     register,
@@ -73,7 +76,6 @@ export function CategoriesView({ showCostCenter = false }: Props) {
   const openNew = () => {
     setEditing(null);
     reset({ type: 'expense', name: '', color: '', icon: '', costCenter: '' });
-    setError('');
     setModalOpen(true);
   };
   const openEdit = (c: Category) => {
@@ -85,33 +87,40 @@ export function CategoriesView({ showCostCenter = false }: Props) {
       icon: c.icon ?? '',
       costCenter: c.costCenter ?? '',
     });
-    setError('');
     setModalOpen(true);
   };
 
   const onSubmit = async (data: FormData) => {
-    setError('');
     const payload = { ...data, costCenter: showCostCenter ? data.costCenter || undefined : undefined };
     try {
       if (editing) {
         await apiClient.patch(`/categories/${editing.id}`, payload);
+        toast.success('Categoria atualizada com sucesso.');
       } else {
         await apiClient.post('/categories', payload);
+        toast.success('Categoria criada com sucesso.');
       }
       setModalOpen(false);
       void load();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Erro ao salvar categoria');
+      toast.error(e instanceof Error ? e.message : 'Erro ao salvar categoria');
     }
   };
 
   const remove = async (id: string) => {
-    if (!confirm('Excluir esta categoria?')) return;
+    const ok = await confirm({
+      title: 'Excluir categoria',
+      description: 'Tem certeza que deseja excluir esta categoria?',
+      confirmText: 'Excluir',
+      variant: 'destructive',
+    });
+    if (!ok) return;
     try {
       await apiClient.delete(`/categories/${id}`);
+      toast.success('Categoria excluída.');
       void load();
     } catch (e: unknown) {
-      if (e instanceof Error) alert(e.message);
+      toast.error(e instanceof Error ? e.message : 'Erro ao excluir categoria');
     }
   };
 
@@ -252,7 +261,6 @@ export function CategoriesView({ showCostCenter = false }: Props) {
               <Input placeholder="Ex: TI, Comercial..." {...register('costCenter')} />
             </div>
           )}
-          {error && <p className="text-sm text-destructive bg-destructive/10 rounded p-2">{error}</p>}
           <div className="flex gap-2">
             <Button type="submit" disabled={isSubmitting} className="flex-1">
               {isSubmitting ? 'Salvando...' : 'Salvar'}

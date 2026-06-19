@@ -8,6 +8,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { apiClient } from '@/lib/api-client';
+import { useToast } from '@/components/ui/toast';
+import { useConfirm } from '@/components/ui/confirm';
 import type { Transaction } from '@/hooks/useTransactions';
 import { CURRENCY_REGEX, currencyToNumber, formatCurrencyInput, maskCurrency } from '@/lib/masks';
 
@@ -36,7 +38,8 @@ export function TransactionForm({ transaction, onSuccess, onCancel }: Props) {
   const [accounts, setAccounts] = useState<{ id: string; name: string }[]>([]);
   const [categories, setCategories] = useState<{ id: string; name: string; type: string }[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState('');
+  const toast = useToast();
+  const confirm = useConfirm();
 
   const {
     register,
@@ -75,21 +78,18 @@ export function TransactionForm({ transaction, onSuccess, onCancel }: Props) {
 
   const onSubmit = async (data: FormData) => {
     setSubmitting(true);
-    setError('');
     const payload = { ...data, amount: currencyToNumber(data.amount) };
     try {
       if (transaction) {
         await apiClient.patch(`/transactions/${transaction.id}`, payload);
+        toast.success('Lançamento atualizado com sucesso.');
       } else {
         await apiClient.post('/transactions', payload);
+        toast.success('Lançamento criado com sucesso.');
       }
       onSuccess();
     } catch (e: unknown) {
-      if (e instanceof Error) {
-        setError(e.message);
-      } else {
-        setError('Erro ao salvar lançamento');
-      }
+      toast.error(e instanceof Error ? e.message : 'Erro ao salvar lançamento');
     } finally {
       setSubmitting(false);
     }
@@ -97,9 +97,21 @@ export function TransactionForm({ transaction, onSuccess, onCancel }: Props) {
 
   const handleCancel = async () => {
     if (!transaction) return onCancel();
-    if (!confirm('Cancelar este lançamento?')) return;
-    await apiClient.delete(`/transactions/${transaction.id}`);
-    onSuccess();
+    const ok = await confirm({
+      title: 'Cancelar lançamento',
+      description: 'O lançamento ficará com status cancelado. Deseja continuar?',
+      confirmText: 'Cancelar lançamento',
+      cancelText: 'Voltar',
+      variant: 'destructive',
+    });
+    if (!ok) return;
+    try {
+      await apiClient.delete(`/transactions/${transaction.id}`);
+      toast.success('Lançamento cancelado.');
+      onSuccess();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao cancelar lançamento');
+    }
   };
 
   const filteredCategories = categories.filter(
@@ -181,7 +193,6 @@ export function TransactionForm({ transaction, onSuccess, onCancel }: Props) {
           <p className="text-xs text-destructive">{errors.transactionDate.message}</p>
         )}
       </div>
-      {error && <p className="text-sm text-destructive bg-destructive/10 rounded p-2">{error}</p>}
       <div className="flex gap-2 pt-2">
         <Button type="submit" disabled={submitting} className="flex-1">
           {submitting ? 'Salvando...' : transaction ? 'Salvar alterações' : 'Criar lançamento'}
