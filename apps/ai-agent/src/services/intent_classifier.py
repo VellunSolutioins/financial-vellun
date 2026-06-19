@@ -129,6 +129,27 @@ class IntentClassifier:
         """Classificação síncrona apenas por regras (útil para respostas de confirmação)."""
         return self._classify_with_rules(message, context or {})
 
+    async def classify_image(
+        self, image_bytes: bytes, mime: str, caption: str | None, context: dict | None = None
+    ) -> FinancialIntent | None:
+        """Extrai a intenção de uma imagem (comprovante) via LLM de visão.
+
+        Retorna ``None`` quando não há provider com suporte a visão ou em falha —
+        sinalizando ao chamador para responder com uma mensagem de fallback.
+        """
+        if self._provider is None or not self._provider.supports_vision:
+            return None
+        try:
+            intent = await self._provider.extract_intent_from_image(
+                image_bytes, mime, caption, context or {}
+            )
+            metrics.incr("vision_success")
+            return self._finalize(intent)
+        except Exception:  # noqa: BLE001 — sem fallback de regras para imagem
+            metrics.incr("vision_fail")
+            logger.warning("Falha na extração por visão", exc_info=True)
+            return None
+
     # ── Regras ────────────────────────────────────────────────────────────
     def _classify_with_rules(self, message: str, context: dict) -> FinancialIntent:
         text = message.lower().strip()

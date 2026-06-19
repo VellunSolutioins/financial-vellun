@@ -1,3 +1,4 @@
+import base64
 import logging
 from datetime import date
 
@@ -8,6 +9,23 @@ from ...schemas.financial_intent import FinancialIntent
 from .base import LlmProvider
 
 logger = logging.getLogger(__name__)
+
+VISION_SYSTEM_PROMPT = """Você extrai dados de COMPROVANTES de pagamento/recibos \
+(imagem) em português do Brasil, preenchendo o schema FinancialIntent.
+
+Regras:
+- `intent`: use "create_transaction" quando for um comprovante financeiro legível; \
+caso contrário, "unknown" com confiança baixa.
+- `transaction_type`: normalmente "expense" (pagamento/compra); use "income" se o \
+comprovante indicar recebimento.
+- `amount`: valor total (use ponto decimal; vírgula é decimal no Brasil).
+- `description`: estabelecimento/recebedor ou um resumo curto do comprovante.
+- `category_name`: escolha entre as categorias disponíveis do usuário; se nada \
+encaixar com clareza, deixe nulo.
+- `transaction_date`: data do comprovante em ISO (YYYY-MM-DD); use a data atual \
+se estiver ilegível.
+- `confidence`: 0.0 a 1.0, sua confiança na leitura da imagem.
+"""
 
 SYSTEM_PROMPT = """Você é um assistente financeiro que extrai informações \
 estruturadas de mensagens em linguagem natural (português do Brasil) sobre \
@@ -87,6 +105,48 @@ class OpenAiProvider(LlmProvider):
         parsed = completion.choices[0].message.parsed
         if parsed is None:
             raise ValueError("LLM não retornou um resultado estruturado")
+        return parsed
+
+    @property
+    def supports_vision(self) -> bool:
+        return True
+
+    async def extract_intent_from_image(
+        self, image_bytes: bytes, mime: str, caption: str | None, context: dict
+    ) -> FinancialIntent:
+        today = context.get("today") or date.today().isoformat()
+        categories = context.get("categories") or []
+        accounts = context.get("accounts") or []
+
+        b64 = base64.b64encode(image_bytes).decode()
+        data_url = f"data:{mime or 'image/jpeg'};base64,{b64}"
+
+        text_block = (
+            f"Data atual: {today}\n"
+            f"Categorias disponíveis: {', '.join(categories) or 'nenhuma informada'}\n"
+            f"Contas disponíveis: {', '.join(accounts) or 'nenhuma informada'}\n"
+            + (f"Legenda enviada pelo usuário: {caption}\n" if caption else "")
+            + "Extraia o lançamento a partir do comprovante na imagem."
+        )
+
+        completion = await self._client.beta.chat.completions.parse(
+            model=settings.openai_vision_model or self._model,
+            messages=[
+                {"role": "system", "content": VISION_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": text_block},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ],
+                },
+            ],
+            response_format=FinancialIntent,
+        )
+
+        parsed = completion.choices[0].message.parsed
+        if parsed is None:
+            raise ValueError("LLM não retornou um resultado estruturado para a imagem")
         return parsed
 
     @staticmethod

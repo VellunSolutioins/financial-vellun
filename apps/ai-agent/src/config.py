@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     # LLM
     llm_provider: str = "rules"  # "openai" | "rules"
     openai_model: str = "gpt-4o-mini"
+    openai_vision_model: str = ""  # vazio → usa openai_model (gpt-4o-mini é multimodal)
+    openai_transcription_model: str = "whisper-1"
+
+    # Mídia (áudio/imagem) recebida no WhatsApp
+    media_max_bytes: int = 16 * 1024 * 1024  # 16 MB (limite da Cloud API)
 
     # Diálogo / confirmação
     confidence_threshold: float = 0.7

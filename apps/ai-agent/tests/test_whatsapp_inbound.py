@@ -51,6 +51,92 @@ def test_meta_text_message():
     assert result[0].timestamp == 1718900000
 
 
+def test_meta_audio_message():
+    payload = {
+        "object": "whatsapp_business_account",
+        "entry": [
+            {
+                "changes": [
+                    {
+                        "value": {
+                            "messages": [
+                                {
+                                    "from": "5519993987410",
+                                    "id": "wamid.AUD",
+                                    "type": "audio",
+                                    "audio": {"id": "media-123", "mime_type": "audio/ogg"},
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        ],
+    }
+    result = parse_inbound(_body(payload))
+    assert len(result) == 1
+    assert result[0].kind == "audio"
+    assert result[0].media_id == "media-123"
+    assert result[0].media_mime == "audio/ogg"
+    assert result[0].message_id == "wamid.AUD"
+
+
+def test_meta_image_message_with_caption():
+    payload = {
+        "object": "whatsapp_business_account",
+        "entry": [
+            {
+                "changes": [
+                    {
+                        "value": {
+                            "messages": [
+                                {
+                                    "from": "5519993987410",
+                                    "id": "wamid.IMG",
+                                    "type": "image",
+                                    "image": {
+                                        "id": "media-img",
+                                        "mime_type": "image/jpeg",
+                                        "caption": "almoço",
+                                    },
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        ],
+    }
+    result = parse_inbound(_body(payload))
+    assert len(result) == 1
+    assert result[0].kind == "image"
+    assert result[0].media_id == "media-img"
+    assert result[0].caption == "almoço"
+
+
+def test_meta_video_is_unsupported():
+    payload = {
+        "object": "whatsapp_business_account",
+        "entry": [
+            {
+                "changes": [
+                    {
+                        "value": {
+                            "messages": [
+                                {"from": "5519993987410", "id": "wamid.VID", "type": "video"}
+                            ]
+                        }
+                    }
+                ]
+            }
+        ],
+    }
+    result = parse_inbound(_body(payload))
+    assert len(result) == 1
+    assert result[0].kind == "unsupported"
+    assert result[0].raw_type == "video"
+
+
 def test_meta_status_event_is_ignored():
     payload = {
         "object": "whatsapp_business_account",

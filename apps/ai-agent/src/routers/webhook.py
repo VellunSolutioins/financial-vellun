@@ -9,6 +9,7 @@
   de forma assíncrona (ver ``message_buffer`` → ``message_processor``).
 """
 
+import asyncio
 import hashlib
 import hmac
 import logging
@@ -17,6 +18,7 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 
 from ..config import settings
+from ..services.media_processor import media_processor
 from ..services.message_buffer import message_buffer
 from ..services.metrics import metrics
 from ..services.whatsapp_inbound import parse_inbound
@@ -24,6 +26,22 @@ from ..services.whatsapp_inbound import parse_inbound
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhook", tags=["webhook"])
+
+# Mantém referência às tasks de background para não serem coletadas pelo GC.
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _schedule(coro) -> None:
+    """Agenda o processamento de mídia fora do request (não bloqueia o ack)."""
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+    def _log_exc(t: asyncio.Task) -> None:
+        if not t.cancelled() and t.exception() is not None:
+            logger.error("Falha no processamento de mídia em background", exc_info=t.exception())
+
+    task.add_done_callback(_log_exc)
 
 
 def _verify_signature(raw_body: bytes, signature: str | None) -> bool:
@@ -83,22 +101,35 @@ async def receive_whatsapp(
 
     inbound = parse_inbound(raw_body)
     if not inbound:
-        # Status de entrega, mídia não suportada ou payload sem mensagem:
-        # responder 200 para a Meta não reenviar.
+        # Status de entrega ou payload sem mensagem: responder 200 para a Meta
+        # não reenviar.
         return {"status": "ignored"}
 
     metrics.incr("webhook_received")
 
     for item in inbound:
-        if len(item.message) > settings.message_max_chars:
-            logger.warning("Mensagem muito longa ignorada de %s", item.phone)
-            continue
-        logger.info("Webhook recebido de %s (message_id=%s)", item.phone, item.message_id)
-        await message_buffer.add(
-            item.phone,
-            item.message,
-            provider_message_id=item.message_id,
-            provider_timestamp=item.timestamp,
-        )
+        if item.kind == "text":
+            if len(item.message) > settings.message_max_chars:
+                logger.warning("Mensagem muito longa ignorada de %s", item.phone)
+                continue
+            logger.info("Texto recebido de %s (message_id=%s)", item.phone, item.message_id)
+            await message_buffer.add(
+                item.phone,
+                item.message,
+                provider_message_id=item.message_id,
+                provider_timestamp=item.timestamp,
+            )
+        elif item.kind in ("audio", "image"):
+            # Download + STT/visão são lentos: processa em background e responde já.
+            logger.info(
+                "Mídia recebida de %s (kind=%s, message_id=%s)",
+                item.phone,
+                item.kind,
+                item.message_id,
+            )
+            _schedule(media_processor.process(item.phone, item))
+        else:  # unsupported
+            logger.info("Tipo não suportado de %s (type=%s)", item.phone, item.raw_type)
+            _schedule(media_processor.respond_unsupported(item.phone))
 
     return {"status": "accepted"}

@@ -7,9 +7,9 @@ aceitando dois formatos:
 - **Real (WhatsApp Cloud API / Meta):** ``{"object": "whatsapp_business_account",
   "entry": [{"changes": [{"value": {"messages": [...]}}]}]}``.
 
-Eventos que não são mensagens de texto (status de entrega ``statuses[]``,
-mídia, etc.) são ignorados — retornam lista vazia, para o webhook responder
-``200`` sem reprocessar.
+Cada mensagem é classificada por ``kind`` (``text``/``audio``/``image``/
+``unsupported``). Eventos sem mensagem (status de entrega ``statuses[]``)
+retornam lista vazia, para o webhook responder ``200`` sem reprocessar.
 """
 
 from __future__ import annotations
@@ -23,12 +23,18 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class InboundMessage:
-    """Mensagem inbound já normalizada, pronta para o buffer."""
+    """Mensagem inbound já normalizada, pronta para roteamento."""
 
     phone: str
-    message: str
+    message: str = ""
     message_id: str | None = None
     timestamp: int | None = None
+    # text | audio | image | unsupported
+    kind: str = "text"
+    media_id: str | None = None
+    media_mime: str | None = None
+    caption: str | None = None
+    raw_type: str | None = None
 
 
 def parse_inbound(raw_body: bytes) -> list[InboundMessage]:
@@ -67,21 +73,56 @@ def _parse_meta(data: dict) -> list[InboundMessage]:
         for change in entry.get("changes") or []:
             value = change.get("value") or {}
             for msg in value.get("messages") or []:
-                if msg.get("type") != "text":
-                    # Áudio/imagem/documento/etc. ainda não suportados.
-                    logger.info("Mensagem não-texto ignorada (type=%s)", msg.get("type"))
-                    continue
-                body = (msg.get("text") or {}).get("body")
-                sender = msg.get("from")
-                if not body or not sender:
-                    continue
-                timestamp = msg.get("timestamp")
-                out.append(
-                    InboundMessage(
-                        phone=sender,
-                        message=body,
-                        message_id=msg.get("id"),
-                        timestamp=int(timestamp) if timestamp is not None else None,
-                    )
-                )
+                item = _parse_meta_message(msg)
+                if item is not None:
+                    out.append(item)
     return out
+
+
+def _parse_meta_message(msg: dict) -> InboundMessage | None:
+    sender = msg.get("from")
+    if not sender:
+        return None
+
+    mtype = msg.get("type")
+    timestamp = msg.get("timestamp")
+    common = {
+        "phone": sender,
+        "message_id": msg.get("id"),
+        "timestamp": int(timestamp) if timestamp is not None else None,
+    }
+
+    if mtype == "text":
+        body = (msg.get("text") or {}).get("body")
+        if not body:
+            return None
+        return InboundMessage(message=body, kind="text", **common)
+
+    if mtype in ("audio", "voice"):
+        media = msg.get(mtype) or {}
+        if not media.get("id"):
+            return None
+        return InboundMessage(
+            kind="audio",
+            media_id=media.get("id"),
+            media_mime=media.get("mime_type"),
+            raw_type=mtype,
+            **common,
+        )
+
+    if mtype == "image":
+        media = msg.get("image") or {}
+        if not media.get("id"):
+            return None
+        return InboundMessage(
+            kind="image",
+            media_id=media.get("id"),
+            media_mime=media.get("mime_type"),
+            caption=media.get("caption"),
+            raw_type=mtype,
+            **common,
+        )
+
+    # Vídeo, documento, sticker, localização, contato, etc.
+    logger.info("Mensagem de tipo não suportado recebida (type=%s)", mtype)
+    return InboundMessage(kind="unsupported", raw_type=mtype, **common)

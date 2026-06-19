@@ -14,3 +14,17 @@ class LlmProvider(ABC):
         acionar o fallback baseado em regras.
         """
         raise NotImplementedError
+
+    @property
+    def supports_vision(self) -> bool:
+        """Indica se o provider consegue extrair intenção de imagens."""
+        return False
+
+    async def extract_intent_from_image(
+        self, image_bytes: bytes, mime: str, caption: str | None, context: dict
+    ) -> FinancialIntent:
+        """Extrai um ``FinancialIntent`` de uma imagem (ex.: comprovante).
+
+        Providers sem suporte a visão devem manter ``supports_vision = False``.
+        """
+        raise NotImplementedError

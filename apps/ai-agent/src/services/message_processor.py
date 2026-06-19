@@ -69,39 +69,65 @@ class MessageProcessor:
             context = await self._build_context(user_id, contact, phone)
             intent = await intent_classifier.classify(message, context)
 
+        return await self.handle_intent(phone, user_id, intent, message, last_inbound_id)
+
+    async def handle_intent(
+        self,
+        phone: str,
+        user_id: str,
+        intent: FinancialIntent,
+        raw_message: str,
+        last_inbound_id: str | None = None,
+        *,
+        response_prefix: str = "",
+        force_confirm: bool = False,
+        confirm_question: str | None = None,
+    ) -> str:
+        """Trata um ``FinancialIntent`` já extraído (texto, áudio ou imagem).
+
+        ``response_prefix`` é prefixado na resposta final (ex.: eco da transcrição
+        de áudio). ``force_confirm`` força o ramo de confirmação independentemente
+        das regras (usado para comprovantes/imagem).
+        """
         # Intenções não-transacionais.
         if intent.intent == IntentType.help:
-            return await self._respond(phone, HELP_MESSAGE)
+            return await self._respond(phone, response_prefix + HELP_MESSAGE)
         if intent.intent == IntentType.query_summary:
             return await self._respond(
                 phone,
-                "Consulta de resumo via WhatsApp ainda não está disponível. Veja no app.",
+                response_prefix
+                + "Consulta de resumo via WhatsApp ainda não está disponível. Veja no app.",
             )
         if intent.intent in (IntentType.cancel_last, IntentType.correct_last):
             return await self._respond(
                 phone,
-                "Para corrigir ou cancelar um lançamento, use o app por enquanto.",
+                response_prefix
+                + "Para corrigir ou cancelar um lançamento, use o app por enquanto.",
             )
 
-        must_confirm, question = needs_confirmation(intent, message)
+        if force_confirm:
+            must_confirm = True
+            question = confirm_question or "Confirma o lançamento?"
+        else:
+            must_confirm, question = needs_confirmation(intent, raw_message)
 
         if must_confirm:
             metrics.incr("confirmation_requested")
             conversation_manager.set_pending(phone, intent)
             await audit_service.log_extraction(
                 user_id=user_id,
-                raw_input=message,
+                raw_input=raw_message,
                 extracted_payload=intent.model_dump(mode="json"),
                 confidence=intent.confidence,
                 status="pending",
                 source_message_id=last_inbound_id,
             )
-            return await self._respond(phone, question)
+            return await self._respond(phone, response_prefix + question)
 
         # Pronto para criar: registra a extração e cria o lançamento.
         extraction_id = await audit_service.log_extraction(
             user_id=user_id,
-            raw_input=message,
+            raw_input=raw_message,
             extracted_payload=intent.model_dump(mode="json"),
             confidence=intent.confidence,
             status="confirmed",
@@ -109,13 +135,13 @@ class MessageProcessor:
         )
 
         result = await transaction_creator.create_from_intent(
-            intent, user_id, message, ai_extracted_transaction_id=extraction_id
+            intent, user_id, raw_message, ai_extracted_transaction_id=extraction_id
         )
         conversation_manager.clear(phone)
 
         metrics.incr("transactions_created" if result.get("ok") else "transaction_failed")
 
-        return await self._respond(phone, result["message"])
+        return await self._respond(phone, response_prefix + result["message"])
 
     async def _respond(self, phone: str, text: str) -> str:
         """Envia a resposta ao usuário e registra como outbound."""
