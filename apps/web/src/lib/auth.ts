@@ -44,3 +44,10 @@ export async function updateMe(data: {
 }): Promise<User> {
   return apiClient.patch<User>('/users/me', data);
 }
+
+export async function updatePassword(data: {
+  currentPassword: string;
+  newPassword: string;
+}): Promise<{ message: string }> {
+  return apiClient.patch<{ message: string }>('/users/me/password', data);
+}

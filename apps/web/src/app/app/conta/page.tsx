@@ -5,11 +5,12 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/components/ui/toast';
-import { updateMe } from '@/lib/auth';
+import { updateMe, updatePassword } from '@/lib/auth';
 import { PHONE_REGEX, maskPhone } from '@/lib/masks';
 
 const schema = z.object({
@@ -18,6 +19,18 @@ const schema = z.object({
   phone: z.string().regex(PHONE_REGEX, 'Telefone inválido').optional().or(z.literal('')),
 });
 type FormData = z.infer<typeof schema>;
+
+const passwordSchema = z
+  .object({
+    currentPassword: z.string().min(1, 'Informe a senha atual'),
+    newPassword: z.string().min(8, 'A nova senha deve ter ao menos 8 caracteres'),
+    confirmNewPassword: z.string(),
+  })
+  .refine((d) => d.newPassword === d.confirmNewPassword, {
+    message: 'As senhas não coincidem',
+    path: ['confirmNewPassword'],
+  });
+type PasswordFormData = z.infer<typeof passwordSchema>;
 
 const profileTypeLabels: Record<string, string> = {
   individual: 'Pessoa Física',
@@ -46,6 +59,16 @@ export default function MinhaContaPage() {
     }
   }, [user, reset]);
 
+  const {
+    register: registerPwd,
+    handleSubmit: handleSubmitPwd,
+    reset: resetPwd,
+    formState: { errors: errorsPwd, isSubmitting: isSubmittingPwd },
+  } = useForm<PasswordFormData>({
+    resolver: zodResolver(passwordSchema),
+    defaultValues: { currentPassword: '', newPassword: '', confirmNewPassword: '' },
+  });
+
   const onSubmit = async (data: FormData) => {
     try {
       const updated = await updateMe({
@@ -58,6 +81,19 @@ export default function MinhaContaPage() {
       toast.success('Dados atualizados com sucesso.');
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Erro ao atualizar dados');
+    }
+  };
+
+  const onSubmitPassword = async (data: PasswordFormData) => {
+    try {
+      await updatePassword({
+        currentPassword: data.currentPassword,
+        newPassword: data.newPassword,
+      });
+      resetPwd({ currentPassword: '', newPassword: '', confirmNewPassword: '' });
+      toast.success('Senha atualizada com sucesso.');
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao atualizar senha');
     }
   };
 
@@ -115,6 +151,60 @@ export default function MinhaContaPage() {
             <div className="flex gap-2">
               <Button type="submit" disabled={isSubmitting || !isDirty}>
                 {isSubmitting ? 'Salvando...' : 'Salvar alterações'}
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Alterar senha</CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Informe a senha atual para definir uma nova.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmitPwd(onSubmitPassword)} className="space-y-4">
+            <div className="space-y-1">
+              <Label>Senha atual</Label>
+              <PasswordInput
+                placeholder="Sua senha atual"
+                autoComplete="current-password"
+                {...registerPwd('currentPassword')}
+              />
+              {errorsPwd.currentPassword && (
+                <p className="text-xs text-destructive">{errorsPwd.currentPassword.message}</p>
+              )}
+            </div>
+
+            <div className="space-y-1">
+              <Label>Nova senha</Label>
+              <PasswordInput
+                placeholder="Mínimo 8 caracteres"
+                autoComplete="new-password"
+                {...registerPwd('newPassword')}
+              />
+              {errorsPwd.newPassword && (
+                <p className="text-xs text-destructive">{errorsPwd.newPassword.message}</p>
+              )}
+            </div>
+
+            <div className="space-y-1">
+              <Label>Confirmar nova senha</Label>
+              <PasswordInput
+                placeholder="Repita a nova senha"
+                autoComplete="new-password"
+                {...registerPwd('confirmNewPassword')}
+              />
+              {errorsPwd.confirmNewPassword && (
+                <p className="text-xs text-destructive">{errorsPwd.confirmNewPassword.message}</p>
+              )}
+            </div>
+
+            <div className="flex gap-2">
+              <Button type="submit" disabled={isSubmittingPwd}>
+                {isSubmittingPwd ? 'Salvando...' : 'Atualizar senha'}
               </Button>
             </div>
           </form>

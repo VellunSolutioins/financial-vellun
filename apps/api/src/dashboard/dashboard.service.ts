@@ -1,5 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  startOfDayUtc,
+  endOfDayUtc,
+  startOfMonthUtc,
+  endOfMonthUtc,
+} from '../common/date.util';
 
 @Injectable()
 export class DashboardService {
@@ -7,8 +13,12 @@ export class DashboardService {
 
   async getSummary(userId: string, periodStart?: string, periodEnd?: string) {
     const now = new Date();
-    const start = periodStart ? new Date(periodStart) : new Date(now.getFullYear(), now.getMonth(), 1);
-    const end = periodEnd ? new Date(periodEnd) : new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    const start = periodStart
+      ? startOfDayUtc(periodStart)
+      : startOfMonthUtc(now.getFullYear(), now.getMonth());
+    const end = periodEnd
+      ? endOfDayUtc(periodEnd)
+      : endOfMonthUtc(now.getFullYear(), now.getMonth());
 
     const [accounts, incomeAgg, expenseAgg, expensesByCategory, recentTransactions] =
       await Promise.all([
@@ -70,8 +80,12 @@ export class DashboardService {
 
   async getBusinessSummary(userId: string, periodStart?: string, periodEnd?: string) {
     const now = new Date();
-    const start = periodStart ? new Date(periodStart) : new Date(now.getFullYear(), now.getMonth(), 1);
-    const end = periodEnd ? new Date(periodEnd) : new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    const start = periodStart
+      ? startOfDayUtc(periodStart)
+      : startOfMonthUtc(now.getFullYear(), now.getMonth());
+    const end = periodEnd
+      ? endOfDayUtc(periodEnd)
+      : endOfMonthUtc(now.getFullYear(), now.getMonth());
 
     const [accounts, confirmedInPeriod, expensesByCategory, accountsReceivable, accountsPayable] =
       await Promise.all([
@@ -223,9 +237,11 @@ export class DashboardService {
     const now = new Date();
 
     for (let i = months - 1; i >= 0; i--) {
-      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const start = new Date(date.getFullYear(), date.getMonth(), 1);
-      const end = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+      const ref = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const year = ref.getFullYear();
+      const monthIndex = ref.getMonth();
+      const start = startOfMonthUtc(year, monthIndex);
+      const end = endOfMonthUtc(year, monthIndex);
 
       const [inc, exp] = await Promise.all([
         this.prisma.transaction.aggregate({
@@ -239,7 +255,7 @@ export class DashboardService {
       ]);
 
       result.push({
-        month: date.toISOString().slice(0, 7),
+        month: `${year}-${String(monthIndex + 1).padStart(2, '0')}`,
         income: Number(inc._sum.amount ?? 0),
         expense: Number(exp._sum.amount ?? 0),
       });

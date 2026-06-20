@@ -10,6 +10,7 @@ import { AccountsService } from '../accounts/accounts.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { ListTransactionsDto } from './dto/list-transactions.dto';
+import { parseDateOnly, startOfDayUtc, endOfDayUtc } from '../common/date.util';
 
 @Injectable()
 export class TransactionsService {
@@ -36,8 +37,8 @@ export class TransactionsService {
       ...(periodStart || periodEnd
         ? {
             transactionDate: {
-              ...(periodStart && { gte: new Date(periodStart) }),
-              ...(periodEnd && { lte: new Date(periodEnd) }),
+              ...(periodStart && { gte: startOfDayUtc(periodStart) }),
+              ...(periodEnd && { lte: endOfDayUtc(periodEnd) }),
             },
           }
         : {}),
@@ -94,7 +95,7 @@ export class TransactionsService {
         type: dto.type,
         amount: dto.amount,
         description: dto.description,
-        transactionDate: new Date(dto.transactionDate),
+        transactionDate: parseDateOnly(dto.transactionDate),
         status: dto.status ?? 'confirmed',
         source: 'manual',
       },
@@ -111,18 +112,26 @@ export class TransactionsService {
   async update(userId: string, id: string, dto: UpdateTransactionDto) {
     const existing = await this.findOne(userId, id);
 
-    if (dto.categoryId) await this.validateOwnership(userId, undefined, dto.categoryId);
+    if (dto.accountId !== undefined || dto.categoryId !== undefined) {
+      await this.validateOwnership(userId, dto.accountId, dto.categoryId);
+    }
+
+    const categoryId = dto.categoryId === '' ? null : dto.categoryId;
 
     const transaction = await this.prisma.transaction.update({
       where: { id },
       data: {
         ...dto,
-        transactionDate: dto.transactionDate ? new Date(dto.transactionDate) : undefined,
+        categoryId,
+        transactionDate: dto.transactionDate ? parseDateOnly(dto.transactionDate) : undefined,
       },
       include: { category: true, account: true },
     });
 
     await this.accountsService.recalculateBalance(existing.accountId);
+    if (transaction.accountId !== existing.accountId) {
+      await this.accountsService.recalculateBalance(transaction.accountId);
+    }
 
     return transaction;
   }
@@ -159,7 +168,8 @@ export class TransactionsService {
   }
 
   private async validateOwnership(userId: string, accountId?: string, categoryId?: string) {
-    if (accountId) {
+    if (accountId !== undefined) {
+      if (!accountId) throw new BadRequestException('Conta inválida');
       const account = await this.prisma.account.findUnique({ where: { id: accountId } });
       if (!account || account.userId !== userId) {
         throw new BadRequestException('Conta inválida');

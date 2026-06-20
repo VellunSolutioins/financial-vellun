@@ -11,6 +11,7 @@ import { useTransactions, type Transaction } from '@/hooks/useTransactions';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
+import { formatDateBR } from '@/lib/utils';
 
 function formatCurrency(v: number) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
@@ -145,7 +146,7 @@ function TransacoesContent() {
               {data.map((tx) => (
                 <tr key={tx.id} className="border-b last:border-0 hover:bg-gray-50">
                   <td className="p-3 text-muted-foreground">
-                    {new Date(tx.transactionDate).toLocaleDateString('pt-BR')}
+                    {formatDateBR(tx.transactionDate)}
                   </td>
                   <td className="p-3 font-medium">{tx.description}</td>
                   <td className="p-3 text-muted-foreground">{tx.category?.name ?? '—'}</td>

@@ -24,6 +24,11 @@ export class UpdateTransactionDto {
   @ApiProperty({ required: false })
   @IsOptional()
   @IsString()
+  accountId?: string;
+
+  @ApiProperty({ required: false })
+  @IsOptional()
+  @IsString()
   categoryId?: string;
 
   @ApiProperty({ required: false })

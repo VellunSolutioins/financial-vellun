@@ -1,8 +1,16 @@
-import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
+import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateIndividualProfileDto } from './dto/create-individual-profile.dto';
 import { CreateBusinessProfileDto } from './dto/create-business-profile.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdatePasswordDto } from './dto/update-password.dto';
 import { normalizePhone } from '../common/phone.util';
 
 @Injectable()
@@ -60,6 +68,19 @@ export class UsersService {
     return this.prisma.businessProfile.create({
       data: { userId, companyName: dto.companyName, tradeName: dto.tradeName, cnpj: dto.cnpj },
     });
+  }
+
+  async updatePassword(userId: string, dto: UpdatePasswordDto) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Usuário não encontrado');
+
+    const valid = await bcrypt.compare(dto.currentPassword, user.passwordHash);
+    if (!valid) throw new UnauthorizedException('Senha atual incorreta');
+
+    const passwordHash = await bcrypt.hash(dto.newPassword, 12);
+    await this.prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+
+    return { message: 'Senha atualizada com sucesso' };
   }
 
   async updateUser(userId: string, dto: UpdateUserDto) {

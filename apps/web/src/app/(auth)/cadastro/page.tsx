@@ -6,6 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { PasswordInput } from '@/components/ui/password-input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -131,14 +132,22 @@ export default function CadastroPage() {
           </div>
           <div className="space-y-1">
             <Label>Senha</Label>
-            <Input type="password" placeholder="Mínimo 8 caracteres" {...register('password')} />
+            <PasswordInput
+              placeholder="Mínimo 8 caracteres"
+              autoComplete="new-password"
+              {...register('password')}
+            />
             {errors.password && (
               <p className="text-xs text-destructive">{errors.password.message}</p>
             )}
           </div>
           <div className="space-y-1">
             <Label>Confirmar senha</Label>
-            <Input type="password" placeholder="Repita a senha" {...register('confirmPassword')} />
+            <PasswordInput
+              placeholder="Repita a senha"
+              autoComplete="new-password"
+              {...register('confirmPassword')}
+            />
             {errors.confirmPassword && (
               <p className="text-xs text-destructive">{errors.confirmPassword.message}</p>
             )}

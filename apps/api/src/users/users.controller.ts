@@ -6,6 +6,7 @@ import { UsersService } from './users.service';
 import { CreateIndividualProfileDto } from './dto/create-individual-profile.dto';
 import { CreateBusinessProfileDto } from './dto/create-business-profile.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdatePasswordDto } from './dto/update-password.dto';
 
 @ApiCookieAuth()
 @ApiTags('users')
@@ -36,5 +37,11 @@ export class UsersController {
   updateUser(@Req() req: Request, @Body() dto: UpdateUserDto) {
     const user = req.user as any;
     return this.usersService.updateUser(user.id, dto);
+  }
+
+  @Patch('me/password')
+  updatePassword(@Req() req: Request, @Body() dto: UpdatePasswordDto) {
+    const user = req.user as any;
+    return this.usersService.updatePassword(user.id, dto);
   }
 }

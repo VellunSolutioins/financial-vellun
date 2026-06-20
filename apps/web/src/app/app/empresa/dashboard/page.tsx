@@ -13,6 +13,7 @@ import {
 } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { apiClient } from '@/lib/api-client';
+import { formatDateBR } from '@/lib/utils';
 
 interface PendingTransaction {
   id: string;
@@ -120,12 +121,12 @@ export default function EmpresaDashboardPage() {
                     <XAxis
                       dataKey="date"
                       tick={{ fontSize: 12 }}
-                      tickFormatter={(d: string) => new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}
+                      tickFormatter={(d: string) => formatDateBR(d, { day: '2-digit', month: '2-digit' })}
                     />
                     <YAxis tick={{ fontSize: 12 }} />
                     <Tooltip
                       formatter={(v) => (typeof v === 'number' ? formatCurrency(v) : String(v))}
-                      labelFormatter={(d) => new Date(d).toLocaleDateString('pt-BR')}
+                      labelFormatter={(d) => formatDateBR(d as string)}
                     />
                     <Legend />
                     <Area type="monotone" dataKey="income" name="Receitas" stroke="#10b981" fill="#10b981" fillOpacity={0.2} />
@@ -218,7 +219,7 @@ function PendingWidget({
                 <div>
                   <p className="text-sm font-medium">{t.description}</p>
                   <p className="text-xs text-muted-foreground">
-                    {new Date(t.transactionDate).toLocaleDateString('pt-BR')}
+                    {formatDateBR(t.transactionDate)}
                     {t.category ? ` · ${t.category.name}` : ''}
                   </p>
                 </div>

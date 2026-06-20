@@ -5,6 +5,7 @@ import { AccountsService } from '../accounts/accounts.service';
 import { CreateAiTransactionDto } from './dto/create-ai-transaction.dto';
 import { AiEventDto } from './dto/ai-event.dto';
 import { normalizePhone } from '../common/phone.util';
+import { parseDateOnly } from '../common/date.util';
 
 @Injectable()
 export class InternalService {
@@ -118,7 +119,7 @@ export class InternalService {
         type: dto.type,
         amount: dto.amount,
         description: dto.description,
-        transactionDate: new Date(dto.transactionDate),
+        transactionDate: parseDateOnly(dto.transactionDate),
         status: dto.status ?? 'confirmed',
         source: dto.source ?? 'ai',
         rawInput: dto.rawInput,
