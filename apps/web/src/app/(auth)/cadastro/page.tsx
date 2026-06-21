@@ -14,12 +14,13 @@ import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/components/ui/toast';
 import { register as registerUser, login } from '@/lib/auth';
 import { ApiClientError } from '@/lib/api-client';
-import { CPF_REGEX, CNPJ_REGEX, maskCpf, maskCnpj } from '@/lib/masks';
+import { CPF_REGEX, CNPJ_REGEX, PHONE_REGEX, maskCpf, maskCnpj, maskPhone } from '@/lib/masks';
 
 const schema = z
   .object({
     name: z.string().min(2, 'Nome deve ter ao menos 2 caracteres'),
     email: z.string().email('Email inválido'),
+    phone: z.string().regex(PHONE_REGEX, 'Celular inválido ((00) 00000-0000)'),
     password: z.string().min(8, 'Senha deve ter ao menos 8 caracteres'),
     confirmPassword: z.string(),
     profileType: z.enum(['individual', 'business'], { required_error: 'Selecione um tipo' }),
@@ -87,6 +88,7 @@ export default function CadastroPage() {
       await registerUser({
         name: data.name,
         email: data.email,
+        phone: data.phone,
         password: data.password,
         profileType: data.profileType,
         ...(data.profileType === 'individual'
@@ -129,6 +131,20 @@ export default function CadastroPage() {
               {...register('email', { onBlur: () => void trigger('email') })}
             />
             {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
+          </div>
+          <div className="space-y-1">
+            <Label>Celular com WhatsApp</Label>
+            <Input
+              inputMode="tel"
+              placeholder="(19) 99999-9999"
+              {...register('phone')}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                const masked = maskPhone(e.target.value);
+                e.target.value = masked;
+                setValue('phone', masked, { shouldDirty: true });
+              }}
+            />
+            {errors.phone && <p className="text-xs text-destructive">{errors.phone.message}</p>}
           </div>
           <div className="space-y-1">
             <Label>Senha</Label>

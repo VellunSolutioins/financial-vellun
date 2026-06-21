@@ -14,6 +14,7 @@ export interface User {
 export async function register(data: {
   name: string;
   email: string;
+  phone: string;
   password: string;
   profileType: 'individual' | 'business';
   cpf?: string;

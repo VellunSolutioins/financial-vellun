@@ -27,9 +27,15 @@ describe('AuthService', () => {
       account: {
         create: jest.fn().mockResolvedValue({ id: 'account-1' }),
       },
+      whatsappContact: {
+        upsert: jest.fn().mockResolvedValue({ id: 'whatsapp-1' }),
+      },
     };
     const prisma = {
       user: {
+        findUnique: jest.fn().mockResolvedValue(null),
+      },
+      whatsappContact: {
         findUnique: jest.fn().mockResolvedValue(null),
       },
       individualProfile: {
@@ -46,6 +52,7 @@ describe('AuthService', () => {
     const result = await service.register({
       name: 'Joao Grilo',
       email: 'joao@example.com',
+      phone: '(19) 99999-9999',
       password: 'password123',
       profileType: ProfileType.individual,
       cpf: '123.456.789-09',
@@ -61,6 +68,7 @@ describe('AuthService', () => {
       data: expect.objectContaining({
         name: 'Joao Grilo',
         email: 'joao@example.com',
+        phone: '(19) 99999-9999',
         profileType: ProfileType.individual,
       }),
     });
@@ -79,6 +87,20 @@ describe('AuthService', () => {
         initialBalance: 0,
         currentBalance: 0,
         currency: 'BRL',
+      },
+    });
+    expect(tx.whatsappContact.upsert).toHaveBeenCalledWith({
+      where: { phoneNumber: '+5519999999999' },
+      update: {
+        userId: 'user-1',
+        provider: 'cloud-api',
+        isVerified: true,
+      },
+      create: {
+        userId: 'user-1',
+        phoneNumber: '+5519999999999',
+        provider: 'cloud-api',
+        isVerified: true,
       },
     });
     expect(result).not.toHaveProperty('passwordHash');
@@ -109,9 +131,15 @@ describe('AuthService', () => {
       account: {
         create: jest.fn().mockResolvedValue({ id: 'account-2' }),
       },
+      whatsappContact: {
+        upsert: jest.fn().mockResolvedValue({ id: 'whatsapp-2' }),
+      },
     };
     const prisma = {
       user: {
+        findUnique: jest.fn().mockResolvedValue(null),
+      },
+      whatsappContact: {
         findUnique: jest.fn().mockResolvedValue(null),
       },
       individualProfile: {
@@ -128,6 +156,7 @@ describe('AuthService', () => {
     const result = await service.register({
       name: 'Padaria do Joao',
       email: 'contato@padaria.com',
+      phone: '(19) 98888-7777',
       password: 'password123',
       profileType: ProfileType.business,
       companyName: 'Padaria do Joao LTDA',
@@ -155,6 +184,20 @@ describe('AuthService', () => {
         initialBalance: 0,
         currentBalance: 0,
         currency: 'BRL',
+      },
+    });
+    expect(tx.whatsappContact.upsert).toHaveBeenCalledWith({
+      where: { phoneNumber: '+5519988887777' },
+      update: {
+        userId: 'user-2',
+        provider: 'cloud-api',
+        isVerified: true,
+      },
+      create: {
+        userId: 'user-2',
+        phoneNumber: '+5519988887777',
+        provider: 'cloud-api',
+        isVerified: true,
       },
     });
     expect(result).not.toHaveProperty('passwordHash');

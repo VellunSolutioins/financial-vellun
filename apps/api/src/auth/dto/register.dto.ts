@@ -11,6 +11,13 @@ export class RegisterDto {
   @IsEmail()
   email!: string;
 
+  @ApiProperty({ example: '(19) 99999-9999' })
+  @IsString()
+  @Matches(/^\(\d{2}\) \d{4,5}-\d{4}$/, {
+    message: 'Celular inválido (formato: (00) 00000-0000)',
+  })
+  phone!: string;
+
   @ApiProperty()
   @IsString()
   @MinLength(8)

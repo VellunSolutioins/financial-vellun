@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { AccountType, ProfileType } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
+import { normalizePhone } from '../common/phone.util';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 
@@ -23,6 +24,10 @@ export class AuthService {
     const exists = await this.prisma.user.findUnique({ where: { email: dto.email } });
     if (exists) throw new ConflictException('Email já cadastrado');
 
+    const phoneNumber = normalizePhone(dto.phone);
+    const phoneExists = await this.prisma.whatsappContact.findUnique({ where: { phoneNumber } });
+    if (phoneExists?.userId) throw new ConflictException('Celular já vinculado a outra conta');
+
     if (dto.profileType === ProfileType.individual) {
       const cpfExists = await this.prisma.individualProfile.findUnique({ where: { cpf: dto.cpf } });
       if (cpfExists) throw new ConflictException('CPF já cadastrado');
@@ -37,6 +42,7 @@ export class AuthService {
         data: {
           name: dto.name,
           email: dto.email,
+          phone: dto.phone,
           passwordHash,
           profileType: dto.profileType,
         },
@@ -69,6 +75,21 @@ export class AuthService {
           initialBalance: 0,
           currentBalance: 0,
           currency: 'BRL',
+        },
+      });
+
+      await tx.whatsappContact.upsert({
+        where: { phoneNumber },
+        update: {
+          userId: createdUser.id,
+          provider: 'cloud-api',
+          isVerified: true,
+        },
+        create: {
+          userId: createdUser.id,
+          phoneNumber,
+          provider: 'cloud-api',
+          isVerified: true,
         },
       });
 
