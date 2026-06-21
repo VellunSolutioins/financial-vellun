@@ -12,12 +12,40 @@ import { AppModule } from './app.module';
 // o horário de Brasília.
 process.env.TZ = process.env.TZ ?? 'America/Sao_Paulo';
 
+const allowedOrigins = [
+  process.env.WEB_URL,
+  'http://localhost:3000',
+  'https://financial-vellun-web.vercel.app',
+]
+  .filter(Boolean)
+  .map((origin) => origin!.replace(/\/$/, ''));
+
+function isAllowedOrigin(origin?: string): boolean {
+  if (!origin) return true;
+
+  const normalizedOrigin = origin.replace(/\/$/, '');
+  return (
+    allowedOrigins.includes(normalizedOrigin) ||
+    /^https:\/\/financial-vellun-web(?:-[a-z0-9-]+)?\.vercel\.app$/.test(normalizedOrigin)
+  );
+}
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   app.enableCors({
-    origin: process.env.WEB_URL ?? 'http://localhost:3000',
+    origin(origin, callback) {
+      if (isAllowedOrigin(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error(`Origin not allowed by CORS: ${origin}`));
+    },
     credentials: true,
+    methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    optionsSuccessStatus: 204,
   });
 
   app.use(cookieParser());
