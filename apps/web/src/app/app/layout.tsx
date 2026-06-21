@@ -1,5 +1,5 @@
 'use client';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
@@ -28,6 +28,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, loading, logout } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Fecha o menu lateral ao navegar (relevante apenas em mobile)
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [pathname]);
 
   useEffect(() => {
     if (loading) return;
@@ -55,14 +61,58 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const items = navItems[user.profileType] ?? navItems.individual;
 
   return (
-    <div className="min-h-screen flex">
+    <div className="min-h-screen lg:flex">
+      {/* Top bar (mobile) */}
+      <header className="lg:hidden sticky top-0 z-30 flex h-14 items-center justify-between border-b bg-white px-4">
+        <button
+          type="button"
+          aria-label="Abrir menu"
+          onClick={() => setSidebarOpen(true)}
+          className="-ml-2 inline-flex h-10 w-10 items-center justify-center rounded-md text-gray-700 hover:bg-gray-100"
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <line x1="3" y1="12" x2="21" y2="12" />
+            <line x1="3" y1="18" x2="21" y2="18" />
+          </svg>
+        </button>
+        <span className="font-bold text-primary">Financial Vellun</span>
+        <span className="w-10" aria-hidden />
+      </header>
+
+      {/* Backdrop (mobile) */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+          aria-hidden
+        />
+      )}
+
       {/* Sidebar */}
-      <aside className="w-64 border-r bg-white flex flex-col">
-        <div className="p-6 border-b">
-          <span className="font-bold text-primary">Financial Vellun</span>
-          <p className="text-xs text-muted-foreground mt-1 truncate">{user.name}</p>
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 flex w-64 transform flex-col border-r bg-white transition-transform duration-200 ease-in-out lg:static lg:z-auto lg:translate-x-0 ${
+          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        <div className="flex items-center justify-between gap-2 border-b p-6">
+          <div className="min-w-0">
+            <span className="font-bold text-primary">Financial Vellun</span>
+            <p className="text-xs text-muted-foreground mt-1 truncate">{user.name}</p>
+          </div>
+          <button
+            type="button"
+            aria-label="Fechar menu"
+            onClick={() => setSidebarOpen(false)}
+            className="-mr-2 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-gray-700 hover:bg-gray-100 lg:hidden"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
         </div>
-        <nav className="flex-1 p-4 space-y-1">
+        <nav className="flex-1 space-y-1 overflow-y-auto p-4">
           {items.map((item) => (
             <Link
               key={item.href}
@@ -95,8 +145,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto bg-gray-50">
-        <div className="max-w-6xl mx-auto p-8">{children}</div>
+      <main className="flex-1 overflow-auto bg-gray-50 min-w-0">
+        <div className="mx-auto max-w-6xl p-4 sm:p-6 lg:p-8">{children}</div>
       </main>
     </div>
   );

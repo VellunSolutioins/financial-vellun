@@ -129,7 +129,7 @@ export function CategoriesView({ showCostCenter = false }: Props) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold">Categorias</h1>
         <Button onClick={openNew}>+ Nova categoria</Button>
       </div>
@@ -141,8 +141,8 @@ export function CategoriesView({ showCostCenter = false }: Props) {
           {custom.length > 0 && (
             <div>
               <h2 className="text-sm font-semibold text-muted-foreground mb-3">Personalizadas</h2>
-              <div className="bg-white rounded-lg border overflow-hidden">
-                <table className="w-full text-sm">
+              <div className="bg-white rounded-lg border overflow-x-auto">
+                <table className="w-full min-w-[480px] text-sm">
                   <thead className="bg-gray-50 border-b">
                     <tr>
                       <th className="text-left p-3 font-medium text-muted-foreground">Nome</th>
@@ -192,8 +192,8 @@ export function CategoriesView({ showCostCenter = false }: Props) {
             <h2 className="text-sm font-semibold text-muted-foreground mb-3">
               Padrão ({defaults.length})
             </h2>
-            <div className="bg-white rounded-lg border overflow-hidden">
-              <table className="w-full text-sm">
+            <div className="bg-white rounded-lg border overflow-x-auto">
+              <table className="w-full min-w-[480px] text-sm">
                 <thead className="bg-gray-50 border-b">
                   <tr>
                     <th className="text-left p-3 font-medium text-muted-foreground">Nome</th>

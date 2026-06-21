@@ -144,13 +144,13 @@ export function ContactsView({ type, title, singular }: Props) {
         className="max-w-sm"
       />
 
-      <div className="bg-white rounded-lg border overflow-hidden">
+      <div className="bg-white rounded-lg border overflow-x-auto">
         {loading ? (
           <div className="p-8 text-center text-muted-foreground">Carregando...</div>
         ) : contacts.length === 0 ? (
           <div className="p-8 text-center text-muted-foreground">Nenhum {singular} cadastrado.</div>
         ) : (
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[640px] text-sm">
             <thead className="bg-gray-50 border-b">
               <tr>
                 <th className="text-left p-3 font-medium text-muted-foreground">Nome</th>

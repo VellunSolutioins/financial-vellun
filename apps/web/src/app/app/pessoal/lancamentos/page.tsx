@@ -40,7 +40,7 @@ function TransacoesContent() {
 
   const filters = {
     page: Number(searchParams.get('page') ?? 1),
-    limit: 20,
+    limit: 10,
     type: searchParams.get('type') ?? undefined,
     status: searchParams.get('status') ?? undefined,
     source: searchParams.get('source') ?? undefined,
@@ -91,7 +91,7 @@ function TransacoesContent() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold">Lançamentos</h1>
         <Button onClick={openNew}>+ Novo lançamento</Button>
       </div>
@@ -123,13 +123,13 @@ function TransacoesContent() {
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-lg border overflow-hidden">
+      <div className="bg-white rounded-lg border overflow-x-auto">
         {loading ? (
           <div className="p-8 text-center text-muted-foreground">Carregando...</div>
         ) : data.length === 0 ? (
           <div className="p-8 text-center text-muted-foreground">Nenhum lançamento encontrado.</div>
         ) : (
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[720px] text-sm">
             <thead className="bg-gray-50 border-b">
               <tr>
                 <th className="text-left p-3 font-medium text-muted-foreground">Data</th>

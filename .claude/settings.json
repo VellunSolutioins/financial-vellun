@@ -61,7 +61,8 @@
       "PowerShell($ok=$false; for\\($i=0;$i -lt 20;$i++\\){ try { $r=Invoke-WebRequest -Uri \"http://localhost:3001/api\" -UseBasicParsing -TimeoutSec 2; $ok=$true; break } catch { if\\($_.Exception.Response.StatusCode.value__\\){ $ok=$true; break } ; Start-Sleep -Seconds 2 } }; if\\($ok\\){\"API responding on 3001\"}else{\"API not responding yet\"})",
       "Bash(pnpm api:dev)",
       "PowerShell($ok=$false; for\\($i=0;$i -lt 30;$i++\\){ try { Invoke-WebRequest -Uri \"http://localhost:3001/api/docs\" -UseBasicParsing -TimeoutSec 2 | Out-Null; $ok=$true; break } catch { if\\($_.Exception.Response.StatusCode.value__\\){ $ok=$true; break }; Start-Sleep -Seconds 2 } }; if\\($ok\\){\"API up on 3001\"}else{\"still down\"})",
-      "Read(//c/Users/Bruno Faboci/OneDrive/Documentos/projetos/floriu/Floriu/**)"
+      "Read(//c/Users/Bruno Faboci/OneDrive/Documentos/projetos/floriu/Floriu/**)",
+      "PowerShell(pnpm --filter @financial-vellun/web exec tsc --noEmit 2>&1)"
     ]
   }
 }
