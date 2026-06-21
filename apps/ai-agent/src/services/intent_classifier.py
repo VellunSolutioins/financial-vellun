@@ -118,6 +118,13 @@ class IntentClassifier:
                 intent = await self._provider.extract_intent(message, context)
                 metrics.incr("llm_success")
                 metrics.observe_ms("llm_latency_ms", (time.monotonic() - started) * 1000)
+                if self._should_prefer_rule_transaction(message, intent):
+                    logger.info(
+                        "LLM classificou como %s, mas a mensagem parece novo lançamento; "
+                        "usando regras",
+                        intent.intent,
+                    )
+                    return self._classify_with_rules(message, context)
                 return self._finalize(intent)
             except Exception:  # noqa: BLE001 — falha do LLM aciona o fallback
                 metrics.incr("llm_fallback")
@@ -255,6 +262,14 @@ class IntentClassifier:
             )
 
         return intent
+
+    def _should_prefer_rule_transaction(self, message: str, intent: FinancialIntent) -> bool:
+        text = message.lower().strip()
+        if intent.intent not in (IntentType.cancel_last, IntentType.correct_last):
+            return False
+        if self._has_any(text, CANCEL_KEYWORDS + CORRECT_KEYWORDS):
+            return False
+        return self._extract_amount(text) is not None and self._detect_type(text) is not None
 
     @staticmethod
     def _has_any(text: str, keywords: tuple[str, ...]) -> bool:
