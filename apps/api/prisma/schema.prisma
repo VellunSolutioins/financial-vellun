@@ -66,6 +66,45 @@ enum AiExtractionStatus {
   rejected
 }
 
+// ── Billing ─────────────────────────────────────────────────────────────────
+
+enum SubscriptionStatus {
+  pending
+  trialing
+  active
+  past_due
+  canceled
+  unpaid
+  expired
+}
+
+enum PaymentStatus {
+  pending
+  processing
+  paid
+  failed
+  refunded
+  partially_refunded
+  chargeback
+  canceled
+}
+
+enum BillingInterval {
+  monthly
+  annual
+}
+
+enum PaymentMethodType {
+  credit_card
+}
+
+enum WebhookEventStatus {
+  received
+  processing
+  processed
+  failed
+}
+
 // ── Core ──────────────────────────────────────────────────────────────────────
 
 model User {
@@ -87,6 +126,8 @@ model User {
   whatsappContacts        WhatsappContact[]
   aiConversations         AiConversation[]
   aiExtractedTransactions AiExtractedTransaction[]
+  subscriptions           Subscription[]
+  payments                Payment[]
 
   @@map("users")
 }
@@ -253,7 +294,7 @@ model AiMessage {
   processedAt       DateTime?          @map("processed_at")
   createdAt         DateTime           @default(now()) @map("created_at")
 
-  conversation            AiConversation          @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversation            AiConversation           @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   aiExtractedTransactions AiExtractedTransaction[]
 
   @@index([conversationId, createdAt])
@@ -277,4 +318,108 @@ model AiExtractedTransaction {
   sourceMessage AiMessage?   @relation(fields: [sourceMessageId], references: [id], onDelete: SetNull)
 
   @@map("ai_extracted_transactions")
+}
+
+// ── Billing ─────────────────────────────────────────────────────────────────
+
+model Plan {
+  id          String          @id @default(uuid())
+  code        String          @unique
+  name        String
+  description String?
+  price       Decimal         @db.Decimal(15, 2)
+  currency    String          @default("BRL")
+  interval    BillingInterval
+  isActive    Boolean         @default(true) @map("is_active")
+  features    Json?
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model Subscription {
+  id                     String             @id @default(uuid())
+  userId                 String             @map("user_id")
+  planId                 String             @map("plan_id")
+  providerCustomerId     String?            @map("provider_customer_id")
+  providerSubscriptionId String?            @unique @map("provider_subscription_id")
+  status                 SubscriptionStatus @default(pending)
+  currentPeriodStart     DateTime?          @map("current_period_start")
+  currentPeriodEnd       DateTime?          @map("current_period_end")
+  trialEndsAt            DateTime?          @map("trial_ends_at")
+  graceUntil             DateTime?          @map("grace_until")
+  cancelAtPeriodEnd      Boolean            @default(false) @map("cancel_at_period_end")
+  canceledAt             DateTime?          @map("canceled_at")
+  createdAt              DateTime           @default(now()) @map("created_at")
+  updatedAt              DateTime           @updatedAt @map("updated_at")
+
+  user     User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan     Plan                @relation(fields: [planId], references: [id])
+  payments Payment[]
+  audits   SubscriptionAudit[]
+
+  @@index([userId])
+  @@index([status])
+  @@map("subscriptions")
+}
+
+model Payment {
+  id                String            @id @default(uuid())
+  userId            String            @map("user_id")
+  subscriptionId    String?           @map("subscription_id")
+  providerPaymentId String?           @unique @map("provider_payment_id")
+  amount            Decimal           @db.Decimal(15, 2)
+  currency          String            @default("BRL")
+  status            PaymentStatus     @default(pending)
+  paymentMethodType PaymentMethodType @default(credit_card) @map("payment_method_type")
+  dueAt             DateTime?         @map("due_at")
+  paidAt            DateTime?         @map("paid_at")
+  failedAt          DateTime?         @map("failed_at")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([subscriptionId])
+  @@index([status])
+  @@map("payments")
+}
+
+model PaymentWebhookEvent {
+  id               String             @id @default(uuid())
+  providerEventId  String             @unique @map("provider_event_id")
+  eventType        String             @map("event_type")
+  status           WebhookEventStatus @default(received)
+  attempts         Int                @default(0)
+  receivedAt       DateTime           @default(now()) @map("received_at")
+  processedAt      DateTime?          @map("processed_at")
+  sanitizedPayload Json?              @map("sanitized_payload")
+  lastError        String?            @map("last_error")
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@map("payment_webhook_events")
+}
+
+model SubscriptionAudit {
+  id             String              @id @default(uuid())
+  subscriptionId String              @map("subscription_id")
+  previousStatus SubscriptionStatus? @map("previous_status")
+  newStatus      SubscriptionStatus? @map("new_status")
+  action         String
+  actor          String?
+  reason         String?
+  metadata       Json?
+  createdAt      DateTime            @default(now()) @map("created_at")
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId])
+  @@map("subscription_audits")
 }
