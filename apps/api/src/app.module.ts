@@ -12,6 +12,7 @@ import { ContactsModule } from './contacts/contacts.module';
 import { TransactionsModule } from './transactions/transactions.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { InternalModule } from './internal/internal.module';
+import { BillingModule } from './billing/billing.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { InternalModule } from './internal/internal.module';
     TransactionsModule,
     DashboardModule,
     InternalModule,
+    BillingModule,
   ],
   controllers: [AppController],
   providers: [AppService],
