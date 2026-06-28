@@ -31,7 +31,9 @@ function isAllowedOrigin(origin?: string): boolean {
 }
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  // `rawBody: true` expõe `req.rawBody` (Buffer) para a validação de assinatura
+  // do webhook do PSP, sem desabilitar o body parser usado pelo ValidationPipe.
+  const app = await NestFactory.create(AppModule, { rawBody: true });
 
   app.enableCors({
     origin(origin, callback) {

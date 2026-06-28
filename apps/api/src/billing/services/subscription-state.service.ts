@@ -11,7 +11,7 @@ import { InvalidSubscriptionTransitionError } from '../billing.errors';
  * a `pending`/`active` para recontratação.
  */
 const ALLOWED_TRANSITIONS: Record<SubscriptionStatus, SubscriptionStatus[]> = {
-  pending: ['trialing', 'active', 'past_due', 'canceled', 'expired'],
+  pending: ['trialing', 'active', 'past_due', 'unpaid', 'canceled', 'expired'],
   trialing: ['trialing', 'active', 'past_due', 'unpaid', 'canceled', 'expired'],
   active: ['active', 'past_due', 'unpaid', 'canceled', 'expired'],
   past_due: ['past_due', 'active', 'unpaid', 'canceled', 'expired'],

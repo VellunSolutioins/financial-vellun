@@ -14,6 +14,7 @@ import {
   CheckoutSession,
   CreateCheckoutInput,
   CreateCustomerInput,
+  NormalizedWebhookEvent,
   PaymentMethodUpdateInput,
   PaymentMethodUpdateSession,
   PaymentProvider,
@@ -27,6 +28,7 @@ import {
 } from '../payment-provider.interface';
 import { AsaasHttpClient } from './asaas.http-client';
 import { mapPayment, mapSubscription, toAsaasCycle } from './asaas.mapper';
+import { normalizeAsaasWebhookEvent } from './asaas-webhook.mapper';
 import {
   AsaasCheckout,
   AsaasCustomer,
@@ -153,6 +155,10 @@ export class AsaasPaymentProvider implements PaymentProvider {
       eventType: event.event,
       payload: event,
     };
+  }
+
+  normalizeWebhookEvent(event: VerifiedPaymentEvent): NormalizedWebhookEvent {
+    return normalizeAsaasWebhookEvent(event.eventType, event.payload);
   }
 
   // ── Internos ──────────────────────────────────────────────────────────────

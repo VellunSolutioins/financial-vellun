@@ -92,6 +92,35 @@ export interface VerifiedPaymentEvent {
   payload: unknown;
 }
 
+/** Intenção de negócio normalizada a partir de um evento do PSP. */
+export type WebhookIntent =
+  | 'payment_succeeded'
+  | 'payment_failed'
+  | 'payment_refunded'
+  | 'payment_chargeback'
+  | 'subscription_canceled'
+  | 'ignore';
+
+export interface NormalizedWebhookPayment {
+  providerPaymentId: string;
+  status: string;
+  amount: string;
+  currency: string;
+  dueAt: Date | null;
+  paidAt: Date | null;
+}
+
+/**
+ * Evento do PSP traduzido para termos internos. O processador de webhook
+ * trabalha apenas com este formato — nunca com o payload bruto do PSP.
+ */
+export interface NormalizedWebhookEvent {
+  intent: WebhookIntent;
+  providerSubscriptionId: string | null;
+  providerCustomerId: string | null;
+  payment: NormalizedWebhookPayment | null;
+}
+
 /**
  * Único contrato que controllers, guards e serviços de domínio conhecem.
  * Implementado pelo adapter do PSP (Prompt 3).
@@ -107,4 +136,6 @@ export interface PaymentProvider {
   listSubscriptionPayments(providerSubscriptionId: string): Promise<ProviderPayment[]>;
   refundPayment(input: RefundPaymentInput): Promise<ProviderRefund>;
   verifyWebhook(input: VerifyWebhookInput): Promise<VerifiedPaymentEvent>;
+  /** Traduz um evento verificado do PSP para a intenção de negócio interna. */
+  normalizeWebhookEvent(event: VerifiedPaymentEvent): NormalizedWebhookEvent;
 }

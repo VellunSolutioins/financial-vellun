@@ -28,7 +28,7 @@ describe('SubscriptionStateService', () => {
       expect(service.canTransition('expired', 'past_due')).toBe(false);
       expect(service.canTransition('unpaid', 'trialing')).toBe(false);
       expect(service.canTransition('canceled', 'past_due')).toBe(false);
-      expect(service.canTransition('pending', 'unpaid')).toBe(false);
+      expect(service.canTransition('expired', 'unpaid')).toBe(false);
     });
 
     it('assertTransition lança em transição inválida', () => {
