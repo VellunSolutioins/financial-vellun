@@ -88,6 +88,58 @@ export class SubscriptionService {
   }
 
   /**
+   * Prepara a assinatura que será paga no checkout. Reusa a assinatura `pending`
+   * mais recente do usuário (atualizando plano/cliente) ou cria uma nova. Nunca
+   * ativa — a ativação só ocorre por webhook validado.
+   */
+  async prepareCheckoutSubscription(
+    userId: string,
+    planId: string,
+    providerCustomerId: string,
+  ) {
+    const existing = await this.prisma.subscription.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (existing && existing.status === SubscriptionStatus.pending) {
+      return this.prisma.subscription.update({
+        where: { id: existing.id },
+        data: { planId, providerCustomerId },
+      });
+    }
+
+    return this.createSubscription({
+      userId,
+      planId,
+      status: SubscriptionStatus.pending,
+      providerCustomerId,
+      actor: 'checkout',
+    });
+  }
+
+  /**
+   * Marca cancelamento ao fim do período já pago (`cancelAtPeriodEnd = true`),
+   * preservando o status atual e o acesso até `currentPeriodEnd`.
+   */
+  async scheduleCancellation(subscriptionId: string, actor: string) {
+    const updated = await this.prisma.subscription.update({
+      where: { id: subscriptionId },
+      data: { cancelAtPeriodEnd: true },
+    });
+
+    await this.audit.record({
+      subscriptionId,
+      action: 'cancel_scheduled',
+      previousStatus: updated.status,
+      newStatus: updated.status,
+      actor,
+    });
+
+    return updated;
+  }
+
+  /**
    * Aplica uma transição de estado validada e registra a auditoria. Rejeita
    * transições inválidas via {@link SubscriptionStateService.assertTransition}.
    */
