@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { BillingController } from './billing.controller';
 import { BillingService } from './billing.service';
 import { BillingWebhookController } from './billing-webhook.controller';
+import { ReconciliationService } from './reconciliation.service';
 import { AsaasPaymentProvider } from './providers/asaas/asaas-payment.provider';
 import { PAYMENT_PROVIDER } from './providers/payment-provider.interface';
 import { PaymentService } from './services/payment.service';
@@ -28,6 +29,7 @@ import { WebhookProcessor } from './webhook/webhook.processor';
     PaymentService,
     WebhookEventService,
     WebhookProcessor,
+    ReconciliationService,
     { provide: PAYMENT_PROVIDER, useClass: AsaasPaymentProvider },
   ],
   exports: [
