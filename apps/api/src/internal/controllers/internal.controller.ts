@@ -32,6 +32,11 @@ export class InternalController {
     return this.internalService.listAccounts(userId);
   }
 
+  @Get('users/:userId/subscription-access')
+  getSubscriptionAccess(@Param('userId') userId: string) {
+    return this.internalService.getSubscriptionAccess(userId);
+  }
+
   @Post('transactions/from-ai')
   createTransaction(@Body() dto: CreateAiTransactionDto) {
     return this.internalService.createTransactionFromAi(dto);

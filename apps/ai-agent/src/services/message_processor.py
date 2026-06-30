@@ -19,6 +19,7 @@ from .conversation_manager import conversation_manager
 from .intent_classifier import intent_classifier
 from .messenger import messenger
 from .metrics import metrics
+from .subscription_gate import subscription_gate
 from .transaction_creator import transaction_creator
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,14 @@ class MessageProcessor:
             return await self._respond(phone, NOT_LINKED_MESSAGE)
 
         user_id = contact["userId"]
+
+        # Bloqueia antes de qualquer operação paga (LLM/criação) se sem assinatura.
+        allowed, block_message = await subscription_gate.evaluate(user_id)
+        if not allowed:
+            metrics.incr("subscription_blocked")
+            logger.info("Acesso bloqueado por assinatura: %s", phone)
+            return await self._respond(phone, block_message or NOT_LINKED_MESSAGE)
+
         state = conversation_manager.get(phone)
 
         if state.awaiting_confirmation and state.pending_intent is not None:

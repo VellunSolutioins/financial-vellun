@@ -62,6 +62,15 @@ export class InternalService {
     });
   }
 
+  /**
+   * Reporta o direito de uso do usuário para o canal de IA decidir antes de
+   * qualquer operação paga. **Não lança** — apenas informa.
+   */
+  async getSubscriptionAccess(userId: string) {
+    const access = await this.subscriptionAccess.canUseProduct(userId);
+    return { canUseProduct: access.allowed, reason: access.reason, status: access.status };
+  }
+
   /** Lista as contas ativas do usuário. */
   async listAccounts(userId: string) {
     await this.assertCanUseProduct(userId);

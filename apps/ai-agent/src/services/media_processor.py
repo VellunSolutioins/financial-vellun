@@ -17,6 +17,7 @@ from .contact_service import contact_service
 from .intent_classifier import intent_classifier
 from .message_processor import NOT_LINKED_MESSAGE, message_processor
 from .metrics import metrics
+from .subscription_gate import subscription_gate
 from .transcription import transcription_service
 from .whatsapp_inbound import InboundMessage
 from .whatsapp_media import whatsapp_media
@@ -51,6 +52,12 @@ class MediaProcessor:
             return await message_processor._respond(phone, NOT_LINKED_MESSAGE)
 
         user_id = contact["userId"]
+
+        # Bloqueia antes de baixar mídia/transcrever/visão se sem assinatura.
+        allowed, block_message = await subscription_gate.evaluate(user_id)
+        if not allowed:
+            metrics.incr("subscription_blocked")
+            return await message_processor._respond(phone, block_message or NOT_LINKED_MESSAGE)
 
         if not item.media_id:
             return await message_processor._respond(phone, UNSUPPORTED_MEDIA_MESSAGE)

@@ -12,6 +12,17 @@ class _Recorder:
         self.sent: list[str] = []
 
 
+class _FakeGate:
+    """Gate de assinatura fake. ``allowed=False`` bloqueia com ``message``."""
+
+    def __init__(self, allowed=True, message=None):
+        self._allowed = allowed
+        self._message = message
+
+    async def evaluate(self, user_id):
+        return (self._allowed, self._message)
+
+
 def _patch(monkeypatch_targets: dict):
     originals = {name: getattr(mp, name) for name in monkeypatch_targets}
     for name, value in monkeypatch_targets.items():
@@ -57,6 +68,48 @@ def test_not_linked_contact_returns_guidance():
     assert reply == mp.NOT_LINKED_MESSAGE
     assert rec.sent == [mp.NOT_LINKED_MESSAGE]
     assert rec.calls == ["find_by_phone"]
+
+
+def test_blocks_without_subscription_before_llm():
+    rec = _Recorder()
+
+    class FakeContact:
+        async def find_by_phone(self, phone):
+            rec.calls.append("contact")
+            return {"userId": "u1", "profileType": "personal"}
+
+    class FakeClassifier:
+        async def classify(self, message, context):
+            rec.calls.append("classify")  # NÃO deve ser chamado
+            raise AssertionError("LLM não deve ser chamado sem assinatura")
+
+    class FakeMessenger:
+        async def send(self, phone, text):
+            rec.sent.append(text)
+
+    class FakeAudit:
+        async def log_message(self, *a, **k):
+            return "id"
+
+    originals = _patch(
+        {
+            "contact_service": FakeContact(),
+            "intent_classifier": FakeClassifier(),
+            "messenger": FakeMessenger(),
+            "audit_service": FakeAudit(),
+            "subscription_gate": _FakeGate(allowed=False, message="Regularize sua assinatura."),
+        }
+    )
+    try:
+        reply = asyncio.run(
+            mp.message_processor.process_buffered_message("+5511", "gastei 50", ["m1"])
+        )
+    finally:
+        _restore(originals)
+
+    assert reply == "Regularize sua assinatura."
+    assert "classify" not in rec.calls
+    assert rec.sent == ["Regularize sua assinatura."]
 
 
 def test_happy_path_calls_services_in_order():
@@ -112,6 +165,7 @@ def test_happy_path_calls_services_in_order():
             "audit_service": FakeAudit(),
             "messenger": FakeMessenger(),
             "needs_confirmation": fake_needs_confirmation,
+            "subscription_gate": _FakeGate(allowed=True),
         }
     )
 

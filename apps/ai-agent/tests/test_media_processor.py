@@ -15,6 +15,15 @@ class _FakeContact:
         return self._contact
 
 
+class _FakeGate:
+    def __init__(self, allowed=True, message=None):
+        self._allowed = allowed
+        self._message = message
+
+    async def evaluate(self, user_id):
+        return (self._allowed, self._message)
+
+
 class _FakeMedia:
     def __init__(self, result):
         self._result = result
@@ -94,7 +103,7 @@ def _restore(originals):
 
 
 def _run(contact, media, *, transcription=None, classifier=None, audit=None, processor=None,
-         item=None):
+         item=None, gate=None):
     processor = processor or _FakeProcessor()
     originals = _patch(
         contact_service=_FakeContact(contact),
@@ -103,6 +112,7 @@ def _run(contact, media, *, transcription=None, classifier=None, audit=None, pro
         intent_classifier=classifier or _FakeClassifier(),
         audit_service=audit or _FakeAudit(),
         message_processor=processor,
+        subscription_gate=gate or _FakeGate(allowed=True),
     )
     try:
         reply = asyncio.run(mpm.media_processor.process("+5511", item))
@@ -188,3 +198,21 @@ def test_not_linked_contact():
     item = InboundMessage(phone="+5511", kind="audio", media_id="m1")
     reply, proc = _run(contact=None, media=(b"x", "audio/ogg"), item=item)
     assert reply == mpm.NOT_LINKED_MESSAGE
+
+
+def test_blocks_without_subscription_before_media_processing():
+    item = InboundMessage(phone="+5511", kind="audio", media_id="m1")
+
+    class _BoomTranscription:
+        async def transcribe(self, content, mime):
+            raise AssertionError("STT não deve ser chamado sem assinatura")
+
+    reply, proc = _run(
+        contact={"userId": "u1"},
+        media=(b"audio", "audio/ogg"),
+        transcription=_BoomTranscription(),
+        item=item,
+        gate=_FakeGate(allowed=False, message="Regularize sua assinatura."),
+    )
+    assert reply == "Regularize sua assinatura."
+    assert proc.handle_calls == []
