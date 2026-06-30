@@ -4,6 +4,46 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { Button } from '@/components/ui/button';
+import type { SubscriptionAccess } from '@/lib/billing';
+
+const ASSINATURA_PATH = '/app/conta/assinatura';
+
+/** Aviso global de inadimplência/grace, ocultado na própria página de assinatura. */
+function SubscriptionBanner({
+  access,
+  pathname,
+}: {
+  access: SubscriptionAccess | null;
+  pathname: string;
+}) {
+  if (!access || pathname === ASSINATURA_PATH) return null;
+
+  // Liberado por grace (past_due): alerta amarelo.
+  if (access.allowed && access.reason === 'grace_period') {
+    return (
+      <div className="mb-4 rounded-md border border-yellow-300 bg-yellow-50 px-4 py-3 text-sm text-yellow-900">
+        Seu último pagamento não foi confirmado. Regularize para não perder o acesso.{' '}
+        <Link href={ASSINATURA_PATH} className="font-semibold underline">
+          Ver assinatura
+        </Link>
+      </div>
+    );
+  }
+
+  // Sem acesso: alerta vermelho.
+  if (!access.allowed) {
+    return (
+      <div className="mb-4 rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900">
+        Sua assinatura não está ativa. Contrate um plano para usar o produto.{' '}
+        <Link href={ASSINATURA_PATH} className="font-semibold underline">
+          Assinar agora
+        </Link>
+      </div>
+    );
+  }
+
+  return null;
+}
 
 const navItems = {
   individual: [
@@ -25,7 +65,7 @@ const navItems = {
 };
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const { user, loading, logout } = useAuth();
+  const { user, loading, logout, subscriptionAccess } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -138,6 +178,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           >
             Minha Conta
           </Link>
+          <Link
+            href="/app/conta/assinatura"
+            className={`block px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+              pathname === '/app/conta/assinatura'
+                ? 'bg-primary text-primary-foreground'
+                : 'text-gray-700 hover:bg-gray-100'
+            }`}
+          >
+            Assinatura
+          </Link>
           <Button variant="ghost" className="w-full justify-start text-sm" onClick={logout}>
             Sair
           </Button>
@@ -146,7 +196,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/* Main content */}
       <main className="flex-1 overflow-auto bg-gray-50 min-w-0">
-        <div className="mx-auto max-w-6xl p-4 sm:p-6 lg:p-8">{children}</div>
+        <div className="mx-auto max-w-6xl p-4 sm:p-6 lg:p-8">
+          <SubscriptionBanner access={subscriptionAccess} pathname={pathname} />
+          {children}
+        </div>
       </main>
     </div>
   );

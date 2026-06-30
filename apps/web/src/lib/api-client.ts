@@ -12,11 +12,14 @@ export class ApiClientError extends Error {
     public readonly statusCode: number,
     message: string,
     public readonly error: string,
+    public readonly code?: string,
   ) {
     super(message);
     this.name = 'ApiClientError';
   }
 }
+
+const BILLING_PATH = '/app/conta/assinatura';
 
 // Dedup: um único refresh em voo é compartilhado por requests concorrentes.
 let refreshPromise: Promise<boolean> | null = null;
@@ -55,8 +58,20 @@ async function request<T>(path: string, options?: RequestInit, retry = true): Pr
   }
 
   if (!res.ok) {
-    const err = (await res.json()) as ApiError;
-    throw new ApiClientError(err.statusCode, err.message, err.error);
+    const err = (await res.json()) as ApiError & { code?: string };
+
+    // Assinatura ausente: redireciona para a área de billing (a API é a fonte
+    // de verdade). Evita loop se já estivermos na própria página de assinatura.
+    if (
+      res.status === 403 &&
+      err.code === 'SUBSCRIPTION_REQUIRED' &&
+      typeof window !== 'undefined' &&
+      !window.location.pathname.startsWith(BILLING_PATH)
+    ) {
+      window.location.assign(`${BILLING_PATH}?status=required`);
+    }
+
+    throw new ApiClientError(err.statusCode, err.message, err.error, err.code);
   }
 
   return res.json() as Promise<T>;
