@@ -11,9 +11,12 @@ function context(user: unknown) {
   } as any;
 }
 
-function setup(allowWithout: boolean, allowed: boolean) {
+function setup(allowWithout: boolean, allowed: boolean, enforced = true) {
   const reflector = { getAllAndOverride: jest.fn().mockReturnValue(allowWithout) } as any;
-  const access = { canUseProduct: jest.fn().mockResolvedValue({ allowed }) } as any;
+  const access = {
+    canUseProduct: jest.fn().mockResolvedValue({ allowed }),
+    isEnforced: jest.fn().mockReturnValue(enforced),
+  } as any;
   return { guard: new ActiveSubscriptionGuard(reflector, access), access };
 }
 
@@ -32,6 +35,12 @@ describe('ActiveSubscriptionGuard', () => {
 
   it('libera rota marcada com @AllowWithoutSubscription sem consultar acesso', async () => {
     const { guard, access } = setup(true, false);
+    await expect(guard.canActivate(context({ id: 'u1' }))).resolves.toBe(true);
+    expect(access.canUseProduct).not.toHaveBeenCalled();
+  });
+
+  it('libera todos quando a obrigatoriedade está desligada (rollout)', async () => {
+    const { guard, access } = setup(false, false, false);
     await expect(guard.canActivate(context({ id: 'u1' }))).resolves.toBe(true);
     expect(access.canUseProduct).not.toHaveBeenCalled();
   });

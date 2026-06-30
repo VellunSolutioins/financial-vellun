@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { SubscriptionStatus } from '@prisma/client';
 
 import { PrismaService } from '../../prisma/prisma.service';
@@ -26,7 +27,19 @@ export interface SubscriptionAccess {
  */
 @Injectable()
 export class SubscriptionAccessService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly config: ConfigService,
+  ) {}
+
+  /**
+   * Feature flag de rollout (doc Fase 7). Quando `BILLING_ENFORCEMENT_ENABLED`
+   * é `false`, a obrigatoriedade de assinatura fica desligada (soft launch) —
+   * usado para ativação progressiva da regra em produção. Default: habilitado.
+   */
+  isEnforced(): boolean {
+    return this.config.get<string>('BILLING_ENFORCEMENT_ENABLED', 'true') !== 'false';
+  }
 
   async canUseProduct(userId: string, now: Date = new Date()): Promise<SubscriptionAccess> {
     // Considera a assinatura mais recente do usuário como fonte de verdade.

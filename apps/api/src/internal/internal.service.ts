@@ -22,6 +22,7 @@ export class InternalService {
    * direito de uso antes de qualquer operação de dados/criação via IA.
    */
   private async assertCanUseProduct(userId: string) {
+    if (!this.subscriptionAccess.isEnforced()) return;
     const access = await this.subscriptionAccess.canUseProduct(userId);
     if (!access.allowed) {
       throw new SubscriptionRequiredException();
@@ -68,7 +69,9 @@ export class InternalService {
    */
   async getSubscriptionAccess(userId: string) {
     const access = await this.subscriptionAccess.canUseProduct(userId);
-    return { canUseProduct: access.allowed, reason: access.reason, status: access.status };
+    // Respeita a feature flag de rollout: o canal de IA confia nesta resposta.
+    const allowed = this.subscriptionAccess.isEnforced() ? access.allowed : true;
+    return { canUseProduct: allowed, reason: access.reason, status: access.status };
   }
 
   /** Lista as contas ativas do usuário. */

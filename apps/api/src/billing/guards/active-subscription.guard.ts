@@ -26,6 +26,9 @@ export class ActiveSubscriptionGuard implements CanActivate {
     ]);
     if (allowWithout) return true;
 
+    // Rollout: com a obrigatoriedade desligada, libera todos (soft launch).
+    if (!this.access.isEnforced()) return true;
+
     const request = context.switchToHttp().getRequest<Request>();
     const user = request.user as { id?: string } | undefined;
     if (!user?.id) {

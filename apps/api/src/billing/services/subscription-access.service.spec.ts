@@ -6,9 +6,10 @@ const NOW = new Date('2026-06-15T12:00:00.000Z');
 const FUTURE = new Date('2026-06-20T12:00:00.000Z');
 const PAST = new Date('2026-06-10T12:00:00.000Z');
 
-function makeService(findFirst: jest.Mock) {
+function makeService(findFirst: jest.Mock, enforced = 'true') {
   const prisma = { subscription: { findFirst } } as any;
-  return new SubscriptionAccessService(prisma);
+  const config = { get: jest.fn((_k: string, d?: string) => (enforced ?? d)) } as any;
+  return new SubscriptionAccessService(prisma, config);
 }
 
 describe('SubscriptionAccessService', () => {
@@ -87,6 +88,16 @@ describe('SubscriptionAccessService', () => {
         NOW,
       );
       expect(result).toMatchObject({ allowed: false, reason: 'inactive' });
+    });
+  });
+
+  describe('isEnforced (feature flag)', () => {
+    it('habilitado por padrão', () => {
+      expect(makeService(jest.fn()).isEnforced()).toBe(true);
+    });
+
+    it('desligado quando BILLING_ENFORCEMENT_ENABLED=false', () => {
+      expect(makeService(jest.fn(), 'false').isEnforced()).toBe(false);
     });
   });
 

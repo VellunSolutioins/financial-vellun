@@ -30,11 +30,14 @@ describe('InternalService', () => {
   let prisma: ReturnType<typeof createPrismaMock>;
   let service: InternalService;
 
-  let access: { canUseProduct: jest.Mock };
+  let access: { canUseProduct: jest.Mock; isEnforced: jest.Mock };
 
   beforeEach(() => {
     prisma = createPrismaMock();
-    access = { canUseProduct: jest.fn().mockResolvedValue({ allowed: true }) };
+    access = {
+      canUseProduct: jest.fn().mockResolvedValue({ allowed: true }),
+      isEnforced: jest.fn().mockReturnValue(true),
+    };
     service = new InternalService(prisma as any, {} as any, access as any);
   });
 
@@ -112,6 +115,17 @@ describe('InternalService', () => {
         service.createTransactionFromAi({ userId: 'u1', accountId: 'a1' } as any),
       ).rejects.toMatchObject({ getResponse: expect.any(Function) });
       expect(prisma.account.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('libera listAccounts quando a obrigatoriedade está desligada (rollout)', async () => {
+      access.isEnforced.mockReturnValue(false);
+      access.canUseProduct.mockResolvedValue({ allowed: false });
+      prisma.account.findMany.mockResolvedValue([{ id: 'a1' }]);
+
+      const result = await service.listAccounts('u1');
+
+      expect(result).toEqual([{ id: 'a1' }]);
+      expect(access.canUseProduct).not.toHaveBeenCalled();
     });
 
     it('createTransactionFromAi rejeita conta de outro usuário (userId manipulado)', async () => {

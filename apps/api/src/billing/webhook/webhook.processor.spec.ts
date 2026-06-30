@@ -152,6 +152,75 @@ describe('WebhookProcessor.process', () => {
     expect(events.markProcessed).toHaveBeenCalledWith('row_1');
   });
 
+  it('chargeback revoga acesso (active → unpaid) e registra pagamento', async () => {
+    const { processor, provider, prisma, subscriptions, payments } = setup();
+    prisma.paymentWebhookEvent.findUniqueOrThrow.mockResolvedValue(persistedEvent());
+    provider.normalizeWebhookEvent.mockReturnValue({
+      intent: 'payment_chargeback',
+      providerSubscriptionId: 'sub_a',
+      providerCustomerId: 'cus_a',
+      payment: { providerPaymentId: 'pay_3', status: 'chargeback', amount: '49.90', currency: 'BRL', dueAt: null, paidAt: null },
+    });
+    prisma.subscription.findFirst.mockResolvedValue({ ...subscription, status: 'active' });
+
+    await processor.process('row_1');
+
+    expect(payments.upsertFromProvider).toHaveBeenCalledWith(
+      expect.objectContaining({ providerPaymentId: 'pay_3', status: PaymentStatus.chargeback }),
+    );
+    expect(subscriptions.transitionTo).toHaveBeenCalledWith('s1', 'unpaid', expect.anything());
+  });
+
+  it('reembolso registra pagamento sem alterar status', async () => {
+    const { processor, provider, prisma, subscriptions, payments } = setup();
+    prisma.paymentWebhookEvent.findUniqueOrThrow.mockResolvedValue(persistedEvent());
+    provider.normalizeWebhookEvent.mockReturnValue({
+      intent: 'payment_refunded',
+      providerSubscriptionId: 'sub_a',
+      providerCustomerId: 'cus_a',
+      payment: { providerPaymentId: 'pay_4', status: 'refunded', amount: '49.90', currency: 'BRL', dueAt: null, paidAt: null },
+    });
+    prisma.subscription.findFirst.mockResolvedValue({ ...subscription, status: 'active' });
+
+    await processor.process('row_1');
+
+    expect(payments.upsertFromProvider).toHaveBeenCalledWith(
+      expect.objectContaining({ providerPaymentId: 'pay_4', status: PaymentStatus.refunded }),
+    );
+    expect(subscriptions.transitionTo).not.toHaveBeenCalled();
+  });
+
+  it('cancelamento no PSP transiciona para canceled', async () => {
+    const { processor, provider, prisma, subscriptions } = setup();
+    prisma.paymentWebhookEvent.findUniqueOrThrow.mockResolvedValue(persistedEvent());
+    provider.normalizeWebhookEvent.mockReturnValue({
+      intent: 'subscription_canceled',
+      providerSubscriptionId: 'sub_a',
+      providerCustomerId: 'cus_a',
+      payment: null,
+    });
+    prisma.subscription.findFirst.mockResolvedValue({ ...subscription, status: 'active' });
+
+    await processor.process('row_1');
+
+    expect(subscriptions.transitionTo).toHaveBeenCalledWith('s1', 'canceled', expect.anything());
+  });
+
+  it('indisponibilidade do PSP no sucesso propaga erro (reprocessável)', async () => {
+    const { processor, provider, prisma } = setup();
+    prisma.paymentWebhookEvent.findUniqueOrThrow.mockResolvedValue(persistedEvent());
+    provider.normalizeWebhookEvent.mockReturnValue({
+      intent: 'payment_succeeded',
+      providerSubscriptionId: 'sub_a',
+      providerCustomerId: 'cus_a',
+      payment: { providerPaymentId: 'pay_5', status: 'paid', amount: '49.90', currency: 'BRL', dueAt: null, paidAt: null },
+    });
+    prisma.subscription.findFirst.mockResolvedValue({ ...subscription, status: 'pending' });
+    provider.getSubscription.mockRejectedValue(new Error('PSP indisponível'));
+
+    await expect(processor.process('row_1')).rejects.toThrow('PSP indisponível');
+  });
+
   it('localiza assinatura por providerCustomerId quando não há subscriptionId local', async () => {
     const { processor, provider, prisma, subscriptions } = setup();
     prisma.paymentWebhookEvent.findUniqueOrThrow.mockResolvedValue(persistedEvent());
