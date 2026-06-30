@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiCookieAuth, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { Request } from 'express';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -28,12 +29,14 @@ export class BillingController {
     return this.billingService.getSubscriptionState(user.id);
   }
 
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('checkout')
   createCheckout(@Req() req: Request, @Body() dto: CreateCheckoutDto) {
     const user = req.user as any;
     return this.billingService.createCheckout(user.id, dto);
   }
 
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('payment-method')
   createPaymentMethodSession(@Req() req: Request) {
     const user = req.user as any;

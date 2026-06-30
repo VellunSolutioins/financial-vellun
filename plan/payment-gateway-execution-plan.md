@@ -223,6 +223,10 @@ Não são executáveis por mim, mas **bloqueiam produção**. Registrar status a
 
 **Done:** nenhum dado de cartão no backend; logs sem segredos; OTP de telefone ativo; fluxos de direitos do titular definidos; incidentes documentados.
 
+> **Status (implementado):** rate limiting (`@nestjs/throttler`), Helmet + headers + Swagger fora de produção, **CSRF double-submit** (guard global + cookie `csrf_token` + header `x-csrf-token` no frontend), comparação **timing-safe** da `INTERNAL_API_KEY`, revisão de cookies e revisão de logs (sem segredos/cartão).
+>
+> **Deferido para os Prompts 12–16** (cada um altera fluxos sensíveis — auth/migrations/CI — e merece escopo e testes próprios): rotação/revogação de refresh token, OTP de telefone, exportação/exclusão de dados (LGPD), scanners de CI, e os itens não-código (incidentes, PSP, PCI).
+
 ---
 
 ## Prompt 11 — Testes e rollout
@@ -236,6 +240,69 @@ Não são executáveis por mim, mas **bloqueiam produção**. Registrar status a
 **Rollout:** mocks locais → sandbox Asaas → staging → testes internos → beta → produção com **feature flag** → ativação progressiva da obrigatoriedade. Monitorar conversão, aprovados/recusados, `past_due`, falhas de webhook, tamanho da DLQ, divergências, chargebacks, cancelamentos, latência do PSP, custo de IA bloqueado.
 
 **Done:** cenários críticos automatizados; rollout com flag; monitoramento operacional. Atende a Definition of Done (doc seção 17).
+
+---
+
+## Prompts deferidos do Prompt 10 (executar ao final de tudo)
+
+Itens de segurança/privacidade desmembrados do Prompt 10 por alterarem fluxos sensíveis (auth, migrations, CI). Executar **após** o Prompt 11, em sequência independente.
+
+### Prompt 12 — Rotação e revogação de refresh token
+
+**Objetivo:** invalidar refresh tokens no logout/refresh e em caso de comprometimento (doc seção 8.3).
+
+**Detalhes:**
+- Persistir refresh tokens (model Prisma + migration), ex. `RefreshToken` com `userId`, `tokenHash`, `expiresAt`, `revokedAt`, `replacedById`.
+- No refresh: validar o token contra o store, **rotacionar** (emitir novo, revogar o anterior) e detectar reuso (revogar a família em caso de replay).
+- No logout: revogar o refresh token atual.
+- Ajustar `auth.service`/`auth.controller` e a strategy de refresh.
+- **Testes:** rotação, revogação no logout, replay de token revogado.
+
+**Done:** refresh token rotacionado a cada uso; logout revoga; replay detectado e bloqueado.
+
+### Prompt 13 — Verificação de telefone por OTP
+
+**Objetivo:** confirmar posse do número antes de usar o WhatsApp para ações financeiras (doc seção 8.5). **Depende do canal de envio (Prompt 0).**
+
+**Detalhes:**
+- Hoje o cadastro marca `whatsappContact.isVerified = true` sem confirmação ([apps/web/src/app/(auth)/cadastro/page.tsx](../apps/web/src/app/(auth)/cadastro/page.tsx) + registro na API).
+- Gerar OTP (curto, com expiração e rate limit), armazenar hash, enviar pelo canal (WhatsApp/SMS), endpoint de verificação; só então `isVerified = true`.
+- Frontend: passo de confirmação no cadastro/edição de telefone.
+- **Testes:** geração/expiração/limite de OTP, verificação correta/incorreta.
+
+**Done:** WhatsApp só é usado para ações financeiras após verificação por OTP.
+
+### Prompt 14 — Exportação e exclusão de dados (LGPD)
+
+**Objetivo:** suportar direitos do titular (doc seção 10.4).
+
+**Detalhes:**
+- Endpoint de **exportação** (agrega dados pessoais e financeiros do usuário em formato portável).
+- Endpoint de **exclusão/anonimização** (cascata respeitando retenção legal de registros fiscais/auditoria; informar exceções ao titular).
+- Marcar essas rotas com `@AllowWithoutSubscription()` (acessíveis sem assinatura — doc seção 5).
+- Política de retenção/descarte documentada.
+- Frontend: ação na área "Minha Conta".
+- **Testes:** exportação completa, exclusão com isolamento por `userId`, retenção de registros obrigatórios.
+
+**Done:** titular consegue exportar e excluir/anonimizar seus dados; exceções legais preservadas e comunicadas.
+
+### Prompt 15 — Scanners de segurança no CI
+
+**Objetivo:** SAST, análise de dependências e secret scanning no pipeline (doc seção 8.6).
+
+**Detalhes:**
+- Configurar pipeline (ex. GitHub Actions): SAST, auditoria de dependências (Node + Python) e secret scanning; falhar o build em achados críticos.
+- Rodar lint e suítes de teste (corrigir também o script `pnpm lint`, hoje quebrado pelo glob/ignore).
+
+**Done:** CI executa scanners e barra achados críticos antes do merge.
+
+### Prompt 16 — Documentação não-código (compliance)
+
+**Objetivo:** fechar itens documentais que bloqueiam produção (doc seções 9, 10; Prompt 0).
+
+**Detalhes:** plano de resposta a incidentes; responsabilidades com o PSP (DPA/suboperadores); evidência da análise PCI aplicável ao Checkout Asaas; bases legais, aviso de privacidade, termos de assinatura, política de retenção.
+
+**Done:** documentos aprovados/arquivados; enquadramento PCI validado.
 
 ---
 
@@ -258,7 +325,8 @@ Após os prompts de código, validar localmente:
 1 (Prisma) ──► 2 (domínio) ──► 3 (Asaas) ──► 4 (endpoints) ──► 5 (webhook) ──► 6 (reconciliação)
                           └────────────────► 7 (guard API) ──► 8 (WhatsApp/IA)
 4,7,8 ──► 9 (frontend)
-tudo ──► 10 (segurança) ──► 11 (testes/rollout)
+tudo ──► 10 (segurança, núcleo) ──► 11 (testes/rollout)
+11 ──► 12 (refresh rotation) ──► 13 (OTP) ──► 14 (LGPD export/delete) ──► 15 (CI scanners) ──► 16 (docs)
 ```
 
-Prompts 1→6 são backend de billing em sequência estrita. 7 depende de 2 (não de 5). 9 depende de 4/7/8. 10 e 11 fecham o épico.
+Prompts 1→6 são backend de billing em sequência estrita. 7 depende de 2 (não de 5). 9 depende de 4/7/8. 10 (núcleo) e 11 fecham o MVP; 12–16 são os itens de segurança/privacidade deferidos do Prompt 10, executados ao final.

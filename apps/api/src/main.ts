@@ -4,8 +4,11 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
 
 import { AppModule } from './app.module';
+
+const isProduction = process.env.NODE_ENV === 'production';
 
 // Fuso horário da aplicação: Brasil (America/Sao_Paulo). Definido antes do
 // bootstrap para que `new Date()`, timestamps e os cálculos do dashboard usem
@@ -35,6 +38,15 @@ async function bootstrap() {
   // do webhook do PSP, sem desabilitar o body parser usado pelo ValidationPipe.
   const app = await NestFactory.create(AppModule, { rawBody: true });
 
+  // Headers de segurança (Helmet). CSP estrito só em produção; em dev fica
+  // desabilitado para não bloquear o Swagger UI.
+  app.use(
+    helmet({
+      contentSecurityPolicy: isProduction ? undefined : false,
+      crossOriginEmbedderPolicy: false,
+    }),
+  );
+
   app.enableCors({
     origin(origin, callback) {
       if (isAllowedOrigin(origin)) {
@@ -60,15 +72,18 @@ async function bootstrap() {
     }),
   );
 
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('Financial Vellun API')
-    .setDescription('API principal de controle financeiro')
-    .setVersion('1.0')
-    .addCookieAuth('access_token')
-    .build();
+  // Swagger fica desabilitado em produção para não expor a superfície da API.
+  if (!isProduction) {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('Financial Vellun API')
+      .setDescription('API principal de controle financeiro')
+      .setVersion('1.0')
+      .addCookieAuth('access_token')
+      .build();
 
-  const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('api/docs', app, document);
+    const document = SwaggerModule.createDocument(app, swaggerConfig);
+    SwaggerModule.setup('api/docs', app, document);
+  }
 
   const port = process.env.PORT ?? process.env.API_PORT ?? 3001;
 

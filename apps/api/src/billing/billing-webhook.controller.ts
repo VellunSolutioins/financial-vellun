@@ -1,6 +1,7 @@
 import { Controller, HttpCode, Inject, Post, Req } from '@nestjs/common';
 import { ApiExcludeEndpoint } from '@nestjs/swagger';
 import { RawBodyRequest } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { Request } from 'express';
 
 import { PAYMENT_PROVIDER, PaymentProvider } from './providers/payment-provider.interface';
@@ -12,6 +13,7 @@ import { WebhookProcessor } from './webhook/webhook.processor';
  * próprio PSP) e com acesso ao corpo bruto. Persiste o evento, responde rápido e
  * processa de forma assíncrona/idempotente.
  */
+@SkipThrottle()
 @Controller('billing')
 export class BillingWebhookController {
   constructor(

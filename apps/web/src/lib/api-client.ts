@@ -20,15 +20,28 @@ export class ApiClientError extends Error {
 }
 
 const BILLING_PATH = '/app/conta/assinatura';
+const CSRF_COOKIE = 'csrf_token';
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/** Lê o token CSRF do cookie (double-submit) para ecoar no header. */
+function readCsrfToken(): string | undefined {
+  if (typeof document === 'undefined') return undefined;
+  return document.cookie
+    .split('; ')
+    .find((c) => c.startsWith(`${CSRF_COOKIE}=`))
+    ?.split('=')[1];
+}
 
 // Dedup: um único refresh em voo é compartilhado por requests concorrentes.
 let refreshPromise: Promise<boolean> | null = null;
 
 function tryRefresh(): Promise<boolean> {
   if (!refreshPromise) {
+    const csrfToken = readCsrfToken();
     refreshPromise = fetch(`${API_URL}/auth/refresh`, {
       method: 'POST',
       credentials: 'include',
+      headers: csrfToken ? { 'x-csrf-token': csrfToken } : undefined,
     })
       .then((r) => r.ok)
       .catch(() => false);
@@ -40,10 +53,14 @@ function tryRefresh(): Promise<boolean> {
 }
 
 async function request<T>(path: string, options?: RequestInit, retry = true): Promise<T> {
+  const method = (options?.method ?? 'GET').toUpperCase();
+  const csrfToken = SAFE_METHODS.has(method) ? undefined : readCsrfToken();
+
   const res = await fetch(`${API_URL}${path}`, {
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
+      ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
       ...options?.headers,
     },
     ...options,

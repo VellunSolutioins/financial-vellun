@@ -1,11 +1,13 @@
 import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
+import { SkipThrottle } from '@nestjs/throttler';
 import { InternalApiKeyGuard } from '../guards/internal-api-key.guard';
 import { InternalService } from '../internal.service';
 import { CreateAiTransactionDto } from '../dto/create-ai-transaction.dto';
 import { AiEventDto } from '../dto/ai-event.dto';
 import { ListMessagesQueryDto } from '../dto/list-messages.dto';
 
+@SkipThrottle()
 @ApiExcludeController()
 @UseGuards(InternalApiKeyGuard)
 @Controller('internal')
