@@ -16,6 +16,9 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        # TZ (e outras chaves de ambiente consumidas fora do Settings, como o
+        # próprio SO/`time.tzset()` acima) podem existir no .env sem virar campos.
+        extra="ignore",
     )
 
     ai_agent_port: int = 8010

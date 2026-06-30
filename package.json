@@ -10,7 +10,7 @@
     "dev": "pnpm db:up && concurrently -n api,web,agent -c blue,green,magenta \"pnpm api:dev\" \"pnpm web:dev\" \"pnpm agent:dev\"",
     "api:dev": "pnpm --filter @financial-vellun/api dev",
     "web:dev": "pnpm --filter @financial-vellun/web dev",
-    "agent:dev": "cd apps/ai-agent && .venv\\Scripts\\python.exe -m uvicorn src.main:app --reload --port 8010",
+    "agent:dev": "node apps/ai-agent/scripts/run-python.mjs -m uvicorn src.main:app --reload --port 8010",
     "db:up": "docker compose -f infra/docker/docker-compose.yml up -d",
     "db:down": "docker compose -f infra/docker/docker-compose.yml down",
     "prisma:generate": "pnpm --filter @financial-vellun/api prisma:generate",
@@ -45,5 +45,6 @@
     "eslint-plugin-import": "^2.32.0",
     "prettier": "^3.8.4",
     "typescript": "^6.0.3"
-  }
+  },
+  "packageManager": "pnpm@9.0.0+sha512.b4106707c7225b1748b61595953ccbebff97b54ad05d002aa3635f633b9c53cd666f7ce9b8bc44704f1fa048b9a49b55371ab2d9e9d667d1efe2ef1514bcd513"
 }
