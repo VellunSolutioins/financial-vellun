@@ -1,8 +1,4 @@
-import {
-  ConflictException,
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { AccountType, ProfileType } from '@prisma/client';
@@ -32,7 +28,9 @@ export class AuthService {
       const cpfExists = await this.prisma.individualProfile.findUnique({ where: { cpf: dto.cpf } });
       if (cpfExists) throw new ConflictException('CPF já cadastrado');
     } else {
-      const cnpjExists = await this.prisma.businessProfile.findUnique({ where: { cnpj: dto.cnpj } });
+      const cnpjExists = await this.prisma.businessProfile.findUnique({
+        where: { cnpj: dto.cnpj },
+      });
       if (cnpjExists) throw new ConflictException('CNPJ já cadastrado');
     }
 
@@ -45,6 +43,13 @@ export class AuthService {
           phone: dto.phone,
           passwordHash,
           profileType: dto.profileType,
+          postalCode: dto.postalCode,
+          street: dto.street,
+          addressNumber: dto.addressNumber,
+          complement: dto.complement,
+          neighborhood: dto.neighborhood,
+          city: dto.city,
+          state: dto.state,
         },
       });
 
@@ -124,9 +129,7 @@ export class AuthService {
     if (!user) throw new UnauthorizedException();
 
     const hasProfile =
-      user.profileType === 'individual'
-        ? !!user.individualProfile
-        : !!user.businessProfile;
+      user.profileType === 'individual' ? !!user.individualProfile : !!user.businessProfile;
 
     const { passwordHash: _, individualProfile, businessProfile, ...rest } = user;
     return { ...rest, hasProfile };

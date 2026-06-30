@@ -14,13 +14,31 @@ import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/components/ui/toast';
 import { register as registerUser, login } from '@/lib/auth';
 import { ApiClientError } from '@/lib/api-client';
-import { CPF_REGEX, CNPJ_REGEX, PHONE_REGEX, maskCpf, maskCnpj, maskPhone } from '@/lib/masks';
+import {
+  CPF_REGEX,
+  CNPJ_REGEX,
+  PHONE_REGEX,
+  CEP_REGEX,
+  maskCpf,
+  maskCnpj,
+  maskPhone,
+  maskCep,
+  isValidCpf,
+  isValidCnpj,
+} from '@/lib/masks';
 
 const schema = z
   .object({
     name: z.string().min(2, 'Nome deve ter ao menos 2 caracteres'),
     email: z.string().email('Email inválido'),
     phone: z.string().regex(PHONE_REGEX, 'Celular inválido ((00) 00000-0000)'),
+    postalCode: z.string().regex(CEP_REGEX, 'CEP inválido (00000-000)'),
+    street: z.string().min(2, 'Logradouro obrigatório'),
+    addressNumber: z.string().min(1, 'Número obrigatório'),
+    complement: z.string().optional().or(z.literal('')),
+    neighborhood: z.string().min(2, 'Bairro obrigatório'),
+    city: z.string().min(2, 'Cidade obrigatória'),
+    state: z.string().regex(/^[A-Za-z]{2}$/, 'UF (2 letras)'),
     password: z.string().min(8, 'Senha deve ter ao menos 8 caracteres'),
     confirmPassword: z.string(),
     profileType: z.enum(['individual', 'business'], { required_error: 'Selecione um tipo' }),
@@ -45,6 +63,12 @@ const schema = z
           message: 'CPF inválido (000.000.000-00)',
           path: ['cpf'],
         });
+      } else if (!isValidCpf(d.cpf)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'CPF inválido (dígito verificador)',
+          path: ['cpf'],
+        });
       }
     } else if (d.profileType === 'business') {
       if (!d.companyName || d.companyName.trim().length < 2) {
@@ -58,6 +82,12 @@ const schema = z
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: 'CNPJ inválido (00.000.000/0000-00)',
+          path: ['cnpj'],
+        });
+      } else if (!isValidCnpj(d.cnpj)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'CNPJ inválido (dígito verificador)',
           path: ['cnpj'],
         });
       }
@@ -90,6 +120,13 @@ export default function CadastroPage() {
         email: data.email,
         phone: data.phone,
         password: data.password,
+        postalCode: data.postalCode,
+        street: data.street,
+        addressNumber: data.addressNumber,
+        complement: data.complement?.trim() ? data.complement : undefined,
+        neighborhood: data.neighborhood,
+        city: data.city,
+        state: data.state.toUpperCase(),
         profileType: data.profileType,
         ...(data.profileType === 'individual'
           ? { cpf: data.cpf, birthDate: data.birthDate?.trim() ? data.birthDate : undefined }
@@ -146,6 +183,74 @@ export default function CadastroPage() {
             />
             {errors.phone && <p className="text-xs text-destructive">{errors.phone.message}</p>}
           </div>
+
+          {/* Endereço de cobrança (obrigatório para assinaturas) */}
+          <div className="space-y-1">
+            <Label>CEP</Label>
+            <Input
+              inputMode="numeric"
+              placeholder="00000-000"
+              {...register('postalCode')}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                const masked = maskCep(e.target.value);
+                e.target.value = masked;
+                setValue('postalCode', masked, { shouldDirty: true });
+              }}
+            />
+            {errors.postalCode && (
+              <p className="text-xs text-destructive">{errors.postalCode.message}</p>
+            )}
+          </div>
+          <div className="space-y-1">
+            <Label>Logradouro</Label>
+            <Input placeholder="Rua / Avenida" {...register('street')} />
+            {errors.street && <p className="text-xs text-destructive">{errors.street.message}</p>}
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label>Número</Label>
+              <Input inputMode="numeric" placeholder="123" {...register('addressNumber')} />
+              {errors.addressNumber && (
+                <p className="text-xs text-destructive">{errors.addressNumber.message}</p>
+              )}
+            </div>
+            <div className="space-y-1">
+              <Label>Complemento (opcional)</Label>
+              <Input placeholder="Apto, bloco..." {...register('complement')} />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label>Bairro</Label>
+            <Input placeholder="Centro" {...register('neighborhood')} />
+            {errors.neighborhood && (
+              <p className="text-xs text-destructive">{errors.neighborhood.message}</p>
+            )}
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div className="space-y-1 sm:col-span-2">
+              <Label>Cidade</Label>
+              <Input placeholder="Curitiba" {...register('city')} />
+              {errors.city && <p className="text-xs text-destructive">{errors.city.message}</p>}
+            </div>
+            <div className="space-y-1">
+              <Label>UF</Label>
+              <Input
+                placeholder="PR"
+                maxLength={2}
+                {...register('state')}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                  const uf = e.target.value
+                    .replace(/[^A-Za-z]/g, '')
+                    .toUpperCase()
+                    .slice(0, 2);
+                  e.target.value = uf;
+                  setValue('state', uf, { shouldDirty: true });
+                }}
+              />
+              {errors.state && <p className="text-xs text-destructive">{errors.state.message}</p>}
+            </div>
+          </div>
+
           <div className="space-y-1">
             <Label>Senha</Label>
             <PasswordInput

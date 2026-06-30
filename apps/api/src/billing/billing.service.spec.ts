@@ -51,7 +51,14 @@ describe('BillingService.createCheckout', () => {
       id: 'u1',
       name: 'Fulano',
       email: 'f@x.com',
-      phone: null,
+      phone: '(41) 99999-9999',
+      postalCode: '80240-000',
+      street: 'Rua das Flores',
+      addressNumber: '123',
+      complement: null,
+      neighborhood: 'Centro',
+      city: 'Curitiba',
+      state: 'PR',
       individualProfile: { cpf: '111' },
       businessProfile: null,
     });
@@ -61,7 +68,14 @@ describe('BillingService.createCheckout', () => {
     const result = await service.createCheckout('u1', { planId: 'plan_1' });
 
     expect(provider.createCustomer).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: 'u1', document: '111' }),
+      expect.objectContaining({
+        userId: 'u1',
+        document: '111',
+        postalCode: '80240-000',
+        street: 'Rua das Flores',
+        addressNumber: '123',
+        neighborhood: 'Centro',
+      }),
     );
     expect(provider.createCheckout).toHaveBeenCalledWith(
       expect.objectContaining({ planCode: 'vellun-mensal', providerCustomerId: 'cus_1' }),
@@ -94,6 +108,33 @@ describe('BillingService.createCheckout', () => {
     expect(provider.createCheckout).toHaveBeenCalledWith(
       expect.objectContaining({ providerCustomerId: 'cus_existing' }),
     );
+  });
+
+  it('rejeita quando o endereço de cobrança está incompleto', async () => {
+    const { service, provider, prisma, subscriptions, access } = setup();
+    prisma.plan.findUnique.mockResolvedValue(PLAN);
+    subscriptions.getUserSubscription.mockResolvedValue(null);
+    access.evaluate.mockReturnValue({ allowed: false });
+    prisma.user.findUniqueOrThrow.mockResolvedValue({
+      id: 'u1',
+      name: 'Fulano',
+      email: 'f@x.com',
+      phone: '(41) 99999-9999',
+      postalCode: null,
+      street: null,
+      addressNumber: null,
+      complement: null,
+      neighborhood: null,
+      city: null,
+      state: null,
+      individualProfile: { cpf: '111' },
+      businessProfile: null,
+    });
+
+    await expect(service.createCheckout('u1', { planId: 'plan_1' })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(provider.createCustomer).not.toHaveBeenCalled();
   });
 
   it('rejeita quando já há assinatura ativa', async () => {
