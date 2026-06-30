@@ -27,6 +27,20 @@ export class SubscriptionStateService {
     return ALLOWED_TRANSITIONS[from]?.includes(to) ?? false;
   }
 
+  /**
+   * Cancelamento agendado para o fim do período pago e ainda dentro dele
+   * (`cancelAtPeriodEnd` + `currentPeriodEnd` no futuro). Nesse estado, sinais de
+   * cancelamento do PSP — que exclui a assinatura imediatamente — **não** devem
+   * revogar o acesso antes de `currentPeriodEnd`. O cancelamento efetivo ocorre
+   * quando o período expira (via reconciliação).
+   */
+  isCancellationDeferred(
+    sub: { cancelAtPeriodEnd: boolean; currentPeriodEnd: Date | null },
+    now: Date = new Date(),
+  ): boolean {
+    return sub.cancelAtPeriodEnd && sub.currentPeriodEnd !== null && sub.currentPeriodEnd > now;
+  }
+
   /** Lança {@link InvalidSubscriptionTransitionError} quando a transição é inválida. */
   assertTransition(from: SubscriptionStatus, to: SubscriptionStatus): void {
     if (!this.canTransition(from, to)) {

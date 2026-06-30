@@ -32,7 +32,10 @@ function localSub(overrides: Record<string, unknown> = {}) {
 describe('ReconciliationService.reconcileSubscription', () => {
   it('é consistente quando local e remoto coincidem', async () => {
     const { service, provider, subscriptions } = setup();
-    provider.getSubscription.mockResolvedValue({ status: 'active', currentPeriodEnd: new Date('2026-07-15') });
+    provider.getSubscription.mockResolvedValue({
+      status: 'active',
+      currentPeriodEnd: new Date('2026-07-15'),
+    });
 
     const outcome = await service.reconcileSubscription(localSub());
 
@@ -54,6 +57,42 @@ describe('ReconciliationService.reconcileSubscription', () => {
     );
   });
 
+  it('mantém ativa quando remoto cancelado mas cancelamento ainda adiado (dentro do período)', async () => {
+    const { service, provider, subscriptions } = setup();
+    provider.getSubscription.mockResolvedValue({ status: 'canceled' });
+
+    const outcome = await service.reconcileSubscription(
+      localSub({
+        status: 'active',
+        cancelAtPeriodEnd: true,
+        currentPeriodEnd: new Date(Date.now() + 24 * 60 * 60 * 1000), // amanhã
+      }),
+    );
+
+    expect(outcome).toBe('consistent');
+    expect(subscriptions.transitionTo).not.toHaveBeenCalled();
+  });
+
+  it('efetiva o cancelamento quando o período já expirou (remoto cancelado)', async () => {
+    const { service, provider, subscriptions } = setup();
+    provider.getSubscription.mockResolvedValue({ status: 'canceled' });
+
+    const outcome = await service.reconcileSubscription(
+      localSub({
+        status: 'active',
+        cancelAtPeriodEnd: true,
+        currentPeriodEnd: new Date(Date.now() - 24 * 60 * 60 * 1000), // ontem
+      }),
+    );
+
+    expect(outcome).toBe('corrected');
+    expect(subscriptions.transitionTo).toHaveBeenCalledWith(
+      's1',
+      'canceled',
+      expect.objectContaining({ actor: 'reconciliation' }),
+    );
+  });
+
   it('corrige deriva de currentPeriodEnd quando ambos ativos', async () => {
     const { service, provider, prisma, audit } = setup();
     provider.getSubscription.mockResolvedValue({
@@ -61,7 +100,9 @@ describe('ReconciliationService.reconcileSubscription', () => {
       currentPeriodEnd: new Date('2026-08-15'),
     });
 
-    const outcome = await service.reconcileSubscription(localSub({ currentPeriodEnd: new Date('2026-07-15') }));
+    const outcome = await service.reconcileSubscription(
+      localSub({ currentPeriodEnd: new Date('2026-07-15') }),
+    );
 
     expect(outcome).toBe('corrected');
     expect(prisma.subscription.update).toHaveBeenCalledWith({

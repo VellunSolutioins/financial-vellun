@@ -50,17 +50,23 @@ export class WebhookProcessor {
       const next = attempt + 1;
       if (next < MAX_ATTEMPTS) {
         const backoff = 2 ** attempt * 500;
-        this.logger.warn(`Webhook ${eventId}: tentativa ${next} falhou, retentando em ${backoff}ms`);
+        this.logger.warn(
+          `Webhook ${eventId}: tentativa ${next} falhou, retentando em ${backoff}ms`,
+        );
         setTimeout(() => void this.runWithRetry(eventId, next), backoff);
       } else {
-        this.logger.error(`Webhook ${eventId} enviado para DLQ após ${next} tentativas: ${message}`);
+        this.logger.error(
+          `Webhook ${eventId} enviado para DLQ após ${next} tentativas: ${message}`,
+        );
       }
     }
   }
 
   /** Processa um evento já persistido. Idempotente: ignora eventos já processados. */
   async process(eventId: string): Promise<void> {
-    const event = await this.prisma.paymentWebhookEvent.findUniqueOrThrow({ where: { id: eventId } });
+    const event = await this.prisma.paymentWebhookEvent.findUniqueOrThrow({
+      where: { id: eventId },
+    });
     if (event.status === 'processed') return;
 
     await this.events.markProcessing(eventId);
@@ -168,6 +174,17 @@ export class WebhookProcessor {
   }
 
   private async handleCanceled(sub: SubscriptionWithPlan) {
+    // Cancelamento agendado para o fim do período pago: o PSP exclui a assinatura
+    // imediatamente, mas o acesso deve continuar até `currentPeriodEnd`. A
+    // reconciliação efetiva o `canceled` quando o período expira.
+    if (this.state.isCancellationDeferred(sub)) {
+      this.logger.log(
+        `Assinatura ${sub.id}: cancelamento adiado até o fim do período pago ` +
+          `(${sub.currentPeriodEnd?.toISOString() ?? 'sem data'}); acesso preservado.`,
+      );
+      return;
+    }
+
     await this.tryTransition(sub, SubscriptionStatus.canceled, 'webhook:subscription_canceled', {
       canceledAt: new Date(),
     });

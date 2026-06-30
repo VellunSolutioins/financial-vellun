@@ -42,6 +42,40 @@ describe('SubscriptionStateService', () => {
     });
   });
 
+  describe('isCancellationDeferred', () => {
+    const now = new Date('2026-06-30T00:00:00.000Z');
+
+    it('é verdadeiro com cancelAtPeriodEnd e período no futuro', () => {
+      expect(
+        service.isCancellationDeferred(
+          { cancelAtPeriodEnd: true, currentPeriodEnd: new Date('2026-07-30T00:00:00.000Z') },
+          now,
+        ),
+      ).toBe(true);
+    });
+
+    it('é falso quando o período já passou', () => {
+      expect(
+        service.isCancellationDeferred(
+          { cancelAtPeriodEnd: true, currentPeriodEnd: new Date('2026-06-15T00:00:00.000Z') },
+          now,
+        ),
+      ).toBe(false);
+    });
+
+    it('é falso sem cancelAtPeriodEnd ou sem data de período', () => {
+      expect(
+        service.isCancellationDeferred(
+          { cancelAtPeriodEnd: false, currentPeriodEnd: new Date('2026-07-30T00:00:00.000Z') },
+          now,
+        ),
+      ).toBe(false);
+      expect(
+        service.isCancellationDeferred({ cancelAtPeriodEnd: true, currentPeriodEnd: null }, now),
+      ).toBe(false);
+    });
+  });
+
   describe('cálculo de datas', () => {
     it('computeTrialEnd soma 30 dias', () => {
       const start = new Date('2026-06-01T00:00:00.000Z');
