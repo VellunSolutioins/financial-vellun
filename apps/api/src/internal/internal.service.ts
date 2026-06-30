@@ -2,6 +2,8 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountsService } from '../accounts/accounts.service';
+import { SubscriptionAccessService } from '../billing/services/subscription-access.service';
+import { SubscriptionRequiredException } from '../billing/subscription-required.exception';
 import { CreateAiTransactionDto } from './dto/create-ai-transaction.dto';
 import { AiEventDto } from './dto/ai-event.dto';
 import { normalizePhone } from '../common/phone.util';
@@ -12,7 +14,19 @@ export class InternalService {
   constructor(
     private prisma: PrismaService,
     private accountsService: AccountsService,
+    private subscriptionAccess: SubscriptionAccessService,
   ) {}
+
+  /**
+   * Garante que o usuário (já resolvido por vínculo, nunca arbitrário) tem
+   * direito de uso antes de qualquer operação de dados/criação via IA.
+   */
+  private async assertCanUseProduct(userId: string) {
+    const access = await this.subscriptionAccess.canUseProduct(userId);
+    if (!access.allowed) {
+      throw new SubscriptionRequiredException();
+    }
+  }
 
   /** Busca um usuário pelo número de telefone vinculado no WhatsApp. */
   async findContactByPhone(phone: string) {
@@ -37,6 +51,7 @@ export class InternalService {
   async listCategories(userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('Usuário não encontrado');
+    await this.assertCanUseProduct(userId);
 
     return this.prisma.category.findMany({
       where: {
@@ -49,6 +64,7 @@ export class InternalService {
 
   /** Lista as contas ativas do usuário. */
   async listAccounts(userId: string) {
+    await this.assertCanUseProduct(userId);
     return this.prisma.account.findMany({
       where: { userId, isActive: true },
       orderBy: { createdAt: 'asc' },
@@ -99,6 +115,8 @@ export class InternalService {
 
   /** Cria um lançamento originado pela IA/WhatsApp e atualiza a rastreabilidade. */
   async createTransactionFromAi(dto: CreateAiTransactionDto) {
+    await this.assertCanUseProduct(dto.userId);
+
     const account = await this.prisma.account.findUnique({ where: { id: dto.accountId } });
     if (!account || account.userId !== dto.userId) {
       throw new BadRequestException('Conta inválida para o usuário');
