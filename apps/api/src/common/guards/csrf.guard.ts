@@ -4,6 +4,7 @@ import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@
 import { Request } from 'express';
 
 import { CSRF_COOKIE, CSRF_HEADER } from '../csrf.util';
+import { isAllowedWebOrigin } from '../http-origin.util';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const AUTH_CSRF_EXEMPT_PATHS = new Set([
@@ -14,11 +15,9 @@ const AUTH_CSRF_EXEMPT_PATHS = new Set([
 ]);
 
 /**
- * Proteção CSRF por double-submit. Exigida apenas em requisições que mudam
- * estado (não-safe) e que carregam sessão por cookie. Requisições sem cookie de
- * sessão (login/cadastro, webhook do PSP, chamadas internas por API key) não
- * têm autoridade ambiente e ficam isentas. Relevante sobretudo com
- * `SameSite=None` em produção (doc seção 8.3).
+ * Proteção CSRF para requisições com sessão em cookie. Usa double-submit quando
+ * o frontend consegue ler `csrf_token`; em deploy cross-domain (Vercel + API em
+ * outro domínio), aceita mutações apenas vindas de uma origem web permitida.
  */
 @Injectable()
 export class CsrfGuard implements CanActivate {
@@ -35,19 +34,19 @@ export class CsrfGuard implements CanActivate {
     const cookieToken = cookies[CSRF_COOKIE];
     const headerToken = request.headers[CSRF_HEADER];
 
-    if (
-      !cookieToken ||
-      typeof headerToken !== 'string' ||
-      !this.safeEqual(headerToken, cookieToken)
-    ) {
-      throw new ForbiddenException({
-        statusCode: 403,
-        code: 'CSRF_FAILED',
-        message: 'Falha na validação CSRF.',
-      });
+    if (cookieToken && typeof headerToken === 'string' && this.safeEqual(headerToken, cookieToken)) {
+      return true;
     }
 
-    return true;
+    if (this.hasAllowedOrigin(request)) {
+      return true;
+    }
+
+    throw new ForbiddenException({
+      statusCode: 403,
+      code: 'CSRF_FAILED',
+      message: 'Falha na validação CSRF.',
+    });
   }
 
   private safeEqual(a: string, b: string): boolean {
@@ -60,5 +59,10 @@ export class CsrfGuard implements CanActivate {
   private isAuthCsrfExemptPath(request: Request): boolean {
     const path = request.path ?? request.url?.split('?')[0];
     return Boolean(path && AUTH_CSRF_EXEMPT_PATHS.has(path));
+  }
+
+  private hasAllowedOrigin(request: Request): boolean {
+    const origin = request.headers.origin;
+    return typeof origin === 'string' && isAllowedWebOrigin(origin);
   }
 }

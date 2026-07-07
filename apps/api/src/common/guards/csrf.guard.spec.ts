@@ -46,6 +46,39 @@ describe('CsrfGuard', () => {
     );
   });
 
+  it('libera mutação com sessão sem token CSRF quando a origem web é permitida', () => {
+    expect(
+      guard.canActivate(
+        context(
+          'POST',
+          { access_token: 'jwt', refresh_token: 'r' },
+          { origin: 'https://financial-vellun-web.vercel.app' },
+          '/billing/checkout',
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it('libera previews da Vercel como origem web permitida', () => {
+    expect(
+      guard.canActivate(
+        context(
+          'PATCH',
+          { access_token: 'jwt' },
+          { origin: 'https://financial-vellun-web-git-main-vellun-s-projects.vercel.app' },
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it('bloqueia mutação com sessão sem token CSRF de origem desconhecida', () => {
+    expect(() =>
+      guard.canActivate(
+        context('POST', { access_token: 'jwt' }, { origin: 'https://evil.example' }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
   it('bloqueia quando header não bate com o cookie', () => {
     expect(() =>
       guard.canActivate(

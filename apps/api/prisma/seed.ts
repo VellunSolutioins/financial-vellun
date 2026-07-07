@@ -76,17 +76,41 @@ const businessCategories = [
 async function main() {
   console.log('Iniciando seed de categorias padrao...');
 
-  await prisma.category.deleteMany({ where: { isDefault: true, userId: null } });
+  let createdCategories = 0;
 
-  const created = await prisma.category.createMany({
-    data: [...individualCategories, ...businessCategories].map((cat) => ({
-      ...cat,
-      isDefault: true,
-      userId: null,
-    })),
-  });
+  for (const category of [...individualCategories, ...businessCategories]) {
+    const existing = await prisma.category.findFirst({
+      where: {
+        userId: null,
+        isDefault: true,
+        name: category.name,
+        type: category.type,
+        profileType: category.profileType,
+      },
+    });
 
-  console.log(`${created.count} categorias padrao inseridas.`);
+    if (existing) {
+      await prisma.category.update({
+        where: { id: existing.id },
+        data: {
+          color: category.color,
+          isDefault: true,
+        },
+      });
+      continue;
+    }
+
+    await prisma.category.create({
+      data: {
+        ...category,
+        isDefault: true,
+        userId: null,
+      },
+    });
+    createdCategories += 1;
+  }
+
+  console.log(`${createdCategories} categorias padrao inseridas.`);
 
   console.log('Criando planos de assinatura...');
 
