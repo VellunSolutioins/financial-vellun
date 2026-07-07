@@ -6,9 +6,10 @@ function context(
   method: string,
   cookies: Record<string, string> = {},
   headers: Record<string, string> = {},
+  path = '/transactions',
 ) {
   return {
-    switchToHttp: () => ({ getRequest: () => ({ method, cookies, headers }) }),
+    switchToHttp: () => ({ getRequest: () => ({ method, cookies, headers, path }) }),
   } as any;
 }
 
@@ -25,6 +26,18 @@ describe('CsrfGuard', () => {
 
   it('libera requisições sem cookie de sessão (login/cadastro/webhook)', () => {
     expect(guard.canActivate(context('POST'))).toBe(true);
+  });
+
+  it('libera login mesmo quando o navegador ainda envia cookie de sessão antigo', () => {
+    expect(guard.canActivate(context('POST', { access_token: 'jwt' }, {}, '/auth/login'))).toBe(
+      true,
+    );
+  });
+
+  it('libera refresh para sessões emitidas antes do cookie CSRF existir', () => {
+    expect(guard.canActivate(context('POST', { refresh_token: 'r' }, {}, '/auth/refresh'))).toBe(
+      true,
+    );
   });
 
   it('bloqueia mutação com sessão e sem token CSRF', () => {
