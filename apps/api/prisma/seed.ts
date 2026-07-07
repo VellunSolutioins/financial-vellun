@@ -1,7 +1,43 @@
-import { AccountType, PrismaClient, ProfileType, TransactionType } from '@prisma/client';
+import {
+  AccountType,
+  BillingInterval,
+  PrismaClient,
+  ProfileType,
+  TransactionType,
+} from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
+
+// Preços são placeholders até a definição comercial final (ver Prompt 0).
+const plans = [
+  {
+    code: 'vellun-mensal',
+    name: 'Vellun Mensal',
+    description: 'Plano mensal com acesso completo ao Financial Vellun.',
+    price: '49.90',
+    currency: 'BRL',
+    interval: BillingInterval.monthly,
+    features: {
+      web: true,
+      whatsapp: true,
+      ai: true,
+    },
+  },
+  {
+    code: 'vellun-anual',
+    name: 'Vellun Anual',
+    description: 'Plano anual com acesso completo ao Financial Vellun.',
+    price: '499.00',
+    currency: 'BRL',
+    interval: BillingInterval.annual,
+    features: {
+      web: true,
+      whatsapp: true,
+      ai: true,
+    },
+  },
+];
 
 const demoUser = {
   name: 'Vellun Solutions',
@@ -51,6 +87,35 @@ async function main() {
   });
 
   console.log(`${created.count} categorias padrao inseridas.`);
+
+  console.log('Criando planos de assinatura...');
+
+  for (const plan of plans) {
+    await prisma.plan.upsert({
+      where: { code: plan.code },
+      update: {
+        name: plan.name,
+        description: plan.description,
+        price: plan.price,
+        currency: plan.currency,
+        interval: plan.interval,
+        isActive: true,
+        features: plan.features,
+      },
+      create: {
+        code: plan.code,
+        name: plan.name,
+        description: plan.description,
+        price: plan.price,
+        currency: plan.currency,
+        interval: plan.interval,
+        isActive: true,
+        features: plan.features,
+      },
+    });
+  }
+
+  console.log(`${plans.length} planos de assinatura disponiveis.`);
 
   console.log('Criando usuario demo...');
 

@@ -1,11 +1,13 @@
 import { Body, Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { ApiCookieAuth, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
+import { issueCsrfCookie } from '../common/csrf.util';
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -20,16 +22,19 @@ const COOKIE_OPTIONS = {
 export class AuthController {
   constructor(private authService: AuthService) {}
 
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('register')
   async register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
   }
 
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('login')
   async login(@Body() dto: LoginDto, @Res({ passthrough: true }) res: Response) {
     const { user, accessToken, refreshToken } = await this.authService.login(dto);
     res.cookie('access_token', accessToken, { ...COOKIE_OPTIONS, maxAge: 15 * 60 * 1000 });
     res.cookie('refresh_token', refreshToken, { ...COOKIE_OPTIONS, maxAge: 7 * 24 * 60 * 60 * 1000 });
+    issueCsrfCookie(res, COOKIE_OPTIONS);
     return user;
   }
 
@@ -47,13 +52,16 @@ export class AuthController {
     const { accessToken, refreshToken } = await this.authService.refresh(user.id, user.email);
     res.cookie('access_token', accessToken, { ...COOKIE_OPTIONS, maxAge: 15 * 60 * 1000 });
     res.cookie('refresh_token', refreshToken, { ...COOKIE_OPTIONS, maxAge: 7 * 24 * 60 * 60 * 1000 });
+    issueCsrfCookie(res, COOKIE_OPTIONS);
     return { message: 'Token renovado' };
   }
 
   @ApiCookieAuth()
   @UseGuards(JwtAuthGuard)
   @Get('me')
-  async me(@Req() req: Request) {
+  async me(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    // Reemite o token CSRF para que sessões já existentes recebam o cookie.
+    issueCsrfCookie(res, COOKIE_OPTIONS);
     const user = req.user as any;
     return this.authService.me(user.id);
   }

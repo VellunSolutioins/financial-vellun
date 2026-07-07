@@ -2,13 +2,14 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards } fro
 import { ApiCookieAuth, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { ActiveSubscriptionGuard } from '../billing/guards/active-subscription.guard';
 import { AccountsService } from './accounts.service';
 import { CreateAccountDto } from './dto/create-account.dto';
 import { UpdateAccountDto } from './dto/update-account.dto';
 
 @ApiCookieAuth()
 @ApiTags('accounts')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ActiveSubscriptionGuard)
 @Controller('accounts')
 export class AccountsController {
   constructor(private accountsService: AccountsService) {}

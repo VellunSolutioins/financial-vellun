@@ -16,11 +16,15 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        # TZ (e outras chaves de ambiente consumidas fora do Settings, como o
+        # próprio SO/`time.tzset()` acima) podem existir no .env sem virar campos.
+        extra="ignore",
     )
 
     ai_agent_port: int = 8010
     environment: str = "development"  # "development" | "production"
     main_api_url: str = "http://localhost:3001"
+    web_url: str = "http://localhost:3000"  # base para o link de regularização da assinatura
     internal_api_key: str
     openai_api_key: str = ""
     whatsapp_provider_token: str = ""

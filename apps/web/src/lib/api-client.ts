@@ -12,10 +12,24 @@ export class ApiClientError extends Error {
     public readonly statusCode: number,
     message: string,
     public readonly error: string,
+    public readonly code?: string,
   ) {
     super(message);
     this.name = 'ApiClientError';
   }
+}
+
+const BILLING_PATH = '/app/conta/assinatura';
+const CSRF_COOKIE = 'csrf_token';
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/** Lê o token CSRF do cookie (double-submit) para ecoar no header. */
+function readCsrfToken(): string | undefined {
+  if (typeof document === 'undefined') return undefined;
+  return document.cookie
+    .split('; ')
+    .find((c) => c.startsWith(`${CSRF_COOKIE}=`))
+    ?.split('=')[1];
 }
 
 // Dedup: um único refresh em voo é compartilhado por requests concorrentes.
@@ -23,9 +37,11 @@ let refreshPromise: Promise<boolean> | null = null;
 
 function tryRefresh(): Promise<boolean> {
   if (!refreshPromise) {
+    const csrfToken = readCsrfToken();
     refreshPromise = fetch(`${API_URL}/auth/refresh`, {
       method: 'POST',
       credentials: 'include',
+      headers: csrfToken ? { 'x-csrf-token': csrfToken } : undefined,
     })
       .then((r) => r.ok)
       .catch(() => false);
@@ -37,10 +53,14 @@ function tryRefresh(): Promise<boolean> {
 }
 
 async function request<T>(path: string, options?: RequestInit, retry = true): Promise<T> {
+  const method = (options?.method ?? 'GET').toUpperCase();
+  const csrfToken = SAFE_METHODS.has(method) ? undefined : readCsrfToken();
+
   const res = await fetch(`${API_URL}${path}`, {
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
+      ...(csrfToken ? { 'x-csrf-token': csrfToken } : {}),
       ...options?.headers,
     },
     ...options,
@@ -55,8 +75,20 @@ async function request<T>(path: string, options?: RequestInit, retry = true): Pr
   }
 
   if (!res.ok) {
-    const err = (await res.json()) as ApiError;
-    throw new ApiClientError(err.statusCode, err.message, err.error);
+    const err = (await res.json()) as ApiError & { code?: string };
+
+    // Assinatura ausente: redireciona para a área de billing (a API é a fonte
+    // de verdade). Evita loop se já estivermos na própria página de assinatura.
+    if (
+      res.status === 403 &&
+      err.code === 'SUBSCRIPTION_REQUIRED' &&
+      typeof window !== 'undefined' &&
+      !window.location.pathname.startsWith(BILLING_PATH)
+    ) {
+      window.location.assign(`${BILLING_PATH}?status=required`);
+    }
+
+    throw new ApiClientError(err.statusCode, err.message, err.error, err.code);
   }
 
   return res.json() as Promise<T>;

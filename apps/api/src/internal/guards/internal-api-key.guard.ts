@@ -1,3 +1,5 @@
+import { timingSafeEqual } from 'node:crypto';
+
 import {
   CanActivate,
   ExecutionContext,
@@ -16,10 +18,18 @@ export class InternalApiKeyGuard implements CanActivate {
     const provided = request.headers['x-internal-api-key'];
     const expected = this.configService.getOrThrow<string>('INTERNAL_API_KEY');
 
-    if (!provided || provided !== expected) {
+    if (typeof provided !== 'string' || !this.safeEqual(provided, expected)) {
       throw new UnauthorizedException('Chave de API interna inválida');
     }
 
     return true;
+  }
+
+  /** Comparação em tempo constante para evitar timing attacks. */
+  private safeEqual(a: string, b: string): boolean {
+    const bufA = Buffer.from(a);
+    const bufB = Buffer.from(b);
+    if (bufA.length !== bufB.length) return false;
+    return timingSafeEqual(bufA, bufB);
   }
 }

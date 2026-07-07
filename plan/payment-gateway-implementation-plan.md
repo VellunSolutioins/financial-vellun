@@ -4,22 +4,25 @@
 
 Implementar cobrança recorrente no Financial Vellun para que somente usuários com direito de acesso vigente possam utilizar os serviços do produto.
 
-A recomendação é não implementar um gateway próprio. O projeto deve integrar um provedor de serviços de pagamento (PSP/adquirente) que ofereça checkout hospedado, tokenização, cobrança recorrente e webhooks. Essa abordagem reduz o risco de segurança, o esforço operacional e o escopo de conformidade com PCI DSS.
+A recomendação é não implementar um gateway próprio. O PSP escolhido para a primeira versão é o **Asaas**, utilizando checkout hospedado ou tokenização fornecida pelo próprio Asaas, cobrança recorrente por cartão e webhooks. Essa abordagem reduz o risco de segurança, o esforço operacional e o escopo de conformidade com PCI DSS.
 
 Este documento considera:
 
 - operação inicial no Brasil;
 - cobranças em BRL;
-- assinaturas recorrentes;
+- assinaturas recorrentes pagas exclusivamente por cartão de crédito;
+- Asaas como PSP inicial;
 - uso do produto pelo web, API e WhatsApp/IA;
 - requisitos de segurança, LGPD, PCI DSS e proteção do consumidor.
+
+Pix, Pix Automático, boleto e outros meios de pagamento não fazem parte do escopo inicial. A arquitetura continuará abstraindo o provedor e o meio de pagamento para permitir evolução futura sem reescrever o domínio de assinaturas.
 
 ## 2. Arquitetura Recomendada
 
 ```text
-Usuário ──► Web ──► API NestJS ──► PSP
-                       │             │
-                       │◄── webhook ─┘
+Usuário ──► Web ──► API NestJS ──► Asaas
+                       │              │
+                       │◄── webhook ──┘
                        │
                        ├── PostgreSQL: planos, assinaturas e pagamentos
                        │
@@ -28,7 +31,9 @@ Usuário ──► Web ──► API NestJS ──► PSP
                               └── WhatsApp/IA
 ```
 
-O PSP será responsável pelo processamento de cartão, Pix e demais meios de pagamento. A aplicação deverá armazenar somente identificadores externos, estado da assinatura e informações não sensíveis necessárias ao negócio.
+O Asaas será responsável pela coleta e tokenização dos dados do cartão, criação das cobranças recorrentes e processamento financeiro. A aplicação deverá armazenar somente identificadores externos, estado da assinatura e informações não sensíveis necessárias ao negócio.
+
+O backend do Financial Vellun não deverá receber número completo do cartão ou CVV. A integração deverá priorizar o Checkout Asaas com assinatura recorrente. Se algum fluxo exigir formulário incorporado, a tokenização deverá ocorrer diretamente entre o navegador e o Asaas.
 
 ## 3. Situação Atual do Projeto
 
@@ -64,7 +69,6 @@ Plan
 - price
 - currency
 - interval
-- providerPriceId
 - isActive
 - features
 - createdAt
@@ -90,6 +94,13 @@ Subscription
 - createdAt
 - updatedAt
 ```
+
+No Asaas:
+
+- `providerCustomerId` corresponde ao identificador do cliente;
+- `providerSubscriptionId` corresponde ao identificador da assinatura;
+- cada recorrência gera uma cobrança própria, cujo identificador será armazenado em `Payment.providerPaymentId`;
+- o plano e suas funcionalidades continuam sendo entidades internas do Financial Vellun.
 
 Estados recomendados:
 
@@ -480,30 +491,75 @@ Se o produto cobrar apenas sua própria assinatura por meio de um PSP, normalmen
 
 Nesse cenário, será necessária análise jurídica e regulatória específica.
 
-## 12. Critérios para Escolha do PSP
+## 12. PSP Selecionado: Asaas
 
-Avaliar os provedores usando uma matriz comparativa:
+### 12.1 Decisão
 
-- suporte a cartão recorrente;
-- Pix e Pix Automático, quando aplicável;
-- checkout hospedado ou tokenização;
-- qualidade e documentação dos webhooks;
-- idempotência;
-- retentativa automática de cobrança;
-- atualização de cartão;
-- portal do cliente;
-- cancelamento e reembolso;
-- chargeback e antifraude;
-- split, somente se houver necessidade futura;
-- relatórios e conciliação;
-- suporte a sandbox;
-- disponibilidade e SLA;
-- suporte técnico no Brasil;
-- custos fixos e variáveis;
+O Asaas foi selecionado como PSP da primeira versão do Financial Vellun.
+
+Fatores determinantes:
+
+- suporte a assinatura recorrente por cartão;
+- checkout hospedado com recorrência;
+- operação, documentação e suporte orientados ao mercado brasileiro;
+- sandbox para desenvolvimento;
+- webhooks para acompanhar cobranças e assinaturas;
+- suporte a cancelamento, estorno e chargeback;
+- relatórios e recursos de conciliação;
+- conformidade PCI DSS documentada;
+- ausência de mensalidade ou taxa de adesão na oferta pública consultada;
+- possibilidade de emissão de NFS-e e expansão futura para outros meios de pagamento.
+
+### 12.2 Escopo contratado inicialmente
+
+- moeda: BRL;
+- meio de pagamento: cartão de crédito;
+- modalidade: cobrança recorrente;
+- periodicidade inicial: mensal e/ou anual, conforme os planos definidos;
+- checkout: hospedado pelo Asaas;
+- ativação: somente após confirmação de pagamento recebida por webhook ou reconciliação;
+- split: fora do escopo;
+- Pix, Pix Automático e boleto: fora do escopo;
+- armazenamento de cartão no Financial Vellun: proibido.
+
+### 12.3 Pontos que exigem confirmação comercial
+
+Antes da entrada em produção, obter confirmação formal do Asaas sobre:
+
+- taxas de cartão recorrente aplicáveis à conta;
 - prazo de recebimento;
-- conformidade PCI DSS;
-- DPA, suboperadores e transferência internacional;
-- exportação dos dados em caso de migração.
+- regras e custos de antecipação;
+- política e custo de chargeback;
+- estratégia disponível para retentativas de cobranças recusadas;
+- mecanismo para atualização do cartão de uma assinatura;
+- SLA e canais de suporte;
+- limites de requisição da API;
+- procedimento para exportação de clientes, assinaturas e cobranças;
+- possibilidade e condições de portabilidade dos tokens de cartão;
+- DPA, suboperadores e localização ou transferência internacional dos dados;
+- questionário PCI DSS aplicável ao Checkout Asaas escolhido.
+
+Preços públicos devem ser tratados como referência, não como condição contratual permanente.
+
+### 12.4 Particularidades da integração
+
+- O plano comercial será mantido no banco do Financial Vellun.
+- O Asaas manterá o cliente, a assinatura e as cobranças geradas por recorrência.
+- A assinatura local não será ativada pelo redirecionamento do checkout.
+- Cada evento de webhook será persistido e processado de forma idempotente.
+- O webhook deve ser protegido pelo mecanismo de autenticação disponibilizado pelo Asaas.
+- Após receber um evento crítico, a aplicação poderá consultar a API do Asaas para confirmar o estado atual antes de conceder ou revogar acesso.
+- A reconciliação periódica deverá comparar assinaturas e cobranças locais com os dados do Asaas.
+- O cancelamento local deverá interromper a geração de novas cobranças no Asaas e preservar a regra de acesso até o final do período já pago, quando aplicável.
+- O tratamento de atualização de cartão dependerá do fluxo seguro oferecido pelo Asaas e nunca deverá solicitar dados completos do cartão ao backend.
+
+Referências técnicas:
+
+- [Asaas — Assinaturas](https://docs.asaas.com/docs/assinaturas)
+- [Asaas — Checkout com assinatura recorrente](https://docs.asaas.com/docs/checkout-com-assinatura-recorrente)
+- [Asaas — Webhooks](https://docs.asaas.com/docs/webhooks)
+- [Asaas — PCI DSS](https://docs.asaas.com/docs/pci-dss-1)
+- [Asaas — Preços e taxas](https://www.asaas.com/precos-e-taxas)
 
 A camada de domínio não deve depender diretamente dos tipos do SDK do PSP.
 
@@ -513,13 +569,20 @@ Interface sugerida:
 interface PaymentProvider {
   createCustomer(input: CreateCustomerInput): Promise<ProviderCustomer>;
   createCheckout(input: CreateCheckoutInput): Promise<CheckoutSession>;
-  createBillingPortal(input: BillingPortalInput): Promise<BillingPortalSession>;
+  createPaymentMethodUpdateSession(
+    input: PaymentMethodUpdateInput,
+  ): Promise<PaymentMethodUpdateSession>;
   cancelSubscription(input: CancelSubscriptionInput): Promise<void>;
   getSubscription(providerSubscriptionId: string): Promise<ProviderSubscription>;
+  listSubscriptionPayments(
+    providerSubscriptionId: string,
+  ): Promise<ProviderPayment[]>;
   refundPayment(input: RefundPaymentInput): Promise<ProviderRefund>;
   verifyWebhook(input: VerifyWebhookInput): Promise<VerifiedPaymentEvent>;
 }
 ```
+
+O adapter `AsaasPaymentProvider` será o único módulo autorizado a utilizar diretamente o SDK ou os contratos HTTP do Asaas. Controllers, guards e serviços de domínio trabalharão apenas com os tipos internos acima.
 
 ## 13. Plano de Implementação
 
@@ -532,15 +595,17 @@ interface PaymentProvider {
 - Definir período de teste.
 - Definir janela de tolerância.
 - Definir política de cancelamento e reembolso.
-- Definir meios de pagamento.
-- Comparar e selecionar o PSP.
+- Confirmar cartão de crédito como único meio de pagamento do MVP.
+- Contratar e homologar a conta Asaas.
+- Obter proposta comercial e documentos de compliance do Asaas.
 - Revisar contratos, privacidade e obrigações fiscais.
 - Definir quem pode realizar alterações manuais nas assinaturas.
 
 #### Critério de conclusão
 
 - Política comercial aprovada.
-- PSP selecionado.
+- Asaas contratado e conta aprovada para produção.
+- Taxas, recebimento e suporte confirmados formalmente.
 - Contratos e responsabilidades documentados.
 - Estados e transições da assinatura definidos.
 
@@ -571,28 +636,35 @@ packages/shared/src/
 - Transições inválidas são rejeitadas.
 - O domínio não depende diretamente de um SDK específico.
 
-### Fase 3 — Integração com o PSP
+### Fase 3 — Integração com o Asaas
 
 #### Tarefas
 
-- Implementar adapter do PSP escolhido.
-- Criar ou recuperar customer.
-- Criar checkout.
-- Criar portal de cobrança.
+- Implementar `AsaasPaymentProvider`.
+- Configurar cliente HTTP, autenticação, timeout e retry seguro.
+- Criar ou recuperar o cliente no Asaas.
+- Criar Checkout Asaas com assinatura recorrente por cartão.
+- Implementar o fluxo seguro de atualização do cartão disponibilizado pelo Asaas.
 - Criar endpoint de webhook.
-- Validar assinatura e timestamp.
-- Implementar idempotência.
+- Validar a autenticação do webhook conforme o mecanismo do Asaas.
+- Persistir o identificador único de cada evento antes de processá-lo.
+- Mapear eventos do Asaas para estados internos de assinatura e pagamento.
+- Consultar a API do Asaas para confirmar eventos críticos quando necessário.
 - Processar eventos de forma assíncrona.
 - Implementar retry, backoff e DLQ.
 - Criar rotina de reconciliação.
+- Configurar variáveis como `ASAAS_API_URL`, `ASAAS_API_KEY` e `ASAAS_WEBHOOK_TOKEN`.
+- Manter credenciais e dados de sandbox separados de produção.
 
 #### Critério de conclusão
 
-- Checkout funciona no sandbox.
+- Checkout recorrente por cartão funciona no sandbox do Asaas.
 - Pagamento aprovado ativa a assinatura.
 - Evento duplicado não gera efeitos duplicados.
 - Falha no processamento pode ser reexecutada.
-- Divergências podem ser detectadas pela reconciliação.
+- Pagamento recusado não concede acesso.
+- Cancelamento interrompe futuras cobranças conforme a política definida.
+- Divergências entre o banco local e o Asaas podem ser detectadas pela reconciliação.
 
 ### Fase 4 — Controle de acesso
 
@@ -623,7 +695,7 @@ packages/shared/src/
 - Criar páginas de retorno e cancelamento do checkout.
 - Criar tela “Minha assinatura”.
 - Exibir plano, status, próxima cobrança e cancelamento programado.
-- Permitir atualização do meio de pagamento via portal do PSP.
+- Permitir atualização do cartão por um fluxo hospedado ou tokenizado pelo Asaas.
 - Permitir cancelamento.
 - Exibir avisos de pagamento recusado e grace period.
 - Redirecionar erros `SUBSCRIPTION_REQUIRED` para a área de billing.
@@ -687,7 +759,7 @@ packages/shared/src/
 #### Estratégia de rollout
 
 1. ambiente local com mocks;
-2. sandbox do PSP;
+2. sandbox do Asaas;
 3. ambiente de staging;
 4. testes internos;
 5. beta com poucos usuários;
@@ -723,7 +795,7 @@ packages/shared/src/
 
 - banco e migrations;
 - endpoints de billing;
-- webhook assinado;
+- webhook autenticado com o token configurado no Asaas;
 - criação de checkout;
 - processamento em fila;
 - reconciliação;
@@ -741,7 +813,7 @@ packages/shared/src/
 
 - CSRF;
 - replay de webhook;
-- assinatura inválida;
+- token de autenticação do webhook inválido;
 - manipulação de `userId`;
 - escalada de privilégio;
 - vazamento de dados em logs;
@@ -749,14 +821,23 @@ packages/shared/src/
 - enumeração de clientes e assinaturas;
 - acesso indevido a portal ou checkout de outro usuário.
 
-## 15. Decisões que Devem Ser Tomadas Antes da Implementação
+## 15. Decisões e Pendências Antes da Implementação
 
-- PSP escolhido.
+Decisões tomadas:
+
+- PSP: Asaas.
+- Meio de pagamento do MVP: cartão de crédito.
+- Modelo: assinatura recorrente.
+- Moeda: BRL.
+- Pix, Pix Automático, boleto e split: fora do escopo inicial.
+- Dados completos de cartão não passarão pelo backend.
+
+Pendências:
+
 - Planos e valores.
 - Cobrança mensal, anual ou ambas.
 - Existência e duração do trial.
 - Duração do grace period.
-- Meios de pagamento.
 - Política de cancelamento.
 - Política de reembolso.
 - Comportamento em chargeback.
@@ -764,6 +845,11 @@ packages/shared/src/
 - Limites por plano.
 - Processo de emissão fiscal.
 - Responsável interno por privacidade e incidentes.
+- Condições comerciais finais do Asaas.
+- Fluxo definitivo de atualização de cartão.
+- Estratégia de retentativa de cobranças recusadas.
+- Eventos de webhook que serão tratados na primeira versão.
+- Política de reconciliação com o Asaas.
 
 ## 16. Estimativa Inicial
 
@@ -779,9 +865,9 @@ Fase 6: 5 a 8 dias
 Fase 7: 4 a 7 dias
 ```
 
-Estimativa total: aproximadamente quatro a seis semanas, dependendo do PSP escolhido, da infraestrutura disponível e do grau de automação exigido.
+Estimativa total: aproximadamente quatro a seis semanas, dependendo da homologação da conta Asaas, da infraestrutura disponível e do grau de automação exigido.
 
-Essa estimativa não inclui o tempo de revisão jurídica, homologação fiscal, contratação do PSP ou análise formal feita por assessor PCI.
+Essa estimativa não inclui o tempo de revisão jurídica, homologação fiscal, contratação e aprovação da conta Asaas ou análise formal feita por assessor PCI.
 
 ## 17. Definition of Done
 
@@ -802,4 +888,3 @@ A funcionalidade poderá ser considerada pronta para produção quando:
 - o enquadramento PCI tiver sido validado;
 - o procedimento de resposta a incidentes estiver aprovado;
 - monitoramento e alertas estiverem operacionais.
-

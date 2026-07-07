@@ -1,6 +1,16 @@
 import { apiClient } from './api-client';
 
-export interface User {
+export interface Address {
+  postalCode?: string | null;
+  street?: string | null;
+  addressNumber?: string | null;
+  complement?: string | null;
+  neighborhood?: string | null;
+  city?: string | null;
+  state?: string | null;
+}
+
+export interface User extends Address {
   id: string;
   name: string;
   email: string;
@@ -16,6 +26,13 @@ export async function register(data: {
   email: string;
   phone: string;
   password: string;
+  postalCode: string;
+  street: string;
+  addressNumber: string;
+  complement?: string;
+  neighborhood: string;
+  city: string;
+  state: string;
   profileType: 'individual' | 'business';
   cpf?: string;
   birthDate?: string;
@@ -42,8 +59,51 @@ export async function updateMe(data: {
   name?: string;
   email?: string;
   phone?: string | null;
+  postalCode?: string;
+  street?: string;
+  addressNumber?: string;
+  complement?: string;
+  neighborhood?: string;
+  city?: string;
+  state?: string;
 }): Promise<User> {
   return apiClient.patch<User>('/users/me', data);
+}
+
+export interface IndividualProfile {
+  cpf: string;
+  birthDate?: string | null;
+}
+
+export interface BusinessProfile {
+  companyName: string;
+  tradeName?: string | null;
+  cnpj: string;
+}
+
+export interface ProfileResponse {
+  profileType: 'individual' | 'business';
+  individualProfile?: IndividualProfile | null;
+  businessProfile?: BusinessProfile | null;
+}
+
+export async function getProfile(): Promise<ProfileResponse> {
+  return apiClient.get<ProfileResponse>('/users/me/profile');
+}
+
+export async function updateIndividualProfile(data: {
+  cpf: string;
+  birthDate?: string;
+}): Promise<IndividualProfile> {
+  return apiClient.post<IndividualProfile>('/users/me/profile/individual', data);
+}
+
+export async function updateBusinessProfile(data: {
+  companyName: string;
+  tradeName?: string;
+  cnpj: string;
+}): Promise<BusinessProfile> {
+  return apiClient.post<BusinessProfile>('/users/me/profile/business', data);
 }
 
 export async function updatePassword(data: {

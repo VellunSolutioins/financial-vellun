@@ -13,6 +13,7 @@ import {
 import { ApiCookieAuth, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { ActiveSubscriptionGuard } from '../billing/guards/active-subscription.guard';
 import { TransactionsService } from './transactions.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
@@ -20,7 +21,7 @@ import { ListTransactionsDto } from './dto/list-transactions.dto';
 
 @ApiCookieAuth()
 @ApiTags('transactions')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ActiveSubscriptionGuard)
 @Controller('transactions')
 export class TransactionsController {
   constructor(private transactionsService: TransactionsService) {}

@@ -138,12 +138,18 @@ O seed tambem cria um usuario demo para desenvolvimento:
 
 ```txt
 Email: vellunsolutions2026@gmail.com
-Senha: qwerty23
+Senha: qwerty123
 ```
 
 > Para resetar o banco em desenvolvimento: `pnpm --filter @financial-vellun/api exec prisma migrate reset`
 
 ### 5. Configurar o agente de IA (Python)
+
+> **Atenção (Windows × Linux/macOS):** o caminho do Python dentro da venv muda
+> conforme o sistema operacional. No Windows é `.venv\Scripts\python.exe`; no
+> Linux/macOS é `.venv/bin/python`. No bash do Linux/macOS as barras invertidas
+> (`\`) são removidas, então copiar o comando do Windows resulta no erro
+> `.venvScriptspython.exe: comando não encontrado`. Use sempre a coluna do seu SO.
 
 ```bash
 cd apps/ai-agent
@@ -153,12 +159,26 @@ python -m venv .venv
 
 # Se a pasta .venv ja existir, nao recrie por cima.
 # Use a venv existente ou pare os processos Python/uvicorn antes de remove-la e recria-la.
+```
 
-# Instalar dependencias usando o Python da propria venv
+Instalar dependencias usando o Python da propria venv:
+
+```bash
+# Windows
 .venv\Scripts\python.exe -m pip install -e .
 
-# Em produção com backend Redis, instale também o extra:
+# Linux/macOS
+.venv/bin/python -m pip install -e .
+```
+
+Em produção com backend Redis, instale também o extra:
+
+```bash
+# Windows
 .venv\Scripts\python.exe -m pip install -e .[redis]
+
+# Linux/macOS
+.venv/bin/python -m pip install -e '.[redis]'
 ```
 
 A ativacao manual da venv e opcional. Ela so e necessaria quando voce quiser executar comandos Python diretamente dentro de `apps/ai-agent`, como `pytest`, `python` ou `pip`.
@@ -171,7 +191,7 @@ A ativacao manual da venv e opcional. Ela so e necessaria quando voce quiser exe
 source .venv/bin/activate
 ```
 
-Para iniciar o agente pelo monorepo, nao precisa ativar a venv manualmente. O script `pnpm agent:dev` ja usa `.venv\Scripts\python.exe` diretamente.
+Para iniciar o agente pelo monorepo, nao precisa ativar a venv manualmente. O script `pnpm agent:dev` cuida disso (no Windows usa `.venv\Scripts\python.exe`; no Linux/macOS, `.venv/bin/python`).
 
 ---
 
@@ -287,10 +307,15 @@ O backend Redis exige o pacote opcional `redis`:
 
 ```bash
 cd apps/ai-agent
-.venv\Scripts\python.exe -m pip install -e .[redis]
 
+# Windows
+.venv\Scripts\python.exe -m pip install -e .[redis]
 # Servir com uvicorn (sem --reload em produção; ajuste workers conforme a carga)
 .venv\Scripts\python.exe -m uvicorn src.main:app --host 0.0.0.0 --port 8010
+
+# Linux/macOS
+.venv/bin/python -m pip install -e '.[redis]'
+.venv/bin/python -m uvicorn src.main:app --host 0.0.0.0 --port 8010
 ```
 
 O worker do buffer Redis é iniciado/encerrado automaticamente pelo ciclo de
@@ -318,7 +343,10 @@ vida da aplicação ([main.py](apps/ai-agent/src/main.py)). Jobs que falham apó
 pnpm --filter @financial-vellun/api test
 
 # Agente de IA (pytest) — a partir de apps/ai-agent
+# Windows
 cd apps/ai-agent && .venv\Scripts\python.exe -m pytest -q
+# Linux/macOS
+cd apps/ai-agent && .venv/bin/python -m pytest -q
 ```
 
 Cobertura atual: buffer/debounce, ordem de chamada do processor, serviço de
@@ -346,7 +374,54 @@ normalizado e idempotência de `recordMessage` (API).
 
 ---
 
+## Testando pagamentos no sandbox do Asaas
+
+O ambiente sandbox usa **cartões fictícios** — nunca use dados reais em
+homologação. O checkout só abre se o cliente tiver telefone + endereço completos
+e CPF/CNPJ com dígito verificador válido, e se `BILLING_CALLBACK_BASE_URL`
+apontar para uma URL pública (o Asaas recusa `localhost` — ver
+[Problemas comuns](#checkout-do-asaas-retorna-400-successurlcancelurl-inválidos)).
+
+**Cartão que simula aprovação** ✅
+
+| Campo    | Valor                                  |
+| -------- | -------------------------------------- |
+| Número   | `4444 4444 4444 4444`                  |
+| Validade | qualquer data **futura** (ex.: `12/2030`) |
+| CVV      | `123` (ou qualquer 3 dígitos)          |
+
+**Cartões que simulam recusa/falha** ❌
+
+| Bandeira   | Número                |
+| ---------- | --------------------- |
+| Mastercard | `5184 0197 4037 3151` |
+| Visa       | `4916 5613 5824 0741` |
+
+**Dados do titular:** use dados fictícios. Se o checkout pedir CPF do titular,
+informe um CPF com dígito verificador válido (ex.: `249.715.637-92`); um CPF
+"fake" como `111.111.111-11` é recusado. Para gerar mais cartões válidos, o
+Asaas sugere geradores como o 4Devs.
+
+Fluxo de homologação: criar cliente → criar cobrança com cartão → resposta da
+API → webhook de pagamento → atualizar status. Teste tanto o cenário de sucesso
+quanto o de recusa. Referência:
+[Testing Credit Card Payment — Asaas Docs](https://docs.asaas.com/docs/testing-credit-card-payment).
+
+---
+
 ## Problemas comuns
+
+### Checkout do Asaas retorna `400` (`successUrl`/`cancelUrl` inválidos)
+
+O Asaas **recusa URLs `localhost`** nos redirects do checkout. Em
+desenvolvimento, defina `BILLING_CALLBACK_BASE_URL` em `apps/api/.env` com uma
+URL pública (ex.: um túnel `https://SEU-ID.ngrok-free.app`) — `WEB_URL`
+continua `http://localhost:3000` para o restante do app. Sem isso, a abertura do
+checkout falha.
+
+Outros `400` na criação do cliente costumam ser dados recusados pelo Asaas
+(ex.: *"O CPF/CNPJ informado é inválido."*): o cadastro agora valida o dígito
+verificador, e a mensagem do Asaas é repassada ao usuário.
 
 ### Porta da API em uso
 

@@ -18,6 +18,11 @@ function createPrismaMock() {
       findUnique: jest.fn(),
       create: jest.fn(),
     },
+    user: { findUnique: jest.fn() },
+    account: { findMany: jest.fn(), findUnique: jest.fn() },
+    category: { findMany: jest.fn(), findUnique: jest.fn() },
+    transaction: { create: jest.fn() },
+    aiExtractedTransaction: { update: jest.fn() },
   };
 }
 
@@ -25,9 +30,15 @@ describe('InternalService', () => {
   let prisma: ReturnType<typeof createPrismaMock>;
   let service: InternalService;
 
+  let access: { canUseProduct: jest.Mock; isEnforced: jest.Mock };
+
   beforeEach(() => {
     prisma = createPrismaMock();
-    service = new InternalService(prisma as any, {} as any);
+    access = {
+      canUseProduct: jest.fn().mockResolvedValue({ allowed: true }),
+      isEnforced: jest.fn().mockReturnValue(true),
+    };
+    service = new InternalService(prisma as any, {} as any, access as any);
   });
 
   describe('listRecentMessagesByPhone', () => {
@@ -74,6 +85,57 @@ describe('InternalService', () => {
       );
       expect(result.conversationId).toBe('conv1');
       expect(result.messages.map((m: any) => m.id)).toEqual(['m1', 'm2']);
+    });
+  });
+
+  describe('controle de assinatura', () => {
+    it('listAccounts bloqueia usuário sem assinatura', async () => {
+      access.canUseProduct.mockResolvedValue({ allowed: false });
+
+      await expect(service.listAccounts('u1')).rejects.toMatchObject({
+        getResponse: expect.any(Function),
+      });
+      expect(prisma.account.findMany).not.toHaveBeenCalled();
+    });
+
+    it('listAccounts libera usuário com assinatura', async () => {
+      access.canUseProduct.mockResolvedValue({ allowed: true });
+      prisma.account.findMany.mockResolvedValue([{ id: 'a1' }]);
+
+      const result = await service.listAccounts('u1');
+
+      expect(access.canUseProduct).toHaveBeenCalledWith('u1');
+      expect(result).toEqual([{ id: 'a1' }]);
+    });
+
+    it('createTransactionFromAi bloqueia antes de tocar no banco quando sem assinatura', async () => {
+      access.canUseProduct.mockResolvedValue({ allowed: false });
+
+      await expect(
+        service.createTransactionFromAi({ userId: 'u1', accountId: 'a1' } as any),
+      ).rejects.toMatchObject({ getResponse: expect.any(Function) });
+      expect(prisma.account.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('libera listAccounts quando a obrigatoriedade está desligada (rollout)', async () => {
+      access.isEnforced.mockReturnValue(false);
+      access.canUseProduct.mockResolvedValue({ allowed: false });
+      prisma.account.findMany.mockResolvedValue([{ id: 'a1' }]);
+
+      const result = await service.listAccounts('u1');
+
+      expect(result).toEqual([{ id: 'a1' }]);
+      expect(access.canUseProduct).not.toHaveBeenCalled();
+    });
+
+    it('createTransactionFromAi rejeita conta de outro usuário (userId manipulado)', async () => {
+      access.canUseProduct.mockResolvedValue({ allowed: true });
+      prisma.account.findUnique.mockResolvedValue({ id: 'a1', userId: 'outro' });
+
+      await expect(
+        service.createTransactionFromAi({ userId: 'u1', accountId: 'a1' } as any),
+      ).rejects.toThrow('Conta inválida para o usuário');
+      expect(prisma.transaction.create).not.toHaveBeenCalled();
     });
   });
 

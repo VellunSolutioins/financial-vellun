@@ -2,11 +2,12 @@ import { Controller, Get, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiCookieAuth, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { ActiveSubscriptionGuard } from '../billing/guards/active-subscription.guard';
 import { DashboardService } from './dashboard.service';
 
 @ApiCookieAuth()
 @ApiTags('dashboard')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ActiveSubscriptionGuard)
 @Controller('dashboard')
 export class DashboardController {
   constructor(private dashboardService: DashboardService) {}

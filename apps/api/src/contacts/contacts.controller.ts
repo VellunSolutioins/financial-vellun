@@ -14,13 +14,14 @@ import { ApiCookieAuth, ApiTags } from '@nestjs/swagger';
 import { ContactType } from '@prisma/client';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { ActiveSubscriptionGuard } from '../billing/guards/active-subscription.guard';
 import { ContactsService } from './contacts.service';
 import { CreateContactDto } from './dto/create-contact.dto';
 import { UpdateContactDto } from './dto/update-contact.dto';
 
 @ApiCookieAuth()
 @ApiTags('contacts')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, ActiveSubscriptionGuard)
 @Controller('contacts')
 export class ContactsController {
   constructor(private contactsService: ContactsService) {}
