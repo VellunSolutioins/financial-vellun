@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
-import { apiClient, type PaginatedResponse } from '@/lib/api-client';
+import { apiClient } from '@/lib/api-client';
 
 export interface Transaction {
   id: string;
@@ -32,6 +32,17 @@ export interface TransactionFilters {
   order?: 'asc' | 'desc';
 }
 
+interface TransactionsResponse {
+  data: Transaction[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages?: number;
+    total_pages?: number;
+  };
+}
+
 export function useTransactions(filters: TransactionFilters) {
   const [data, setData] = useState<Transaction[]>([]);
   const [meta, setMeta] = useState({ total: 0, page: 1, limit: 20, total_pages: 1 });
@@ -49,9 +60,14 @@ export function useTransactions(filters: TransactionFilters) {
       Object.entries(JSON.parse(filtersKey) as TransactionFilters).forEach(([k, v]) => {
         if (v !== undefined && v !== '') params.set(k, String(v));
       });
-      const res = await apiClient.get<PaginatedResponse<Transaction>>(`/transactions?${params}`);
+      const res = await apiClient.get<TransactionsResponse>(`/transactions?${params}`);
       setData(res.data);
-      setMeta(res.meta);
+      setMeta({
+        total: res.meta.total,
+        page: res.meta.page,
+        limit: res.meta.limit,
+        total_pages: res.meta.total_pages ?? res.meta.totalPages ?? 1,
+      });
     } catch {
       setError('Erro ao carregar lançamentos');
     } finally {
