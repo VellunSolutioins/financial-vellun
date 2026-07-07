@@ -6,6 +6,12 @@ import { Request } from 'express';
 import { CSRF_COOKIE, CSRF_HEADER } from '../csrf.util';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+const AUTH_CSRF_EXEMPT_PATHS = new Set([
+  '/auth/login',
+  '/auth/register',
+  '/auth/logout',
+  '/auth/refresh',
+]);
 
 /**
  * Proteção CSRF por double-submit. Exigida apenas em requisições que mudam
@@ -20,6 +26,7 @@ export class CsrfGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<Request>();
 
     if (SAFE_METHODS.has(request.method.toUpperCase())) return true;
+    if (this.isAuthCsrfExemptPath(request)) return true;
 
     const cookies = (request.cookies ?? {}) as Record<string, string | undefined>;
     const hasSession = Boolean(cookies['access_token'] || cookies['refresh_token']);
@@ -48,5 +55,10 @@ export class CsrfGuard implements CanActivate {
     const bufB = Buffer.from(b);
     if (bufA.length !== bufB.length) return false;
     return timingSafeEqual(bufA, bufB);
+  }
+
+  private isAuthCsrfExemptPath(request: Request): boolean {
+    const path = request.path ?? request.url?.split('?')[0];
+    return Boolean(path && AUTH_CSRF_EXEMPT_PATHS.has(path));
   }
 }

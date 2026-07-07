@@ -7,7 +7,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
-import { issueCsrfCookie } from '../common/csrf.util';
+import { CSRF_COOKIE, issueCsrfCookie } from '../common/csrf.util';
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -42,6 +42,7 @@ export class AuthController {
   async logout(@Res({ passthrough: true }) res: Response) {
     res.clearCookie('access_token', COOKIE_OPTIONS);
     res.clearCookie('refresh_token', COOKIE_OPTIONS);
+    res.clearCookie(CSRF_COOKIE, { ...COOKIE_OPTIONS, httpOnly: false });
     return { message: 'Logout realizado com sucesso' };
   }
 
