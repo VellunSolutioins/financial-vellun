@@ -62,12 +62,21 @@ export class BillingService {
 
     let providerCustomerId = current?.providerCustomerId ?? null;
     if (!providerCustomerId) {
+      // O provedor de pagamentos exige telefone + endereço completo para
+      // checkout com cartão. Validamos aqui para devolver um erro acionável em
+      // vez de deixar o provedor recusar com uma mensagem genérica.
+      this.assertBillingProfileComplete(user);
       const customer = await this.provider.createCustomer({
         userId,
         name: user.name,
         email: user.email,
         phone: user.phone,
         document,
+        postalCode: user.postalCode,
+        street: user.street,
+        addressNumber: user.addressNumber,
+        complement: user.complement,
+        neighborhood: user.neighborhood,
       });
       providerCustomerId = customer.id;
     }
@@ -87,6 +96,31 @@ export class BillingService {
     await this.subscriptions.prepareCheckoutSubscription(userId, plan.id, providerCustomerId);
 
     return { checkoutUrl: checkout.checkoutUrl };
+  }
+
+  /**
+   * Garante que o usuário tem telefone + endereço de cobrança completos antes de
+   * abrir o checkout. Sem isso, o provedor recusa a criação do cliente.
+   */
+  private assertBillingProfileComplete(user: {
+    phone: string | null;
+    postalCode: string | null;
+    street: string | null;
+    addressNumber: string | null;
+    neighborhood: string | null;
+  }) {
+    const missing: string[] = [];
+    if (!user.phone) missing.push('telefone');
+    if (!user.postalCode) missing.push('CEP');
+    if (!user.street) missing.push('logradouro');
+    if (!user.addressNumber) missing.push('número');
+    if (!user.neighborhood) missing.push('bairro');
+
+    if (missing.length > 0) {
+      throw new BadRequestException(
+        `Complete seu endereço de cobrança em "Minha Conta" antes de assinar (faltando: ${missing.join(', ')}).`,
+      );
+    }
   }
 
   /** Abre o fluxo seguro de atualização de cartão (hospedado pelo Asaas). */
@@ -124,7 +158,17 @@ export class BillingService {
     return this.getSubscriptionState(userId);
   }
 
+  /**
+   * Base das URLs de redirecionamento enviadas ao provedor de pagamentos
+   * (successUrl/cancelUrl/returnUrl). O Asaas **recusa `localhost`**, então em
+   * desenvolvimento use `BILLING_CALLBACK_BASE_URL` apontando para uma URL
+   * pública (ex.: túnel ngrok). Em produção cai no `WEB_URL` do domínio real.
+   */
   private webUrl(): string {
-    return this.config.get<string>('WEB_URL') ?? 'http://localhost:3000';
+    return (
+      this.config.get<string>('BILLING_CALLBACK_BASE_URL') ??
+      this.config.get<string>('WEB_URL') ??
+      'http://localhost:3000'
+    );
   }
 }

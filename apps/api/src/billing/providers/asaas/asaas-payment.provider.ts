@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 
 import {
+  BadRequestException,
   Injectable,
   InternalServerErrorException,
   Logger,
@@ -26,7 +27,7 @@ import {
   VerifiedPaymentEvent,
   VerifyWebhookInput,
 } from '../payment-provider.interface';
-import { AsaasHttpClient } from './asaas.http-client';
+import { AsaasApiError, AsaasHttpClient } from './asaas.http-client';
 import { mapPayment, mapSubscription, toAsaasCycle } from './asaas.mapper';
 import { normalizeAsaasWebhookEvent } from './asaas-webhook.mapper';
 import {
@@ -38,6 +39,9 @@ import {
   AsaasSubscription,
   AsaasWebhookEvent,
 } from './asaas.types';
+
+/** Fuso horário de negócio da aplicação (datas de cobrança em horário do Brasil). */
+const APP_TIME_ZONE = 'America/Sao_Paulo';
 
 /**
  * Único módulo autorizado a falar com o Asaas. Mapeia tudo para os tipos
@@ -55,37 +59,56 @@ export class AsaasPaymentProvider implements PaymentProvider {
   constructor(private readonly config: ConfigService) {}
 
   async createCustomer(input: CreateCustomerInput): Promise<ProviderCustomer> {
-    const customer = await this.getClient().post<AsaasCustomer>('/customers', {
-      name: input.name,
-      email: input.email,
-      cpfCnpj: input.document ?? undefined,
-      mobilePhone: input.phone ?? undefined,
-      externalReference: input.userId,
-    });
-    return { id: customer.id };
+    try {
+      const customer = await this.getClient().post<AsaasCustomer>('/customers', {
+        name: input.name,
+        email: input.email,
+        cpfCnpj: this.onlyDigits(input.document),
+        // O Asaas espera apenas dígitos no telefone/CEP (sem máscara).
+        mobilePhone: this.onlyDigits(input.phone),
+        postalCode: this.onlyDigits(input.postalCode),
+        address: input.street ?? undefined,
+        addressNumber: input.addressNumber ?? undefined,
+        complement: input.complement ?? undefined,
+        province: input.neighborhood ?? undefined,
+        externalReference: input.userId,
+      });
+      return { id: customer.id };
+    } catch (error) {
+      this.rethrowAsClientError(error, 'criar o cliente');
+    }
   }
 
   async createCheckout(input: CreateCheckoutInput): Promise<CheckoutSession> {
-    const checkout = await this.getClient().post<AsaasCheckout>('/checkouts', {
-      billingTypes: ['CREDIT_CARD'],
-      chargeTypes: ['RECURRENT'],
-      minutesToExpire: 60,
-      customer: input.providerCustomerId,
-      callback: {
-        successUrl: input.successUrl,
-        cancelUrl: input.cancelUrl,
-      },
-      items: [
-        {
-          name: input.planCode,
-          quantity: 1,
-          value: Number(input.amount),
+    let checkout: AsaasCheckout;
+    try {
+      checkout = await this.getClient().post<AsaasCheckout>('/checkouts', {
+        billingTypes: ['CREDIT_CARD'],
+        chargeTypes: ['RECURRENT'],
+        minutesToExpire: 60,
+        customer: input.providerCustomerId,
+        callback: {
+          successUrl: input.successUrl,
+          cancelUrl: input.cancelUrl,
         },
-      ],
-      subscription: {
-        cycle: toAsaasCycle(input.interval),
-      },
-    });
+        items: [
+          {
+            name: input.planCode,
+            quantity: 1,
+            value: Number(input.amount),
+          },
+        ],
+        subscription: {
+          cycle: toAsaasCycle(input.interval),
+          // Asaas exige a data da primeira cobrança para checkouts RECURRENT.
+          // A cobrança efetiva ocorre quando o cliente conclui o checkout; usamos
+          // a data de hoje (fuso da API) como primeiro vencimento.
+          nextDueDate: this.today(),
+        },
+      });
+    } catch (error) {
+      this.rethrowAsClientError(error, 'abrir o checkout');
+    }
 
     const checkoutUrl = checkout.link ?? checkout.url;
     if (!checkoutUrl) {
@@ -163,6 +186,56 @@ export class AsaasPaymentProvider implements PaymentProvider {
 
   // ── Internos ──────────────────────────────────────────────────────────────
 
+  /**
+   * Data de hoje (`YYYY-MM-DD`) no fuso da aplicação (America/Sao_Paulo). Usar
+   * UTC aqui adiantaria um dia quando o checkout ocorre à noite no Brasil (≥21h),
+   * pois já é o dia seguinte em UTC — resultando num primeiro vencimento errado.
+   */
+  private today(): string {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: APP_TIME_ZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+  }
+
+  /** Remove tudo que não for dígito (telefone, CEP, CPF/CNPJ mascarados). */
+  private onlyDigits(value?: string | null): string | undefined {
+    if (!value) return undefined;
+    const digits = value.replace(/\D/g, '');
+    return digits.length > 0 ? digits : undefined;
+  }
+
+  /**
+   * Converte um erro do Asaas em uma exceção apropriada para o cliente. Erros de
+   * validação (4xx) viram `BadRequestException` com a(s) descrição(ões) do Asaas
+   * (sem segredos) — ex.: "O CPF/CNPJ informado é inválido." Demais erros sobem
+   * como estão (viram 5xx). Nunca loga corpos de requisição.
+   */
+  private rethrowAsClientError(error: unknown, action: string): never {
+    if (error instanceof AsaasApiError && error.status >= 400 && error.status < 500) {
+      const description = this.extractAsaasErrors(error.body);
+      this.logger.warn(`Asaas recusou ${action} (HTTP ${error.status}): ${description ?? '—'}`);
+      throw new BadRequestException(
+        description ?? `Não foi possível ${action}. Verifique os dados informados.`,
+      );
+    }
+    throw error;
+  }
+
+  /** Extrai as descrições de erro do corpo padrão do Asaas (`{ errors: [...] }`). */
+  private extractAsaasErrors(body: unknown): string | undefined {
+    if (body && typeof body === 'object' && 'errors' in body) {
+      const errors = (body as { errors?: Array<{ description?: string }> }).errors;
+      if (Array.isArray(errors)) {
+        const messages = errors.map((e) => e?.description).filter((d): d is string => !!d);
+        if (messages.length > 0) return messages.join('; ');
+      }
+    }
+    return undefined;
+  }
+
   private getClient(): AsaasHttpClient {
     if (this.client) return this.client;
 
@@ -185,10 +258,7 @@ export class AsaasPaymentProvider implements PaymentProvider {
     }
   }
 
-  private headerValue(
-    headers: VerifyWebhookInput['headers'],
-    name: string,
-  ): string | undefined {
+  private headerValue(headers: VerifyWebhookInput['headers'], name: string): string | undefined {
     const value = headers?.[name];
     return Array.isArray(value) ? value[0] : value;
   }

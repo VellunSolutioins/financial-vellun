@@ -75,7 +75,12 @@ export class ReconciliationService {
       take: BATCH_SIZE,
     });
 
-    const summary: ReconcileSummary = { checked: candidates.length, corrected: 0, divergent: 0, errors: 0 };
+    const summary: ReconcileSummary = {
+      checked: candidates.length,
+      corrected: 0,
+      divergent: 0,
+      errors: 0,
+    };
 
     for (const local of candidates) {
       try {
@@ -102,6 +107,14 @@ export class ReconciliationService {
     if (!target) return 'consistent';
 
     if (local.status !== target) {
+      // Cancelamento agendado ainda dentro do período pago: o PSP já reporta a
+      // assinatura como cancelada/deletada, mas o acesso é mantido até
+      // `currentPeriodEnd`. A correção para `canceled` ocorre no ciclo seguinte
+      // ao fim do período, quando o cancelamento deixa de estar adiado.
+      if (target === SubscriptionStatus.canceled && this.state.isCancellationDeferred(local)) {
+        return 'consistent';
+      }
+
       if (!this.state.canTransition(local.status, target)) {
         this.alert(
           `Divergência não auto-corrigível na assinatura ${local.id}: ` +
@@ -120,7 +133,10 @@ export class ReconciliationService {
     }
 
     // Mesmo status: detecta deriva no fim do período quando ativa.
-    if (target === SubscriptionStatus.active && this.periodDrifted(local, remote.currentPeriodEnd)) {
+    if (
+      target === SubscriptionStatus.active &&
+      this.periodDrifted(local, remote.currentPeriodEnd)
+    ) {
       await this.prisma.subscription.update({
         where: { id: local.id },
         data: { currentPeriodEnd: remote.currentPeriodEnd },

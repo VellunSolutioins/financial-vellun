@@ -20,6 +20,12 @@ export interface CreateCustomerInput {
   email: string;
   phone?: string | null;
   document?: string | null;
+  /** Endereço de cobrança. `city`/`state` são derivados do CEP pelo provedor. */
+  postalCode?: string | null;
+  street?: string | null;
+  addressNumber?: string | null;
+  complement?: string | null;
+  neighborhood?: string | null;
 }
 
 export interface CreateCheckoutInput {

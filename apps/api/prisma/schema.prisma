@@ -114,6 +114,19 @@ model User {
   phone        String?
   passwordHash String      @map("password_hash")
   profileType  ProfileType @map("profile_type")
+
+  // Endereço de cobrança (usado pelo provedor de pagamentos). Nullable para não
+  // quebrar usuários anteriores à introdução do campo; obrigatório em novos
+  // cadastros via DTO. `city`/`state` são derivados do CEP pelo Asaas, mas
+  // mantidos aqui para exibição e registros próprios.
+  postalCode    String? @map("postal_code")
+  street        String?
+  addressNumber String? @map("address_number")
+  complement    String?
+  neighborhood  String?
+  city          String?
+  state         String?
+
   createdAt    DateTime    @default(now()) @map("created_at")
   updatedAt    DateTime    @updatedAt @map("updated_at")
 

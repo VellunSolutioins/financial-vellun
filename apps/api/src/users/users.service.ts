@@ -31,7 +31,11 @@ export class UsersService {
   async createOrUpdateIndividualProfile(userId: string, dto: CreateIndividualProfileDto) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException();
-    if (user.profileType !== 'individual') throw new ForbiddenException('Usuário não é do tipo individual');
+    if (user.profileType !== 'individual')
+      throw new ForbiddenException('Usuário não é do tipo individual');
+
+    const cpfOwner = await this.prisma.individualProfile.findUnique({ where: { cpf: dto.cpf } });
+    if (cpfOwner && cpfOwner.userId !== userId) throw new ConflictException('CPF já cadastrado');
 
     const existing = await this.prisma.individualProfile.findUnique({ where: { userId } });
     if (existing) {
@@ -41,18 +45,23 @@ export class UsersService {
       });
     }
 
-    const cpfExists = await this.prisma.individualProfile.findUnique({ where: { cpf: dto.cpf } });
-    if (cpfExists) throw new ConflictException('CPF já cadastrado');
-
     return this.prisma.individualProfile.create({
-      data: { userId, cpf: dto.cpf, birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined },
+      data: {
+        userId,
+        cpf: dto.cpf,
+        birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined,
+      },
     });
   }
 
   async createOrUpdateBusinessProfile(userId: string, dto: CreateBusinessProfileDto) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException();
-    if (user.profileType !== 'business') throw new ForbiddenException('Usuário não é do tipo business');
+    if (user.profileType !== 'business')
+      throw new ForbiddenException('Usuário não é do tipo business');
+
+    const cnpjOwner = await this.prisma.businessProfile.findUnique({ where: { cnpj: dto.cnpj } });
+    if (cnpjOwner && cnpjOwner.userId !== userId) throw new ConflictException('CNPJ já cadastrado');
 
     const existing = await this.prisma.businessProfile.findUnique({ where: { userId } });
     if (existing) {
@@ -61,9 +70,6 @@ export class UsersService {
         data: { companyName: dto.companyName, tradeName: dto.tradeName, cnpj: dto.cnpj },
       });
     }
-
-    const cnpjExists = await this.prisma.businessProfile.findUnique({ where: { cnpj: dto.cnpj } });
-    if (cnpjExists) throw new ConflictException('CNPJ já cadastrado');
 
     return this.prisma.businessProfile.create({
       data: { userId, companyName: dto.companyName, tradeName: dto.tradeName, cnpj: dto.cnpj },
@@ -101,6 +107,13 @@ export class UsersService {
         name: dto.name,
         email: dto.email,
         phone: dto.phone,
+        postalCode: dto.postalCode,
+        street: dto.street,
+        addressNumber: dto.addressNumber,
+        complement: dto.complement,
+        neighborhood: dto.neighborhood,
+        city: dto.city,
+        state: dto.state,
       },
       select: {
         id: true,
@@ -108,6 +121,13 @@ export class UsersService {
         email: true,
         phone: true,
         profileType: true,
+        postalCode: true,
+        street: true,
+        addressNumber: true,
+        complement: true,
+        neighborhood: true,
+        city: true,
+        state: true,
         createdAt: true,
         updatedAt: true,
       },

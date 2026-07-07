@@ -63,7 +63,10 @@ describe('AsaasPaymentProvider.verifyWebhook', () => {
   it('rejeita corpo que não é JSON', async () => {
     const provider = makeProvider();
     await expect(
-      provider.verifyWebhook({ rawBody: 'não-json', headers: { 'asaas-access-token': WEBHOOK_TOKEN } }),
+      provider.verifyWebhook({
+        rawBody: 'não-json',
+        headers: { 'asaas-access-token': WEBHOOK_TOKEN },
+      }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
@@ -95,5 +98,16 @@ describe('AsaasPaymentProvider — configuração e stubs', () => {
     await expect(provider.getSubscription('sub_1')).rejects.toBeInstanceOf(
       InternalServerErrorException,
     );
+  });
+});
+
+describe('AsaasPaymentProvider.today (fuso de cobrança)', () => {
+  afterEach(() => jest.useRealTimers());
+
+  it('usa a data no fuso do Brasil, não em UTC (noite no Brasil = dia seguinte em UTC)', () => {
+    // 2026-07-01T02:30:00Z = 2026-06-30 23:30 em America/Sao_Paulo (UTC-3).
+    jest.useFakeTimers().setSystemTime(new Date('2026-07-01T02:30:00Z'));
+    const provider = makeProvider() as unknown as { today: () => string };
+    expect(provider.today()).toBe('2026-06-30');
   });
 });

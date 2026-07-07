@@ -58,7 +58,16 @@ export function mapPaymentStatus(status: AsaasPaymentStatus): string {
 }
 
 function parseDate(value?: string | null): Date | null {
-  return value ? new Date(value) : null;
+  if (!value) return null;
+  // Datas "date-only" do Asaas (`YYYY-MM-DD`, ex.: nextDueDate/dueDate)
+  // representam um DIA de calendário. `new Date('2026-07-30')` seria interpretado
+  // como meia-noite UTC, que em fusos negativos (America/Sao_Paulo, UTC-3) recua
+  // para o dia anterior ao ser exibido. Ancoramos ao meio-dia UTC para preservar
+  // o dia em qualquer fuso (UTC-11..UTC+11).
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return new Date(`${value}T12:00:00Z`);
+  }
+  return new Date(value);
 }
 
 export function mapSubscription(sub: AsaasSubscription): ProviderSubscription {

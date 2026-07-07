@@ -50,7 +50,23 @@ describe('asaas.mapper', () => {
       nextDueDate: '2026-07-15',
     });
     expect(result).toMatchObject({ id: 'sub_1', status: 'active', cancelAtPeriodEnd: false });
-    expect(result.currentPeriodEnd).toEqual(new Date('2026-07-15'));
+    // Data "date-only" ancorada ao meio-dia UTC (preserva o dia em UTC-3).
+    expect(result.currentPeriodEnd).toEqual(new Date('2026-07-15T12:00:00Z'));
+  });
+
+  it('mapSubscription: data de cobrança não recua um dia ao exibir em America/Sao_Paulo (UTC-3)', () => {
+    const result = mapSubscription({
+      id: 'sub_2',
+      customer: 'cus_1',
+      status: 'ACTIVE',
+      cycle: 'MONTHLY',
+      value: 49.9,
+      nextDueDate: '2026-07-30',
+    });
+    const shown = result.currentPeriodEnd?.toLocaleDateString('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+    });
+    expect(shown).toBe('30/07/2026');
   });
 
   it('mapPayment formata valor e usa paymentDate', () => {
@@ -62,6 +78,6 @@ describe('asaas.mapper', () => {
       paymentDate: '2026-07-14',
     });
     expect(result).toMatchObject({ id: 'pay_1', status: 'paid', amount: '49.90', currency: 'BRL' });
-    expect(result.paidAt).toEqual(new Date('2026-07-14'));
+    expect(result.paidAt).toEqual(new Date('2026-07-14T12:00:00Z'));
   });
 });
