@@ -30,6 +30,26 @@ const sourceLabels: Record<string, string> = {
   recurring: 'Recorrente',
 };
 
+function monthLabel(month: string) {
+  const [year, monthNumber] = month.split('-');
+  return `${monthNumber}/${year.slice(2)}`;
+}
+
+function currentMonth() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function monthRange(month: string) {
+  const [year, monthNumber] = month.split('-').map(Number);
+  const start = `${year}-${String(monthNumber).padStart(2, '0')}-01`;
+  const endDate = new Date(Date.UTC(year, monthNumber, 0));
+  const end = `${year}-${String(monthNumber).padStart(2, '0')}-${String(
+    endDate.getUTCDate(),
+  ).padStart(2, '0')}`;
+  return { start, end };
+}
+
 function TransacoesContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -37,16 +57,25 @@ function TransacoesContent() {
   const confirm = useConfirm();
   const [modalOpen, setModalOpen] = useState(false);
   const [editingTx, setEditingTx] = useState<Transaction | undefined>();
+  const selectedMonth = searchParams.get('month') ?? currentMonth();
+  const { start: monthStart, end: monthEnd } = monthRange(selectedMonth);
+
+  const monthOptions = Array.from({ length: 12 }, (_, index) => {
+    const ref = new Date();
+    ref.setMonth(ref.getMonth() - index);
+    return `${ref.getFullYear()}-${String(ref.getMonth() + 1).padStart(2, '0')}`;
+  });
 
   const filters = {
     page: Number(searchParams.get('page') ?? 1),
-    limit: 10,
+    limit: 15,
     type: searchParams.get('type') ?? undefined,
     status: searchParams.get('status') ?? undefined,
     source: searchParams.get('source') ?? undefined,
+    categoryId: searchParams.get('categoryId') ?? undefined,
     search: searchParams.get('search') ?? undefined,
-    periodStart: searchParams.get('periodStart') ?? undefined,
-    periodEnd: searchParams.get('periodEnd') ?? undefined,
+    periodStart: monthStart,
+    periodEnd: monthEnd,
   };
 
   const { data, meta, loading, refetch } = useTransactions(filters);
@@ -55,7 +84,7 @@ function TransacoesContent() {
     const params = new URLSearchParams(searchParams.toString());
     if (value) params.set(key, value);
     else params.delete(key);
-    params.delete('page');
+    if (key !== 'page') params.delete('page');
     router.push(`?${params.toString()}`);
   };
 
@@ -93,11 +122,24 @@ function TransacoesContent() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold">Lançamentos</h1>
-        <Button onClick={openNew}>+ Novo lançamento</Button>
+        <div className="flex items-center gap-2">
+          <Select
+            value={selectedMonth}
+            onChange={(e) => setParam('month', e.target.value)}
+            className="h-9 w-auto text-sm"
+          >
+            {monthOptions.map((month) => (
+              <option key={month} value={month}>
+                {monthLabel(month)}
+              </option>
+            ))}
+          </Select>
+          <Button onClick={openNew}>+ Novo lançamento</Button>
+        </div>
       </div>
 
       {/* Filters */}
-      <div className="bg-white rounded-lg border p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="bg-white rounded-lg border p-4 grid grid-cols-2 md:grid-cols-5 gap-3">
         <Input
           placeholder="Buscar descrição..."
           defaultValue={filters.search}
@@ -115,11 +157,13 @@ function TransacoesContent() {
           <option value="pending">Pendente</option>
           <option value="cancelled">Cancelado</option>
         </Select>
-        <Input
-          type="date"
-          defaultValue={filters.periodStart}
-          onChange={(e) => setParam('periodStart', e.target.value)}
-        />
+        <Select
+          defaultValue={filters.categoryId}
+          onChange={(e) => setParam('categoryId', e.target.value)}
+        >
+          <option value="">Todas categorias</option>
+          <option value="uncategorized">Sem categoria</option>
+        </Select>
       </div>
 
       {/* Table */}
@@ -203,31 +247,34 @@ function TransacoesContent() {
         )}
       </div>
 
-      {/* Pagination */}
-      {meta.total_pages > 1 && (
-        <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">{meta.total} lançamentos</p>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={meta.page <= 1}
-              onClick={() => setParam('page', String(meta.page - 1))}
-            >
-              Anterior
-            </Button>
-            <span className="flex items-center px-3 text-sm">
-              {meta.page}/{meta.total_pages}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={meta.page >= meta.total_pages}
-              onClick={() => setParam('page', String(meta.page + 1))}
-            >
-              Próxima
-            </Button>
-          </div>
+      {meta.total > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">
+            {meta.total} lançamento{meta.total === 1 ? '' : 's'} em {monthLabel(selectedMonth)}
+          </p>
+          {meta.total_pages > 1 && (
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={meta.page <= 1}
+                onClick={() => setParam('page', String(meta.page - 1))}
+              >
+                Anterior
+              </Button>
+              <span className="flex items-center px-3 text-sm text-muted-foreground">
+                {meta.page}/{meta.total_pages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={meta.page >= meta.total_pages}
+                onClick={() => setParam('page', String(meta.page + 1))}
+              >
+                Próxima
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
