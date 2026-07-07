@@ -29,7 +29,7 @@ export class TransactionsService {
     const where: Prisma.TransactionWhereInput = {
       userId,
       ...(type && { type }),
-      ...(categoryId && { categoryId }),
+      ...(categoryId === 'uncategorized' ? { categoryId: null } : categoryId ? { categoryId } : {}),
       ...(accountId && { accountId }),
       ...(status && { status }),
       ...(source && { source }),

@@ -46,6 +46,21 @@ function tooltipCurrency(v: unknown) {
   return typeof v === 'number' ? formatCurrency(v) : String(v);
 }
 
+function monthRange(month: string) {
+  const [year, monthNumber] = month.split('-').map(Number);
+  const start = `${year}-${String(monthNumber).padStart(2, '0')}-01`;
+  const endDate = new Date(Date.UTC(year, monthNumber, 0));
+  const end = `${year}-${String(monthNumber).padStart(2, '0')}-${String(
+    endDate.getUTCDate(),
+  ).padStart(2, '0')}`;
+  return { start, end };
+}
+
+function lastMonthWithMovement(months: DashboardSummary['monthlyComparison']) {
+  const month = [...months].reverse().find((m) => m.income > 0 || m.expense > 0);
+  return month?.month ?? months[months.length - 1]?.month ?? '';
+}
+
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -60,12 +75,22 @@ export default function DashboardPage() {
       .get<DashboardSummary>('/dashboard/summary')
       .then((d) => {
         setData(d);
-        const months = d.monthlyComparison;
-        if (months.length > 0) setSelectedMonth(months[months.length - 1].month);
+        setSelectedMonth(lastMonthWithMovement(d.monthlyComparison));
       })
       .catch(console.error)
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!selectedMonth) return;
+    const { start, end } = monthRange(selectedMonth);
+    setLoading(true);
+    apiClient
+      .get<DashboardSummary>(`/dashboard/summary?period_start=${start}&period_end=${end}`)
+      .then(setData)
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [selectedMonth]);
 
   useEffect(() => {
     if (!selectedMonth) return;
@@ -106,7 +131,20 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Dashboard</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold">Dashboard</h1>
+        <Select
+          value={selectedMonth}
+          onChange={(e) => setSelectedMonth(e.target.value)}
+          className="h-9 w-auto text-sm"
+        >
+          {monthOptions.map((m) => (
+            <option key={m} value={m}>
+              {monthLabel(m)}
+            </option>
+          ))}
+        </Select>
+      </div>
 
       {/* Cards de totais */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
