@@ -193,3 +193,86 @@ def test_happy_path_calls_services_in_order():
         "create_transaction",
         "send",
     ]
+
+
+def test_pending_category_reply_uses_user_categories():
+    rec = _Recorder()
+    phone = "+5511"
+
+    class FakeContact:
+        async def find_by_phone(self, phone):
+            return {"userId": "u1", "profileType": "personal"}
+
+    class FakeTxCreator:
+        async def create_from_intent(self, intent, user_id, raw, ai_extracted_transaction_id=None):
+            rec.calls.append(f"create:{intent.category_name}")
+            return {"ok": True, "message": f"Criado em {intent.category_name}"}
+
+    class FakeAudit:
+        async def log_message(self, *a, **k):
+            return "msg-id"
+
+        async def log_extraction(self, *a, **k):
+            rec.calls.append("log_extraction")
+            return "ext-id"
+
+    class FakeMessenger:
+        async def send(self, phone, text):
+            rec.sent.append(text)
+
+    originals = _patch(
+        {
+            "contact_service": FakeContact(),
+            "transaction_creator": FakeTxCreator(),
+            "audit_service": FakeAudit(),
+            "messenger": FakeMessenger(),
+            "subscription_gate": _FakeGate(allowed=True),
+        }
+    )
+
+    async def fake_build_context(self, user_id, contact, phone):
+        rec.calls.append("build_context")
+        return {"categories": ["Mercado", "Outros"], "recent_messages": []}
+
+    orig_build = mp.MessageProcessor._build_context
+    mp.MessageProcessor._build_context = fake_build_context
+    mp.conversation_manager.set_pending(
+        phone,
+        FinancialIntent(
+            intent=IntentType.create_transaction,
+            transaction_type=TransactionTypeEnum.expense,
+            amount=50,
+            description="Compra teste de R$ 50,00",
+            transaction_date="2026-07-07",
+            confidence=0.6,
+            needs_confirmation=True,
+        ),
+    )
+    try:
+        reply = asyncio.run(mp.message_processor.process_buffered_message(phone, "Outros", ["m2"]))
+    finally:
+        mp.conversation_manager.clear(phone)
+        mp.MessageProcessor._build_context = orig_build
+        _restore(originals)
+
+    assert reply == "Criado em Outros"
+    assert rec.sent == ["Criado em Outros"]
+    assert rec.calls == ["build_context", "log_extraction", "create:Outros"]
+
+
+def test_category_reply_matching_ignores_accents_and_allows_partial_match():
+    processor = mp.MessageProcessor()
+    assert (
+        processor._match_category_reply(
+            "servicos essenciais",
+            {"categories": ["Serviços essenciais", "Outros"]},
+        )
+        == "Serviços essenciais"
+    )
+    assert (
+        processor._match_category_reply(
+            "serviços essenciais",
+            {"categories": ["Serviços", "Outros"]},
+        )
+        == "Serviços"
+    )

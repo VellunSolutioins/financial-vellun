@@ -57,7 +57,13 @@ needs_confirmation for true.
 Uso do histórico (quando fornecido):
 - Use o "Histórico recente" apenas como contexto para interpretar a "Mensagem \
 atual consolidada"; foque sempre na mensagem atual.
-- Não duplique um lançamento que já foi confirmado/criado no histórico.
+- Se a mensagem atual tiver valor e linguagem de novo gasto/receita, trate como \
+um novo lançamento independente, mesmo que seja parecida com mensagens anteriores.
+- Não use "correct_last" ou "cancel_last" por semelhança com o histórico; use \
+essas intenções somente quando a mensagem atual pedir explicitamente correção, \
+alteração, cancelamento, remoção ou desfazer.
+- Não duplique um lançamento que já foi confirmado/criado no histórico apenas \
+quando a mensagem atual não trouxer uma nova solicitação de registro.
 - Se a mensagem atual for uma correção do último lançamento, use \
 "correct_last"; se for um cancelamento, use "cancel_last".
 - Em respostas curtas a uma pergunta anterior (ex.: só "Nubank" ou "internet"), \
