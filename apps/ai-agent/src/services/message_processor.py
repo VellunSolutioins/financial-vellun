@@ -8,6 +8,7 @@ registrar outbound/extração.
 """
 
 import logging
+import unicodedata
 from datetime import date
 
 from ..config import settings
@@ -33,6 +34,12 @@ HELP_MESSAGE = (
 )
 AFFIRMATIVE = ("sim", "isso", "confirmo", "ok", "pode", "correto", "certo", "exato")
 NEGATIVE = ("não", "nao", "cancela", "cancelar", "errado", "deixa")
+
+
+def _normalize_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", text)
+    normalized = "".join(c for c in normalized if not unicodedata.combining(c))
+    return normalized.lower().strip()
 
 
 class MessageProcessor:
@@ -70,7 +77,10 @@ class MessageProcessor:
         state = conversation_manager.get(phone)
 
         if state.awaiting_confirmation and state.pending_intent is not None:
-            intent, confirmed = self._merge_confirmation_reply(state.pending_intent, message)
+            context = await self._build_context(user_id, contact, phone)
+            intent, confirmed = self._merge_confirmation_reply(
+                state.pending_intent, message, context
+            )
             if confirmed is False:  # usuário cancelou
                 conversation_manager.clear(phone)
                 return await self._respond(phone, "Ok, cancelei. Nada foi registrado.")
@@ -159,7 +169,7 @@ class MessageProcessor:
         return text
 
     def _merge_confirmation_reply(
-        self, pending: FinancialIntent, reply: str
+        self, pending: FinancialIntent, reply: str, context: dict | None = None
     ) -> tuple[FinancialIntent, bool | None]:
         """Funde a resposta do usuário ao intent pendente.
 
@@ -179,6 +189,10 @@ class MessageProcessor:
             pending.transaction_type = extracted.transaction_type
         if extracted.category_name is not None:
             pending.category_name = extracted.category_name
+        elif pending.category_name is None:
+            matched_category = self._match_category_reply(reply, context or {})
+            if matched_category is not None:
+                pending.category_name = matched_category
         if extracted.transaction_date is not None and "hoje" not in reply.lower():
             pending.transaction_date = extracted.transaction_date
 
@@ -190,6 +204,25 @@ class MessageProcessor:
         pending.confidence = max(pending.confidence, settings.confidence_threshold)
         pending.needs_confirmation = False
         return pending, confirmed
+
+    def _match_category_reply(self, reply: str, context: dict) -> str | None:
+        """Resolve respostas curtas de confirmação contra categorias reais."""
+        target = _normalize_text(reply)
+        if not target:
+            return None
+
+        categories = context.get("categories") or []
+        for category in categories:
+            normalized = _normalize_text(str(category))
+            if normalized == target:
+                return str(category)
+
+        for category in categories:
+            normalized = _normalize_text(str(category))
+            if target in normalized or normalized in target:
+                return str(category)
+
+        return None
 
     async def _build_context(self, user_id: str, contact: dict, phone: str) -> dict:
         """Contexto para o LLM: categorias, contas, data e histórico recente."""
