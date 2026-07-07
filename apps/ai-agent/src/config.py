@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     ai_agent_port: int = 8010
     environment: str = "development"  # "development" | "production"
     main_api_url: str = "http://localhost:3001"
-    web_url: str = "http://localhost:3000"  # base para o link de regularização da assinatura
+    web_url: str = "https://financial-vellun-web.vercel.app"  # base do link de regularização
     internal_api_key: str
     openai_api_key: str = ""
     whatsapp_provider_token: str = ""
