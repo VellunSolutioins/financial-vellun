@@ -68,7 +68,7 @@ function TransacoesContent() {
 
   const filters = {
     page: Number(searchParams.get('page') ?? 1),
-    limit: 15,
+    limit: 10,
     type: searchParams.get('type') ?? undefined,
     status: searchParams.get('status') ?? undefined,
     source: searchParams.get('source') ?? undefined,
