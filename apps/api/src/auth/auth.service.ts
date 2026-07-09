@@ -5,6 +5,7 @@ import { AccountType, ProfileType } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { normalizePhone } from '../common/phone.util';
+import { WelcomeNotificationService } from '../notifications/welcome-notification.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 
@@ -14,6 +15,7 @@ export class AuthService {
     private prisma: PrismaService,
     private jwtService: JwtService,
     private config: ConfigService,
+    private welcomeNotification: WelcomeNotificationService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -99,6 +101,15 @@ export class AuthService {
       });
 
       return createdUser;
+    });
+
+    // Após o commit do cadastro: dispara (best-effort, sem bloquear a resposta)
+    // a mensagem de boas-vindas no WhatsApp com instruções de uso. O novo
+    // cliente não conhece o número do app — esta é a primeira mensagem dele.
+    void this.welcomeNotification.sendWelcome({
+      phone: phoneNumber,
+      name: dto.name,
+      profileType: dto.profileType,
     });
 
     const { passwordHash: _, ...result } = user;
