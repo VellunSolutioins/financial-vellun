@@ -54,6 +54,17 @@ export class BillingService {
       throw new BadRequestException('Você já possui uma assinatura ativa.');
     }
 
+    const webUrl = this.webUrl();
+    const successUrl = `${webUrl}/app/conta/assinatura?status=success`;
+
+    // Planos gratuitos (ex.: "Local Dev Active", uso interno/testes) pulam o
+    // PSP: o Asaas recusa cobranças abaixo de R$ 5,00, então uma cobrança de
+    // R$ 0,00 seria sempre rejeitada no checkout.
+    if (Number(plan.price.toString()) === 0) {
+      await this.subscriptions.activateFreeSubscription(userId, plan.id, plan.interval, 'checkout');
+      return { checkoutUrl: successUrl };
+    }
+
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
       include: { individualProfile: true, businessProfile: true },
@@ -81,7 +92,6 @@ export class BillingService {
       providerCustomerId = customer.id;
     }
 
-    const webUrl = this.webUrl();
     const checkout = await this.provider.createCheckout({
       userId,
       planCode: plan.code,
@@ -89,7 +99,7 @@ export class BillingService {
       interval: plan.interval,
       amount: plan.price.toString(),
       currency: plan.currency,
-      successUrl: `${webUrl}/app/conta/assinatura?status=success`,
+      successUrl,
       cancelUrl: `${webUrl}/app/conta/assinatura?status=cancel`,
     });
 

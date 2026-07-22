@@ -47,7 +47,13 @@ describe('AuthService', () => {
       $transaction: jest.fn((callback) => callback(tx)),
     };
 
-    const service = new AuthService(prisma as any, {} as any, {} as any);
+    const welcomeNotification = { sendWelcome: jest.fn().mockResolvedValue(undefined) };
+    const service = new AuthService(
+      prisma as any,
+      {} as any,
+      {} as any,
+      welcomeNotification as any,
+    );
 
     const result = await service.register({
       name: 'Joao Grilo',
@@ -56,6 +62,12 @@ describe('AuthService', () => {
       password: 'password123',
       profileType: ProfileType.individual,
       cpf: '123.456.789-09',
+    });
+
+    expect(welcomeNotification.sendWelcome).toHaveBeenCalledWith({
+      phone: '+5519999999999',
+      name: 'Joao Grilo',
+      profileType: ProfileType.individual,
     });
 
     expect(prisma.user.findUnique).toHaveBeenCalledWith({
@@ -151,7 +163,13 @@ describe('AuthService', () => {
       $transaction: jest.fn((callback) => callback(tx)),
     };
 
-    const service = new AuthService(prisma as any, {} as any, {} as any);
+    const welcomeNotification = { sendWelcome: jest.fn().mockResolvedValue(undefined) };
+    const service = new AuthService(
+      prisma as any,
+      {} as any,
+      {} as any,
+      welcomeNotification as any,
+    );
 
     const result = await service.register({
       name: 'Padaria do Joao',
@@ -162,6 +180,12 @@ describe('AuthService', () => {
       companyName: 'Padaria do Joao LTDA',
       tradeName: 'Padaria do Joao',
       cnpj: '12.345.678/0001-99',
+    });
+
+    expect(welcomeNotification.sendWelcome).toHaveBeenCalledWith({
+      phone: '+5519988887777',
+      name: 'Padaria do Joao',
+      profileType: ProfileType.business,
     });
 
     expect(prisma.businessProfile.findUnique).toHaveBeenCalledWith({

@@ -101,7 +101,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const items = navItems[user.profileType] ?? navItems.individual;
 
   return (
-    <div className="min-h-screen lg:flex">
+    <div className="min-h-screen lg:flex lg:h-screen">
       {/* Top bar (mobile) */}
       <header className="lg:hidden sticky top-0 z-30 flex h-14 items-center justify-between border-b bg-white px-4">
         <button
@@ -131,7 +131,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-64 transform flex-col border-r bg-white transition-transform duration-200 ease-in-out lg:static lg:z-auto lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-50 flex w-64 transform flex-col border-r bg-white transition-transform duration-200 ease-in-out lg:sticky lg:top-0 lg:z-auto lg:h-screen lg:shrink-0 lg:translate-x-0 ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -152,7 +152,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </svg>
           </button>
         </div>
-        <nav className="flex-1 space-y-1 overflow-y-auto p-4">
+        <nav className="flex-1 space-y-1 p-4">
           {items.map((item) => (
             <Link
               key={item.href}
@@ -195,7 +195,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto bg-gray-50 min-w-0">
+      <main className="flex-1 overflow-auto bg-gray-50 min-w-0 lg:h-screen lg:min-h-0">
         <div className="mx-auto max-w-6xl p-4 sm:p-6 lg:p-8">
           <SubscriptionBanner access={subscriptionAccess} pathname={pathname} />
           {children}

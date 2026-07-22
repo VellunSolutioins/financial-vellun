@@ -23,6 +23,7 @@ class Settings(BaseSettings):
 
     ai_agent_port: int = 8010
     environment: str = "development"  # "development" | "production"
+    log_level: str = "INFO"  # nível dos logs da aplicação (DEBUG | INFO | WARNING | ...)
     main_api_url: str = "http://localhost:3001"
     web_url: str = "https://financial-vellun-web.vercel.app"  # base do link de regularização
     internal_api_key: str
