@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma, SubscriptionStatus } from '@prisma/client';
+import { BillingInterval, Prisma, SubscriptionStatus } from '@prisma/client';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { SubscriptionAuditService } from './subscription-audit.service';
@@ -115,6 +115,35 @@ export class SubscriptionService {
       status: SubscriptionStatus.pending,
       providerCustomerId,
       actor: 'checkout',
+    });
+  }
+
+  /**
+   * Ativa diretamente uma assinatura de plano gratuito (ex.: "Local Dev Active",
+   * uso interno/testes), sem passar pelo PSP — o Asaas recusa cobranças abaixo
+   * de R$ 5,00, então checkout/webhook nunca entrariam em jogo para R$ 0,00.
+   */
+  async activateFreeSubscription(
+    userId: string,
+    planId: string,
+    interval: BillingInterval,
+    actor: string,
+  ) {
+    const subscription = await this.createSubscription({
+      userId,
+      planId,
+      status: SubscriptionStatus.pending,
+      actor,
+    });
+
+    const start = new Date();
+    return this.transitionTo(subscription.id, SubscriptionStatus.active, {
+      actor,
+      reason: 'plano gratuito: ativação automática sem cobrança',
+      data: {
+        currentPeriodStart: start,
+        currentPeriodEnd: this.state.computePeriodEnd(start, interval),
+      },
     });
   }
 
