@@ -141,8 +141,26 @@ model User {
   aiExtractedTransactions AiExtractedTransaction[]
   subscriptions           Subscription[]
   payments                Payment[]
+  passwordResetTokens     PasswordResetToken[]
 
   @@map("users")
+}
+
+/// Token de recuperação de senha. Guardamos apenas o **hash SHA-256** do token
+/// (o valor em claro só existe no link enviado por e-mail), com uso único
+/// (`usedAt`) e expiração curta (`expiresAt`).
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
 }
 
 model IndividualProfile {

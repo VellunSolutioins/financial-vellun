@@ -25,7 +25,7 @@ financial-vellun/
 | Ferramenta    | Versão mínima | Verificar                  |
 | ------------- | ------------- | -------------------------- |
 | Node.js       | 20            | `node -v`                  |
-| pnpm          | 9             | `pnpm -v`                  |
+| pnpm          | 10            | `pnpm -v`                  |
 | Python        | 3.11          | `python --version`         |
 | Docker Desktop| qualquer      | `docker -v`                |
 
@@ -55,6 +55,10 @@ cp apps/api/.env.example apps/api/.env
 | `JWT_REFRESH_SECRET`  | Segredo para os refresh tokens (≥ 32 chars)       |
 | `API_PORT`            | Porta da API (padrão: `3001`)                     |
 | `INTERNAL_API_KEY`    | Chave compartilhada entre API e agente de IA      |
+| `WEB_URL`             | URL do frontend — base do link de recuperação de senha |
+| `MAIL_PROVIDER`       | `log` (padrão: só imprime o e-mail no console) ou `resend` |
+| `RESEND_API_KEY`      | Chave do Resend — obrigatória com `MAIL_PROVIDER=resend` |
+| `MAIL_FROM`           | Remetente, em domínio verificado no Resend (ex.: `Financial Vellun <nao-responda@seudominio.com.br>`) |
 
 **Web** (`apps/web/`):
 ```bash
@@ -275,11 +279,21 @@ MESSAGE_BUFFER_BACKEND=redis
 REDIS_URL=redis://<host>:6379/0
 LLM_PROVIDER=openai
 OPENAI_API_KEY=<chave>
+
+# API
+WEB_URL=https://<dominio-do-frontend>                  # base dos links enviados por e-mail
+MAIL_PROVIDER=resend                                   # sem isto, o e-mail só vai para o log
+RESEND_API_KEY=<chave-do-resend>
+MAIL_FROM=Financial Vellun <nao-responda@<dominio-verificado>>
 ```
 
 Em produção (`ENVIRONMENT=production`) o `WHATSAPP_WEBHOOK_SECRET` é
 **obrigatório** — sem ele o webhook recusa todas as requisições. Tokens e
 chaves nunca são gravados em log.
+
+A recuperação de senha só envia e-mail de verdade com `MAIL_PROVIDER=resend` e
+um domínio verificado — ver
+[E-mail transacional](#e-mail-transacional-recuperação-de-senha).
 
 ### 2. Banco de dados (migrations)
 
@@ -409,7 +423,81 @@ quanto o de recusa. Referência:
 
 ---
 
+## E-mail transacional (recuperação de senha)
+
+A recuperação de senha (`/esqueci-senha` → e-mail com link → `/redefinir-senha`)
+é o único fluxo que dispara e-mail hoje. O canal é escolhido por
+`MAIL_PROVIDER` em `apps/api/.env`, no mesmo padrão _factory + log_ do messenger
+do agente de IA:
+
+| `MAIL_PROVIDER` | Comportamento                                                                          |
+| --------------- | -------------------------------------------------------------------------------------- |
+| ausente / `log` | **Padrão.** Nada é enviado; o e-mail inteiro (com o link) é impresso no console da API |
+| `resend`        | Envio real pelo [Resend](https://resend.com). Exige `RESEND_API_KEY` e `MAIL_FROM`     |
+
+Em desenvolvimento **não configure nada**: peça o link em `/esqueci-senha` e
+copie a URL `http://localhost:3000/redefinir-senha?token=…` que aparece no log
+da API. O link vale 1 hora, é de uso único, e pedir um novo invalida o anterior.
+
+### Ativando o envio real (Resend)
+
+**Pré-requisito: um domínio próprio.** O Resend só envia de um domínio cujo DNS
+você controla, porque é preciso publicar os registros de SPF/DKIM que provam a
+titularidade. Isso significa que **não dá para enviar de um `@gmail.com`** nem
+do subdomínio `*.vercel.app` — nenhum dos dois é verificável. A conta no Resend
+em si pode ser aberta com qualquer e-mail (inclusive o Gmail da empresa); a
+restrição vale só para o remetente.
+
+1. **Registrar o domínio** — [registro.br](https://registro.br) para `.com.br`
+   (exige CPF/CNPJ) ou Cloudflare/Namecheap para `.com`. O DNS pode ficar no
+   próprio registrador ou ser apontado para a Cloudflare.
+2. **Criar a conta** no Resend e, em _Add Domain_, cadastrar de preferência um
+   **subdomínio de envio** (ex.: `envio.seudominio.com.br`). Usar subdomínio
+   preserva a reputação do domínio raiz e não conflita com o e-mail corporativo.
+3. **Publicar no DNS** os registros que o painel exibir (um MX e alguns TXT de
+   SPF/DKIM) e aguardar a verificação — costuma levar minutos, mas a propagação
+   de DNS pode demorar horas.
+4. **Gerar a API key** (`re_…`) no painel.
+5. **Configurar as variáveis** em `apps/api/.env` (e no host, em produção):
+
+   ```env
+   MAIL_PROVIDER=resend
+   RESEND_API_KEY=re_sua_chave_aqui
+   MAIL_FROM=Financial Vellun <nao-responda@envio.seudominio.com.br>
+   ```
+
+   O endereço de `MAIL_FROM` **precisa pertencer ao domínio verificado** no
+   passo 2, senão o Resend recusa o envio.
+6. **Conferir o `WEB_URL`**: o link do e-mail é montado a partir dele. Em
+   produção precisa apontar para o domínio real do frontend — se ficar
+   `http://localhost:3000`, o cliente recebe um link que só abre na sua máquina.
+7. **Reiniciar a API.** O transport é escolhido uma única vez, na construção do
+   `MailService`; trocar o `.env` com o processo de pé não muda nada.
+
+**Sem domínio ainda?** Para validar o envio de verdade antes do registro, o
+Resend aceita o remetente de teste `onboarding@resend.dev` — mas ele **só
+entrega para o e-mail dono da conta**. Serve para homologar, não para clientes.
+
+---
+
 ## Problemas comuns
+
+### E-mail de recuperação de senha não chega
+
+A resposta da API é sempre genérica (*"Se o e-mail estiver cadastrado…"*) para
+não revelar quais endereços têm conta — então falha de envio **nunca** aparece
+na tela. O diagnóstico é pelo log da API:
+
+| Log                                                               | Significado                                                        |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `[LogMailTransport] [mail:log] para=…`                            | Está no modo `log`: nada foi enviado (esperado em desenvolvimento) |
+| `[MailService] MAIL_PROVIDER=resend sem RESEND_API_KEY/MAIL_FROM` | Faltou variável; caiu de volta no transport de log                 |
+| `[MailService] Falha ao enviar … Resend recusou o envio: …`       | O Resend rejeitou — em geral remetente/domínio não verificado      |
+| `[ResendMailTransport] E-mail "…" enviado para …`                 | Saiu de verdade; se não chegou, procure no spam                    |
+
+As rotas `POST /auth/forgot-password` e `POST /auth/reset-password` aceitam
+**5 requisições por 15 minutos por IP**; testes em sequência passam a receber
+`429`.
 
 ### Checkout do Asaas retorna `400` (`successUrl`/`cancelUrl` inválidos)
 

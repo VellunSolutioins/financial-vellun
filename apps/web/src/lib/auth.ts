@@ -51,6 +51,18 @@ export async function logout(): Promise<void> {
   await apiClient.post('/auth/logout', {});
 }
 
+/** Pede o link de redefinição. A resposta é genérica (não revela se o e-mail existe). */
+export async function forgotPassword(email: string): Promise<{ message: string }> {
+  return apiClient.post<{ message: string }>('/auth/forgot-password', { email });
+}
+
+export async function resetPassword(data: {
+  token: string;
+  newPassword: string;
+}): Promise<{ message: string }> {
+  return apiClient.post<{ message: string }>('/auth/reset-password', data);
+}
+
 export async function getMe(): Promise<User> {
   return apiClient.get<User>('/auth/me');
 }

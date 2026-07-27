@@ -1,5 +1,11 @@
+import { createHash } from 'node:crypto';
+
+import { BadRequestException } from '@nestjs/common';
 import { AccountType, ProfileType } from '@prisma/client';
+import * as bcrypt from 'bcryptjs';
 import { AuthService } from './auth.service';
+
+const sha256 = (value: string) => createHash('sha256').update(value).digest('hex');
 
 describe('AuthService', () => {
   it('creates an individual profile and a default account when registering a PF user', async () => {
@@ -53,6 +59,7 @@ describe('AuthService', () => {
       {} as any,
       {} as any,
       welcomeNotification as any,
+      { sendPasswordReset: jest.fn() } as any,
     );
 
     const result = await service.register({
@@ -169,6 +176,7 @@ describe('AuthService', () => {
       {} as any,
       {} as any,
       welcomeNotification as any,
+      { sendPasswordReset: jest.fn() } as any,
     );
 
     const result = await service.register({
@@ -225,5 +233,153 @@ describe('AuthService', () => {
       },
     });
     expect(result).not.toHaveProperty('passwordHash');
+  });
+});
+
+describe('AuthService — recuperação de senha', () => {
+  const GENERIC_MESSAGE =
+    'Se o e-mail estiver cadastrado, enviamos um link para redefinir a senha.';
+
+  function buildService(prismaOverrides: Record<string, unknown>) {
+    const prisma = {
+      user: { findUnique: jest.fn(), update: jest.fn() },
+      passwordResetToken: {
+        deleteMany: jest.fn(),
+        create: jest.fn(),
+        findUnique: jest.fn(),
+        update: jest.fn(),
+      },
+      $transaction: jest.fn().mockResolvedValue([]),
+      ...prismaOverrides,
+    };
+    const config = { get: jest.fn().mockReturnValue('http://localhost:3000') };
+    const mail = { sendPasswordReset: jest.fn().mockResolvedValue(undefined) };
+    const service = new AuthService(
+      prisma as any,
+      {} as any,
+      config as any,
+      {} as any,
+      mail as any,
+    );
+    return { service, prisma, mail };
+  }
+
+  it('gera um token e envia o e-mail quando o endereço existe', async () => {
+    const { service, prisma, mail } = buildService({
+      user: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ id: 'user-1', email: 'joao@example.com', name: 'Joao Grilo' }),
+        update: jest.fn(),
+      },
+    });
+
+    const result = await service.forgotPassword({ email: 'joao@example.com' });
+
+    // Pedidos anteriores ainda não usados são descartados.
+    expect(prisma.passwordResetToken.deleteMany).toHaveBeenCalledWith({
+      where: { userId: 'user-1', usedAt: null },
+    });
+
+    expect(mail.sendPasswordReset).toHaveBeenCalledTimes(1);
+    const [to, name, resetUrl] = mail.sendPasswordReset.mock.calls[0];
+    expect(to).toBe('joao@example.com');
+    expect(name).toBe('Joao Grilo');
+
+    // O link carrega o token em claro; o banco guarda apenas o hash.
+    const token = new URL(resetUrl).searchParams.get('token')!;
+    expect(token).toMatch(/^[0-9a-f]{64}$/);
+    const created = prisma.passwordResetToken.create.mock.calls[0][0].data;
+    expect(created.userId).toBe('user-1');
+    expect(created.tokenHash).toBe(sha256(token));
+    expect(created.tokenHash).not.toBe(token);
+    expect(created.expiresAt.getTime()).toBeGreaterThan(Date.now());
+
+    expect(result).toEqual({ message: GENERIC_MESSAGE });
+  });
+
+  it('responde a mesma mensagem sem criar token quando o e-mail não existe', async () => {
+    const { service, prisma, mail } = buildService({
+      user: { findUnique: jest.fn().mockResolvedValue(null), update: jest.fn() },
+    });
+
+    const result = await service.forgotPassword({ email: 'ninguem@example.com' });
+
+    expect(prisma.passwordResetToken.create).not.toHaveBeenCalled();
+    expect(mail.sendPasswordReset).not.toHaveBeenCalled();
+    expect(result).toEqual({ message: GENERIC_MESSAGE });
+  });
+
+  it('troca a senha e marca o token como usado', async () => {
+    const token = 'a'.repeat(64);
+    const { service, prisma } = buildService({
+      passwordResetToken: {
+        deleteMany: jest.fn(),
+        create: jest.fn(),
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'token-1',
+          userId: 'user-1',
+          tokenHash: sha256(token),
+          expiresAt: new Date(Date.now() + 60_000),
+          usedAt: null,
+        }),
+        update: jest.fn(),
+      },
+    });
+
+    const result = await service.resetPassword({ token, newPassword: 'novaSenha123' });
+
+    expect(prisma.passwordResetToken.findUnique).toHaveBeenCalledWith({
+      where: { tokenHash: sha256(token) },
+    });
+
+    const updateArgs = prisma.user.update.mock.calls[0][0];
+    expect(updateArgs.where).toEqual({ id: 'user-1' });
+    expect(await bcrypt.compare('novaSenha123', updateArgs.data.passwordHash)).toBe(true);
+
+    expect(prisma.passwordResetToken.update).toHaveBeenCalledWith({
+      where: { id: 'token-1' },
+      data: { usedAt: expect.any(Date) },
+    });
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ message: 'Senha redefinida com sucesso' });
+  });
+
+  it.each([
+    ['inexistente', null],
+    [
+      'expirado',
+      {
+        id: 'token-1',
+        userId: 'user-1',
+        expiresAt: new Date(Date.now() - 1_000),
+        usedAt: null,
+      },
+    ],
+    [
+      'já usado',
+      {
+        id: 'token-1',
+        userId: 'user-1',
+        expiresAt: new Date(Date.now() + 60_000),
+        usedAt: new Date(),
+      },
+    ],
+  ])('recusa a redefinição com token %s', async (_caso, stored) => {
+    const { service, prisma } = buildService({
+      passwordResetToken: {
+        deleteMany: jest.fn(),
+        create: jest.fn(),
+        findUnique: jest.fn().mockResolvedValue(stored),
+        update: jest.fn(),
+      },
+    });
+
+    await expect(
+      service.resetPassword({ token: 'b'.repeat(64), newPassword: 'novaSenha123' }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.user.update).not.toHaveBeenCalled();
+    expect(prisma.passwordResetToken.update).not.toHaveBeenCalled();
   });
 });

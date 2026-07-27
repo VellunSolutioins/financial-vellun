@@ -70,6 +70,11 @@ export default function LoginPage() {
           <Button type="submit" className="w-full" disabled={isSubmitting}>
             {isSubmitting ? 'Entrando...' : 'Entrar'}
           </Button>
+          <p className="text-center text-sm">
+            <Link href="/esqueci-senha" className="text-primary underline">
+              Esqueci minha senha
+            </Link>
+          </p>
           <p className="text-center text-sm text-muted-foreground">
             Não tem conta?{' '}
             <Link href="/cadastro" className="text-primary underline">

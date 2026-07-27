@@ -12,6 +12,10 @@ const AUTH_CSRF_EXEMPT_PATHS = new Set([
   '/auth/register',
   '/auth/logout',
   '/auth/refresh',
+  // Recuperação de senha: rotas públicas que não usam a sessão em cookie —
+  // um cookie antigo no navegador não pode bloquear quem perdeu o acesso.
+  '/auth/forgot-password',
+  '/auth/reset-password',
 ]);
 
 /**
