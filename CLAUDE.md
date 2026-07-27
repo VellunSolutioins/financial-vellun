@@ -187,6 +187,7 @@ Em modo edição, converter o valor vindo da API para display antes de passar ao
 
 ## Documentação
 
+- [Fluxos do backend (diagramas Mermaid)](docs/backend-flows.md) — API + agente de IA, com o fluxo WhatsApp → lançamento detalhado
 - [Requisitos técnicos](docs/technical-requirements.md)
 - [Prompts de implementação](docs/implementation-prompts.md)
 - [README](README.md) — setup detalhado, variáveis de ambiente e troubleshooting
