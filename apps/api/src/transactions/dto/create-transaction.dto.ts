@@ -1,13 +1,15 @@
 import {
   IsDateString,
   IsEnum,
+  IsInt,
   IsNumber,
   IsOptional,
   IsPositive,
   IsString,
+  Min,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { TransactionStatus, TransactionType } from '@prisma/client';
+import { RecurrenceType, TransactionStatus, TransactionType } from '@prisma/client';
 import { Type } from 'class-transformer';
 
 export class CreateTransactionDto {
@@ -42,4 +44,29 @@ export class CreateTransactionDto {
   @IsOptional()
   @IsEnum(TransactionStatus)
   status?: TransactionStatus;
+
+  @ApiProperty({ enum: RecurrenceType, default: RecurrenceType.avulso, required: false })
+  @IsOptional()
+  @IsEnum(RecurrenceType)
+  recurrenceType?: RecurrenceType;
+
+  @ApiProperty({
+    required: false,
+    description: 'Número de parcelas — obrigatório quando recurrenceType = parcelado (mínimo 2).',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(2)
+  installments?: number;
+
+  @ApiProperty({
+    required: false,
+    description: 'Quantidade de meses a gerar — obrigatório quando recurrenceType = fixo (mínimo 2).',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(2)
+  recurrenceMonths?: number;
 }

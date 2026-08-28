@@ -14,6 +14,10 @@ export interface Transaction {
   accountId: string;
   category?: { id: string; name: string };
   account?: { id: string; name: string };
+  recurrenceType: 'avulso' | 'fixo' | 'parcelado';
+  seriesId?: string | null;
+  installmentNumber?: number | null;
+  installmentTotal?: number | null;
   createdAt: string;
 }
 

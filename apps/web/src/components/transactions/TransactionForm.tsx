@@ -13,28 +13,47 @@ import { useConfirm } from '@/components/ui/confirm';
 import type { Transaction } from '@/hooks/useTransactions';
 import { CURRENCY_REGEX, currencyToNumber, formatCurrencyInput, maskCurrency } from '@/lib/masks';
 
-const schema = z.object({
-  type: z.enum(['income', 'expense', 'transfer']),
-  amount: z
-    .string()
-    .min(1, 'Valor obrigatório')
-    .regex(CURRENCY_REGEX, 'Valor inválido')
-    .refine((v) => currencyToNumber(v) > 0, 'Valor deve ser positivo'),
-  description: z.string().min(1, 'Descrição obrigatória'),
-  accountId: z.string().min(1, 'Conta obrigatória'),
-  categoryId: z.string().optional(),
-  transactionDate: z.string().min(1, 'Data obrigatória'),
-  status: z.enum(['confirmed', 'pending']),
-});
+const schema = z
+  .object({
+    type: z.enum(['income', 'expense', 'transfer']),
+    amount: z
+      .string()
+      .min(1, 'Valor obrigatório')
+      .regex(CURRENCY_REGEX, 'Valor inválido')
+      .refine((v) => currencyToNumber(v) > 0, 'Valor deve ser positivo'),
+    description: z.string().min(1, 'Descrição obrigatória'),
+    accountId: z.string().min(1, 'Conta obrigatória'),
+    categoryId: z.string().optional(),
+    transactionDate: z.string().min(1, 'Data obrigatória'),
+    status: z.enum(['confirmed', 'pending']),
+    recurrenceType: z.enum(['avulso', 'fixo', 'parcelado']),
+    installments: z.string().optional(),
+    recurrenceMonths: z.string().optional(),
+  })
+  .refine(
+    (data) => data.recurrenceType !== 'parcelado' || Number(data.installments) >= 2,
+    { message: 'Informe pelo menos 2 parcelas', path: ['installments'] },
+  )
+  .refine(
+    (data) => data.recurrenceType !== 'fixo' || Number(data.recurrenceMonths) >= 2,
+    { message: 'Informe pelo menos 2 meses', path: ['recurrenceMonths'] },
+  );
 type FormData = z.infer<typeof schema>;
+
+const recurrenceLabels: Record<FormData['recurrenceType'], string> = {
+  avulso: 'Avulso',
+  fixo: 'Fixo (repete todo mês)',
+  parcelado: 'Parcelado',
+};
 
 interface Props {
   transaction?: Transaction;
+  defaultType?: 'income' | 'expense';
   onSuccess: () => void;
   onCancel: () => void;
 }
 
-export function TransactionForm({ transaction, onSuccess, onCancel }: Props) {
+export function TransactionForm({ transaction, defaultType, onSuccess, onCancel }: Props) {
   const [accounts, setAccounts] = useState<{ id: string; name: string }[]>([]);
   const [categories, setCategories] = useState<{ id: string; name: string; type: string }[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -50,7 +69,7 @@ export function TransactionForm({ transaction, onSuccess, onCancel }: Props) {
   } = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: {
-      type: transaction?.type ?? 'expense',
+      type: transaction?.type ?? defaultType ?? 'expense',
       amount: transaction ? formatCurrencyInput(Number(transaction.amount)) : '',
       description: transaction?.description ?? '',
       accountId: transaction?.accountId ?? '',
@@ -59,10 +78,14 @@ export function TransactionForm({ transaction, onSuccess, onCancel }: Props) {
         ? new Date(transaction.transactionDate).toISOString().slice(0, 10)
         : new Date().toISOString().slice(0, 10),
       status: (transaction?.status as 'confirmed' | 'pending') ?? 'confirmed',
+      recurrenceType: 'avulso',
+      installments: '',
+      recurrenceMonths: '',
     },
   });
 
   const selectedType = watch('type');
+  const selectedRecurrenceType = watch('recurrenceType');
 
   useEffect(() => {
     Promise.all([
@@ -78,7 +101,16 @@ export function TransactionForm({ transaction, onSuccess, onCancel }: Props) {
 
   const onSubmit = async (data: FormData) => {
     setSubmitting(true);
-    const payload = { ...data, amount: currencyToNumber(data.amount) };
+    const { installments, recurrenceMonths, recurrenceType, ...rest } = data;
+    const payload = transaction
+      ? { ...rest, amount: currencyToNumber(data.amount) }
+      : {
+          ...rest,
+          recurrenceType,
+          amount: currencyToNumber(data.amount),
+          ...(recurrenceType === 'parcelado' && { installments: Number(installments) }),
+          ...(recurrenceType === 'fixo' && { recurrenceMonths: Number(recurrenceMonths) }),
+        };
     try {
       if (transaction) {
         await apiClient.patch(`/transactions/${transaction.id}`, payload);
@@ -193,6 +225,44 @@ export function TransactionForm({ transaction, onSuccess, onCancel }: Props) {
           <p className="text-xs text-destructive">{errors.transactionDate.message}</p>
         )}
       </div>
+      {!transaction && (
+        <div className="space-y-1">
+          <Label>Tipo de lançamento</Label>
+          <Select {...register('recurrenceType')}>
+            {Object.entries(recurrenceLabels).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </Select>
+          {selectedRecurrenceType === 'parcelado' && (
+            <div className="pt-1">
+              <Input
+                type="number"
+                min={2}
+                placeholder="Número de parcelas"
+                {...register('installments')}
+              />
+              {errors.installments && (
+                <p className="text-xs text-destructive">{errors.installments.message}</p>
+              )}
+            </div>
+          )}
+          {selectedRecurrenceType === 'fixo' && (
+            <div className="pt-1">
+              <Input
+                type="number"
+                min={2}
+                placeholder="Repetir por quantos meses"
+                {...register('recurrenceMonths')}
+              />
+              {errors.recurrenceMonths && (
+                <p className="text-xs text-destructive">{errors.recurrenceMonths.message}</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       <div className="flex gap-2 pt-2">
         <Button type="submit" disabled={submitting} className="flex-1">
           {submitting ? 'Salvando...' : transaction ? 'Salvar alterações' : 'Criar lançamento'}

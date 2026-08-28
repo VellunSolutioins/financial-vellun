@@ -4,13 +4,14 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountsService } from '../accounts/accounts.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { ListTransactionsDto } from './dto/list-transactions.dto';
-import { parseDateOnly, startOfDayUtc, endOfDayUtc } from '../common/date.util';
+import { parseDateOnly, startOfDayUtc, endOfDayUtc, addMonthsUtc } from '../common/date.util';
 
 @Injectable()
 export class TransactionsService {
@@ -87,26 +88,57 @@ export class TransactionsService {
   async create(userId: string, dto: CreateTransactionDto) {
     await this.validateOwnership(userId, dto.accountId, dto.categoryId);
 
-    const transaction = await this.prisma.transaction.create({
-      data: {
-        userId,
-        accountId: dto.accountId,
-        categoryId: dto.categoryId,
-        type: dto.type,
-        amount: dto.amount,
-        description: dto.description,
-        transactionDate: parseDateOnly(dto.transactionDate),
-        status: dto.status ?? 'confirmed',
-        source: 'manual',
-      },
-      include: { category: true, account: true },
-    });
+    const recurrenceType = dto.recurrenceType ?? 'avulso';
+    const firstDate = parseDateOnly(dto.transactionDate);
+    const baseData = {
+      userId,
+      accountId: dto.accountId,
+      categoryId: dto.categoryId || null,
+      type: dto.type,
+      amount: dto.amount,
+      description: dto.description,
+      source: 'manual' as const,
+      recurrenceType,
+    };
 
-    if (transaction.status === 'confirmed') {
-      await this.accountsService.recalculateBalance(dto.accountId);
+    let occurrences: number;
+    if (recurrenceType === 'parcelado') {
+      if (!dto.installments || dto.installments < 2) {
+        throw new BadRequestException('Informe o número de parcelas (mínimo 2)');
+      }
+      occurrences = dto.installments;
+    } else if (recurrenceType === 'fixo') {
+      if (!dto.recurrenceMonths || dto.recurrenceMonths < 2) {
+        throw new BadRequestException('Informe por quantos meses repetir (mínimo 2)');
+      }
+      occurrences = dto.recurrenceMonths;
+    } else {
+      occurrences = 1;
     }
 
-    return transaction;
+    const seriesId = occurrences > 1 ? randomUUID() : null;
+
+    const [firstTransaction] = await this.prisma.$transaction(
+      Array.from({ length: occurrences }, (_, i) =>
+        this.prisma.transaction.create({
+          data: {
+            ...baseData,
+            transactionDate: i === 0 ? firstDate : addMonthsUtc(firstDate, i),
+            // A primeira ocorrência respeita o status escolhido; as futuras
+            // nascem pendentes, já que ainda não aconteceram.
+            status: i === 0 ? (dto.status ?? 'confirmed') : 'pending',
+            seriesId,
+            installmentNumber: seriesId ? i + 1 : null,
+            installmentTotal: seriesId ? occurrences : null,
+          },
+          include: { category: true, account: true },
+        }),
+      ),
+    );
+
+    await this.accountsService.recalculateBalance(dto.accountId);
+
+    return firstTransaction;
   }
 
   async update(userId: string, id: string, dto: UpdateTransactionDto) {

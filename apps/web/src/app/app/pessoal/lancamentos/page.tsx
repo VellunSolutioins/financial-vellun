@@ -1,8 +1,10 @@
 'use client';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useState, Suspense } from 'react';
+import { ArrowLeftRight, Plus, TrendingDown, TrendingUp } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Dialog } from '@/components/ui/dialog';
@@ -12,11 +14,17 @@ import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
 import { formatDateBR } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 
 function formatCurrency(v: number) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 }
 
+const statusVariant: Record<string, 'success' | 'warning' | 'destructive'> = {
+  confirmed: 'success',
+  pending: 'warning',
+  cancelled: 'destructive',
+};
 const statusLabels: Record<string, string> = {
   confirmed: 'Confirmado',
   pending: 'Pendente',
@@ -30,9 +38,20 @@ const sourceLabels: Record<string, string> = {
   recurring: 'Recorrente',
 };
 
+const typeStyle = {
+  income: { icon: TrendingUp, tone: 'text-emerald-600 bg-emerald-50', sign: '+' },
+  expense: { icon: TrendingDown, tone: 'text-rose-600 bg-rose-50', sign: '-' },
+  transfer: { icon: ArrowLeftRight, tone: 'text-blue-600 bg-blue-50', sign: '' },
+} as const;
+
 function monthLabel(month: string) {
-  const [year, monthNumber] = month.split('-');
-  return `${monthNumber}/${year.slice(2)}`;
+  const [year, monthNumber] = month.split('-').map(Number);
+  const label = new Intl.DateTimeFormat('pt-BR', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(Date.UTC(year, monthNumber - 1, 1)));
+  return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 function currentMonth() {
@@ -57,6 +76,7 @@ function TransacoesContent() {
   const confirm = useConfirm();
   const [modalOpen, setModalOpen] = useState(false);
   const [editingTx, setEditingTx] = useState<Transaction | undefined>();
+  const [newType, setNewType] = useState<'income' | 'expense'>('expense');
   const selectedMonth = searchParams.get('month') ?? currentMonth();
   const { start: monthStart, end: monthEnd } = monthRange(selectedMonth);
 
@@ -88,8 +108,9 @@ function TransacoesContent() {
     router.push(`?${params.toString()}`);
   };
 
-  const openNew = () => {
+  const openNew = (type: 'income' | 'expense') => {
     setEditingTx(undefined);
+    setNewType(type);
     setModalOpen(true);
   };
   const openEdit = (tx: Transaction) => {
@@ -119,10 +140,13 @@ function TransacoesContent() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold">Lançamentos</h1>
-        <div className="flex items-center gap-2">
+        <div>
+          <h1 className="text-xl font-bold sm:text-2xl">Lançamentos</h1>
+          <p className="text-sm text-muted-foreground">Suas receitas e despesas do período.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
           <Select
             value={selectedMonth}
             onChange={(e) => setParam('month', e.target.value)}
@@ -134,118 +158,142 @@ function TransacoesContent() {
               </option>
             ))}
           </Select>
-          <Button onClick={openNew}>+ Novo lançamento</Button>
+          <Button
+            size="sm"
+            onClick={() => openNew('income')}
+            className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+          >
+            <Plus className="mr-1 h-4 w-4" />
+            Entrada
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => openNew('expense')}
+            className="bg-rose-600 text-white hover:bg-rose-600/90"
+          >
+            <Plus className="mr-1 h-4 w-4" />
+            Saída
+          </Button>
         </div>
       </div>
 
       {/* Filters */}
-      <div className="bg-white rounded-lg border p-4 grid grid-cols-2 md:grid-cols-5 gap-3">
-        <Input
-          placeholder="Buscar descrição..."
-          defaultValue={filters.search}
-          onChange={(e) => setParam('search', e.target.value)}
-        />
-        <Select defaultValue={filters.type} onChange={(e) => setParam('type', e.target.value)}>
-          <option value="">Todos os tipos</option>
-          <option value="income">Receita</option>
-          <option value="expense">Despesa</option>
-          <option value="transfer">Transferência</option>
-        </Select>
-        <Select defaultValue={filters.status} onChange={(e) => setParam('status', e.target.value)}>
-          <option value="">Todos os status</option>
-          <option value="confirmed">Confirmado</option>
-          <option value="pending">Pendente</option>
-          <option value="cancelled">Cancelado</option>
-        </Select>
-        <Select
-          defaultValue={filters.categoryId}
-          onChange={(e) => setParam('categoryId', e.target.value)}
-        >
-          <option value="">Todas categorias</option>
-          <option value="uncategorized">Sem categoria</option>
-        </Select>
-      </div>
+      <Card className="rounded-2xl">
+        <CardContent className="grid grid-cols-2 gap-3 p-4 md:grid-cols-5">
+          <Input
+            placeholder="Buscar descrição..."
+            defaultValue={filters.search}
+            onChange={(e) => setParam('search', e.target.value)}
+            className="col-span-2 md:col-span-2"
+          />
+          <Select defaultValue={filters.type} onChange={(e) => setParam('type', e.target.value)}>
+            <option value="">Todos os tipos</option>
+            <option value="income">Receita</option>
+            <option value="expense">Despesa</option>
+            <option value="transfer">Transferência</option>
+          </Select>
+          <Select defaultValue={filters.status} onChange={(e) => setParam('status', e.target.value)}>
+            <option value="">Todos os status</option>
+            <option value="confirmed">Confirmado</option>
+            <option value="pending">Pendente</option>
+            <option value="cancelled">Cancelado</option>
+          </Select>
+          <Select
+            defaultValue={filters.categoryId}
+            onChange={(e) => setParam('categoryId', e.target.value)}
+          >
+            <option value="">Todas categorias</option>
+            <option value="uncategorized">Sem categoria</option>
+          </Select>
+        </CardContent>
+      </Card>
 
-      {/* Table */}
-      <div className="bg-white rounded-lg border overflow-x-auto">
-        {loading ? (
-          <div className="p-8 text-center text-muted-foreground">Carregando...</div>
-        ) : data.length === 0 ? (
-          <div className="p-8 text-center text-muted-foreground">Nenhum lançamento encontrado.</div>
-        ) : (
-          <table className="w-full min-w-[720px] text-sm">
-            <thead className="bg-gray-50 border-b">
-              <tr>
-                <th className="text-left p-3 font-medium text-muted-foreground">Data</th>
-                <th className="text-left p-3 font-medium text-muted-foreground">Descrição</th>
-                <th className="text-left p-3 font-medium text-muted-foreground">Categoria</th>
-                <th className="text-left p-3 font-medium text-muted-foreground">Conta</th>
-                <th className="text-left p-3 font-medium text-muted-foreground">Origem</th>
-                <th className="text-left p-3 font-medium text-muted-foreground">Status</th>
-                <th className="text-right p-3 font-medium text-muted-foreground">Valor</th>
-                <th className="p-3"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((tx) => (
-                <tr key={tx.id} className="border-b last:border-0 hover:bg-gray-50">
-                  <td className="p-3 text-muted-foreground">
-                    {formatDateBR(tx.transactionDate)}
-                  </td>
-                  <td className="p-3 font-medium">{tx.description}</td>
-                  <td className="p-3 text-muted-foreground">{tx.category?.name ?? '—'}</td>
-                  <td className="p-3 text-muted-foreground">{tx.account?.name ?? '—'}</td>
-                  <td className="p-3">
-                    {tx.source !== 'manual' && (
-                      <Badge variant={tx.source === 'ai' ? 'secondary' : 'outline'}>
-                        {sourceLabels[tx.source]}
-                      </Badge>
-                    )}
-                  </td>
-                  <td className="p-3">
-                    <Badge
-                      variant={
-                        tx.status === 'confirmed'
-                          ? 'success'
-                          : tx.status === 'pending'
-                            ? 'warning'
-                            : 'destructive'
-                      }
+      {/* List */}
+      <Card className="rounded-2xl">
+        <CardContent className="p-0">
+          {loading ? (
+            <div className="p-10 text-center text-sm text-muted-foreground">Carregando...</div>
+          ) : data.length === 0 ? (
+            <div className="p-10 text-center text-sm text-muted-foreground">
+              Nenhum lançamento encontrado.
+            </div>
+          ) : (
+            <ul className="divide-y divide-border">
+              {data.map((tx) => {
+                const style = typeStyle[tx.type];
+                const Icon = style.icon;
+                return (
+                  <li key={tx.id}>
+                    <button
+                      type="button"
+                      onClick={() => openEdit(tx)}
+                      className="flex w-full items-center justify-between gap-3 p-4 text-left transition-colors hover:bg-muted/40"
                     >
-                      {statusLabels[tx.status]}
-                    </Badge>
-                  </td>
-                  <td
-                    className={`p-3 text-right font-semibold ${
-                      tx.type === 'income'
-                        ? 'text-green-600'
-                        : tx.type === 'expense'
-                          ? 'text-red-600'
-                          : 'text-gray-700'
-                    }`}
-                  >
-                    {tx.type === 'income' ? '+' : tx.type === 'expense' ? '-' : ''}
-                    {formatCurrency(Number(tx.amount))}
-                  </td>
-                  <td className="p-3 text-right whitespace-nowrap">
-                    <Button size="sm" variant="ghost" onClick={() => openEdit(tx)}>
-                      Editar
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="text-destructive"
-                      onClick={() => void handleDelete(tx)}
-                    >
-                      Excluir
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span
+                          className={cn(
+                            'flex h-10 w-10 shrink-0 items-center justify-center rounded-full',
+                            style.tone,
+                          )}
+                        >
+                          <Icon className="h-4.5 w-4.5" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">{tx.description}</p>
+                          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground">
+                            <span>{formatDateBR(tx.transactionDate)}</span>
+                            {tx.category?.name && (
+                              <>
+                                <span>·</span>
+                                <span className="truncate">{tx.category.name}</span>
+                              </>
+                            )}
+                            {tx.source !== 'manual' && (
+                              <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+                                {sourceLabels[tx.source]}
+                              </Badge>
+                            )}
+                            {tx.recurrenceType === 'parcelado' && tx.installmentTotal && (
+                              <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+                                {tx.installmentNumber}/{tx.installmentTotal}
+                              </Badge>
+                            )}
+                            {tx.recurrenceType === 'fixo' && (
+                              <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+                                Fixo
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 flex-col items-end gap-1">
+                        <span
+                          className={cn(
+                            'text-sm font-semibold',
+                            tx.type === 'income'
+                              ? 'text-emerald-600'
+                              : tx.type === 'expense'
+                                ? 'text-rose-600'
+                                : 'text-foreground',
+                          )}
+                        >
+                          {style.sign}
+                          {formatCurrency(Number(tx.amount))}
+                        </span>
+                        {tx.status !== 'confirmed' && (
+                          <Badge variant={statusVariant[tx.status]} className="px-1.5 py-0 text-[10px]">
+                            {statusLabels[tx.status]}
+                          </Badge>
+                        )}
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
 
       {meta.total > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -284,7 +332,28 @@ function TransacoesContent() {
         onClose={closeModal}
         title={editingTx ? 'Editar lançamento' : 'Novo lançamento'}
       >
-        <TransactionForm transaction={editingTx} onSuccess={handleSuccess} onCancel={closeModal} />
+        <TransactionForm
+          transaction={editingTx}
+          defaultType={newType}
+          onSuccess={handleSuccess}
+          onCancel={closeModal}
+        />
+        {editingTx && (
+          <div className="mt-2 flex justify-end">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="text-destructive"
+              onClick={() => {
+                closeModal();
+                void handleDelete(editingTx);
+              }}
+            >
+              Excluir lançamento
+            </Button>
+          </div>
+        )}
       </Dialog>
     </div>
   );

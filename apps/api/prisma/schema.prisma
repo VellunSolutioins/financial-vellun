@@ -34,6 +34,12 @@ enum TransactionSource {
   recurring
 }
 
+enum RecurrenceType {
+  avulso
+  fixo
+  parcelado
+}
+
 enum AccountType {
   checking
   savings
@@ -225,6 +231,10 @@ model Transaction {
   status          TransactionStatus @default(confirmed)
   source          TransactionSource @default(manual)
   rawInput        String?           @map("raw_input")
+  recurrenceType    RecurrenceType @default(avulso) @map("recurrence_type")
+  seriesId          String?        @map("series_id")
+  installmentNumber Int?           @map("installment_number")
+  installmentTotal  Int?           @map("installment_total")
   createdAt       DateTime          @default(now()) @map("created_at")
   updatedAt       DateTime          @updatedAt @map("updated_at")
 
@@ -239,6 +249,7 @@ model Transaction {
   @@index([type])
   @@index([categoryId])
   @@index([accountId])
+  @@index([seriesId])
   @@map("transactions")
 }
 

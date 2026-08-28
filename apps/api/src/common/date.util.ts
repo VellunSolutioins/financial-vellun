@@ -47,3 +47,24 @@ export function startOfMonthUtc(year: number, monthIndex: number): Date {
 export function endOfMonthUtc(year: number, monthIndex: number): Date {
   return new Date(Date.UTC(year, monthIndex + 1, 0, 23, 59, 59, 999));
 }
+
+/**
+ * Soma `months` meses a uma data (UTC), travando o dia no último dia do mês
+ * de destino quando ele não existir (ex.: 31/jan + 1 mês → 28 ou 29/fev, em
+ * vez de "vazar" para março, que é o comportamento padrão do `Date`).
+ */
+export function addMonthsUtc(date: Date, months: number): Date {
+  const day = date.getUTCDate();
+  const target = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + months, 1));
+  const lastDayOfTargetMonth = new Date(
+    Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+  target.setUTCDate(Math.min(day, lastDayOfTargetMonth));
+  target.setUTCHours(
+    date.getUTCHours(),
+    date.getUTCMinutes(),
+    date.getUTCSeconds(),
+    date.getUTCMilliseconds(),
+  );
+  return target;
+}

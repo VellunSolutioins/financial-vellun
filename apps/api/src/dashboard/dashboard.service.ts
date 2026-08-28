@@ -20,7 +20,7 @@ export class DashboardService {
       ? endOfDayUtc(periodEnd)
       : endOfMonthUtc(now.getFullYear(), now.getMonth());
 
-    const [accounts, incomeAgg, expenseAgg, expensesByCategory, recentTransactions] =
+    const [accounts, incomeAgg, expenseAgg, expensesByCategory, recentTransactions, upcomingBills] =
       await Promise.all([
         this.prisma.account.findMany({ where: { userId, isActive: true }, select: { currentBalance: true } }),
         this.prisma.transaction.aggregate({
@@ -41,6 +41,12 @@ export class DashboardService {
           where: { userId },
           include: { category: true, account: true },
           orderBy: { createdAt: 'desc' },
+          take: 5,
+        }),
+        this.prisma.transaction.findMany({
+          where: { userId, type: 'expense', status: 'pending' },
+          include: { category: true, account: true },
+          orderBy: { transactionDate: 'asc' },
           take: 5,
         }),
       ]);
@@ -74,6 +80,7 @@ export class DashboardService {
       netResult: totalIncome - totalExpense,
       expensesByCategory: expensesByCategoryResult,
       recentTransactions,
+      upcomingBills,
       monthlyComparison,
     };
   }
