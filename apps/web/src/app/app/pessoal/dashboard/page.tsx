@@ -20,6 +20,7 @@ import {
   Receipt,
   ArrowUpRight,
   ArrowDownRight,
+  Scale,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -79,6 +80,23 @@ function monthLabelFull(ym: string) {
     timeZone: 'UTC',
   }).format(new Date(Date.UTC(y, m - 1, 1)));
   return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+/** Classifica a saúde financeira do mês a partir da taxa de economia (Economia / Receitas). */
+function financialHealth(savingsRate: number, hasIncome: boolean) {
+  if (!hasIncome) {
+    return { label: 'Sem dados', barClass: 'bg-muted-foreground/30', badgeClass: 'bg-muted text-muted-foreground' };
+  }
+  if (savingsRate < 0) {
+    return { label: 'Ruim', barClass: 'bg-rose-500', badgeClass: 'bg-rose-100 text-rose-700' };
+  }
+  if (savingsRate < 10) {
+    return { label: 'Regular', barClass: 'bg-amber-500', badgeClass: 'bg-amber-100 text-amber-700' };
+  }
+  if (savingsRate < 20) {
+    return { label: 'Bom', barClass: 'bg-blue-500', badgeClass: 'bg-blue-100 text-blue-700' };
+  }
+  return { label: 'Ótimo', barClass: 'bg-emerald-500', badgeClass: 'bg-emerald-100 text-emerald-700' };
 }
 
 function tooltipCurrency(v: unknown) {
@@ -241,6 +259,9 @@ export default function DashboardPage() {
     },
   ];
 
+  const health = financialHealth(savingsRate, data.totalIncome > 0);
+  const healthBarWidth = Math.max(0, Math.min(100, ((savingsRate + 20) / 60) * 100));
+
   return (
     <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -278,6 +299,32 @@ export default function DashboardPage() {
           </Card>
         ))}
       </div>
+
+      {/* Saúde financeira */}
+      <Card className="rounded-2xl">
+        <CardContent className="space-y-3 p-4 sm:p-5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-foreground">
+                <Scale className="h-4 w-4" />
+              </span>
+              <CardTitle className="text-base">Saúde Financeira</CardTitle>
+            </div>
+            <Badge className={health.badgeClass}>{health.label}</Badge>
+          </div>
+          <div className="h-2.5 w-full overflow-hidden rounded-full bg-muted">
+            <div
+              className={cn('h-full rounded-full transition-all', health.barClass)}
+              style={{ width: `${healthBarWidth}%` }}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {data.totalIncome > 0
+              ? `Você está economizando ${savingsRate.toFixed(0)}% da sua receita neste período.`
+              : 'Ainda sem receita registrada neste período para calcular.'}
+          </p>
+        </CardContent>
+      </Card>
 
       {/* Evolução mensal + Despesas por categoria */}
       <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
