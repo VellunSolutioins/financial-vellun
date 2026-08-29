@@ -49,6 +49,11 @@ enum RecurringFrequency {
   annual
 }
 
+enum SavingsYieldPeriod {
+  monthly
+  annual
+}
+
 enum AccountType {
   checking
   savings
@@ -158,6 +163,7 @@ model User {
   payments                Payment[]
   recurringRules          RecurringRule[]
   spendingGoals           SpendingGoal[]
+  savingsBoxes            SavingsBox[]
 
   @@map("users")
 }
@@ -336,6 +342,48 @@ model SpendingGoal {
   @@unique([userId, categoryId])
   @@index([userId])
   @@map("spending_goals")
+}
+
+/// Caixinha (earmarking virtual): meta e prazo são opcionais (pode ser só
+/// acumular sem alvo definido). Rendimento opcional é aplicado
+/// automaticamente pelo cron (ver savings-boxes.service.ts) como um aporte
+/// sintético — por isso `SavingsContribution.yieldCompetence` existe: chave
+/// "YYYY-MM" (mensal) ou "YYYY" (anual) com `@@unique` para não aplicar duas
+/// vezes no mesmo período (mesmo padrão de `RecurringRule`/`competenceMonth`).
+model SavingsBox {
+  id           String              @id @default(uuid())
+  userId       String              @map("user_id")
+  name         String
+  color        String?
+  targetAmount Decimal?            @db.Decimal(15, 2) @map("target_amount")
+  targetDate   DateTime?           @map("target_date") @db.Date
+  yieldRate    Decimal?            @db.Decimal(6, 3) @map("yield_rate")
+  yieldPeriod  SavingsYieldPeriod? @map("yield_period")
+  createdAt    DateTime            @default(now()) @map("created_at")
+  updatedAt    DateTime            @updatedAt @map("updated_at")
+
+  user          User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contributions SavingsContribution[]
+
+  @@index([userId])
+  @@map("savings_boxes")
+}
+
+model SavingsContribution {
+  id              String   @id @default(uuid())
+  savingsBoxId    String   @map("savings_box_id")
+  amount          Decimal  @db.Decimal(15, 2)
+  contributedAt   DateTime @map("contributed_at") @db.Date
+  note            String?
+  /// Preenchido só em aportes gerados automaticamente pelo rendimento (null em aportes manuais).
+  yieldCompetence String?  @map("yield_competence")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  savingsBox SavingsBox @relation(fields: [savingsBoxId], references: [id], onDelete: Cascade)
+
+  @@unique([savingsBoxId, yieldCompetence])
+  @@index([savingsBoxId])
+  @@map("savings_contributions")
 }
 
 // ── WhatsApp ──────────────────────────────────────────────────────────────────

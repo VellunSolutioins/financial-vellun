@@ -19,6 +19,7 @@ import { InternalModule } from './internal/internal.module';
 import { BillingModule } from './billing/billing.module';
 import { RecurringRulesModule } from './recurring-rules/recurring-rules.module';
 import { SpendingGoalsModule } from './spending-goals/spending-goals.module';
+import { SavingsBoxesModule } from './savings-boxes/savings-boxes.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { SpendingGoalsModule } from './spending-goals/spending-goals.module';
     BillingModule,
     RecurringRulesModule,
     SpendingGoalsModule,
+    SavingsBoxesModule,
   ],
   controllers: [AppController],
   providers: [
