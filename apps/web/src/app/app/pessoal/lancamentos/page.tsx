@@ -210,7 +210,7 @@ function TransacoesContent() {
 
       {/* List */}
       <Card className="rounded-2xl">
-        <CardContent className="p-0">
+        <CardContent className="overflow-x-auto p-0">
           {loading ? (
             <div className="p-10 text-center text-sm text-muted-foreground">Carregando...</div>
           ) : data.length === 0 ? (
@@ -218,79 +218,99 @@ function TransacoesContent() {
               Nenhum lançamento encontrado.
             </div>
           ) : (
-            <ul className="divide-y divide-border">
-              {data.map((tx) => {
-                const style = typeStyle[tx.type];
-                const Icon = style.icon;
-                return (
-                  <li key={tx.id}>
-                    <button
-                      type="button"
+            <table className="w-full min-w-[820px] text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-xs font-medium text-muted-foreground">
+                  <th className="p-3">Data</th>
+                  <th className="p-3">Descrição</th>
+                  <th className="p-3">Categoria</th>
+                  <th className="p-3">Conta</th>
+                  <th className="p-3">Origem</th>
+                  <th className="p-3">Status</th>
+                  <th className="p-3 text-right">Valor</th>
+                  <th className="p-3" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {data.map((tx) => {
+                  const style = typeStyle[tx.type];
+                  const Icon = style.icon;
+                  return (
+                    <tr
+                      key={tx.id}
                       onClick={() => openEdit(tx)}
-                      className="flex w-full items-center justify-between gap-3 p-4 text-left transition-colors hover:bg-muted/40"
+                      className="cursor-pointer transition-colors hover:bg-muted/40"
                     >
-                      <div className="flex min-w-0 items-center gap-3">
-                        <span
-                          className={cn(
-                            'flex h-10 w-10 shrink-0 items-center justify-center rounded-full',
-                            style.tone,
-                          )}
-                        >
-                          <Icon className="h-4.5 w-4.5" />
-                        </span>
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium">{tx.description}</p>
-                          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground">
-                            <span>{formatDateBR(tx.transactionDate)}</span>
-                            {tx.category?.name && (
-                              <>
-                                <span>·</span>
-                                <span className="truncate">{tx.category.name}</span>
-                              </>
+                      <td className="whitespace-nowrap p-3 text-muted-foreground">
+                        {formatDateBR(tx.transactionDate)}
+                      </td>
+                      <td className="p-3">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span
+                            className={cn(
+                              'flex h-7 w-7 shrink-0 items-center justify-center rounded-full',
+                              style.tone,
                             )}
-                            {tx.source !== 'manual' && (
-                              <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
-                                {sourceLabels[tx.source]}
-                              </Badge>
-                            )}
-                            {tx.recurrenceType === 'parcelado' && tx.installmentTotal && (
-                              <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
-                                {tx.installmentNumber}/{tx.installmentTotal}
-                              </Badge>
-                            )}
-                            {tx.recurrenceType === 'fixo' && (
-                              <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
-                                Fixo
+                          >
+                            <Icon className="h-3.5 w-3.5" />
+                          </span>
+                          <div className="min-w-0">
+                            <p className="truncate font-medium">{tx.description}</p>
+                            {(tx.recurrenceType === 'parcelado' || tx.recurrenceType === 'fixo') && (
+                              <Badge variant="outline" className="mt-0.5 px-1.5 py-0 text-[10px]">
+                                {tx.recurrenceType === 'parcelado' && tx.installmentTotal
+                                  ? `${tx.installmentNumber}/${tx.installmentTotal}`
+                                  : 'Fixo'}
                               </Badge>
                             )}
                           </div>
                         </div>
-                      </div>
-                      <div className="flex shrink-0 flex-col items-end gap-1">
-                        <span
-                          className={cn(
-                            'text-sm font-semibold',
-                            tx.type === 'income'
-                              ? 'text-emerald-600'
-                              : tx.type === 'expense'
-                                ? 'text-rose-600'
-                                : 'text-foreground',
-                          )}
-                        >
-                          {style.sign}
-                          {formatCurrency(Number(tx.amount))}
-                        </span>
-                        {tx.status !== 'confirmed' && (
-                          <Badge variant={statusVariant[tx.status]} className="px-1.5 py-0 text-[10px]">
-                            {statusLabels[tx.status]}
-                          </Badge>
+                      </td>
+                      <td className="whitespace-nowrap p-3 text-muted-foreground">
+                        {tx.category?.name ?? '—'}
+                      </td>
+                      <td className="whitespace-nowrap p-3 text-muted-foreground">
+                        {tx.account?.name ?? '—'}
+                      </td>
+                      <td className="whitespace-nowrap p-3 text-muted-foreground">
+                        {sourceLabels[tx.source]}
+                      </td>
+                      <td className="whitespace-nowrap p-3">
+                        <Badge variant={statusVariant[tx.status]} className="px-1.5 py-0 text-[10px]">
+                          {statusLabels[tx.status]}
+                        </Badge>
+                      </td>
+                      <td
+                        className={cn(
+                          'whitespace-nowrap p-3 text-right font-semibold',
+                          tx.type === 'income'
+                            ? 'text-emerald-600'
+                            : tx.type === 'expense'
+                              ? 'text-rose-600'
+                              : 'text-foreground',
                         )}
-                      </div>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+                      >
+                        {style.sign}
+                        {formatCurrency(Number(tx.amount))}
+                      </td>
+                      <td className="whitespace-nowrap p-3 text-right">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleDelete(tx);
+                          }}
+                        >
+                          Excluir
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           )}
         </CardContent>
       </Card>
