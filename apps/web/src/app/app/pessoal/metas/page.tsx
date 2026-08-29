@@ -139,6 +139,22 @@ export default function MetasPage() {
                       />
                       <span className="truncate font-medium">{goal.category.name}</span>
                     </div>
+                    <Badge className={cn('shrink-0', health.badge)}>{goal.health.label}</Badge>
+                  </div>
+                  <div>
+                    <span className="text-xl font-bold">{formatCurrency(goal.spent)}</span>
+                    <p className="text-xs text-muted-foreground">de {formatCurrency(goal.amount)} de meta</p>
+                  </div>
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                    <div
+                      className={cn('h-full rounded-full transition-all', health.bar)}
+                      style={{ width: `${barWidth}%` }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className={cn('text-xs font-medium', health.text)}>
+                      {goal.percentage.toFixed(0)}% utilizado
+                    </p>
                     <div className="flex shrink-0 gap-1">
                       <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => openEdit(goal)}>
                         Editar
@@ -153,19 +169,6 @@ export default function MetasPage() {
                       </Button>
                     </div>
                   </div>
-                  <div>
-                    <span className="text-xl font-bold">{formatCurrency(goal.spent)}</span>
-                    <p className="text-xs text-muted-foreground">de {formatCurrency(goal.amount)} de meta</p>
-                  </div>
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                    <div
-                      className={cn('h-full rounded-full transition-all', health.bar)}
-                      style={{ width: `${barWidth}%` }}
-                    />
-                  </div>
-                  <p className={cn('text-xs font-medium', health.text)}>
-                    {goal.percentage.toFixed(0)}% utilizado
-                  </p>
                 </CardContent>
               </Card>
             );
