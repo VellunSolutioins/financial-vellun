@@ -1,7 +1,7 @@
 'use client';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useState, Suspense } from 'react';
-import { ArrowLeftRight, Plus, TrendingDown, TrendingUp } from 'lucide-react';
+import { ArrowLeftRight, Eye, Plus, TrendingDown, TrendingUp } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -76,6 +76,7 @@ function TransacoesContent() {
   const confirm = useConfirm();
   const [modalOpen, setModalOpen] = useState(false);
   const [editingTx, setEditingTx] = useState<Transaction | undefined>();
+  const [viewingTx, setViewingTx] = useState<Transaction | undefined>();
   const [newType, setNewType] = useState<'income' | 'expense'>('expense');
   const selectedMonth = searchParams.get('month') ?? currentMonth();
   const { start: monthStart, end: monthEnd } = monthRange(selectedMonth);
@@ -218,14 +219,12 @@ function TransacoesContent() {
               Nenhum lançamento encontrado.
             </div>
           ) : (
-            <table className="w-full min-w-[820px] text-sm">
+            <table className="w-full min-w-[620px] text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-xs font-medium text-muted-foreground">
                   <th className="p-3">Data</th>
                   <th className="p-3">Descrição</th>
                   <th className="p-3">Categoria</th>
-                  <th className="p-3">Conta</th>
-                  <th className="p-3">Origem</th>
                   <th className="p-3">Status</th>
                   <th className="p-3 text-right">Valor</th>
                   <th className="p-3" />
@@ -269,12 +268,6 @@ function TransacoesContent() {
                       <td className="whitespace-nowrap p-3 text-muted-foreground">
                         {tx.category?.name ?? '—'}
                       </td>
-                      <td className="whitespace-nowrap p-3 text-muted-foreground">
-                        {tx.account?.name ?? '—'}
-                      </td>
-                      <td className="whitespace-nowrap p-3 text-muted-foreground">
-                        {sourceLabels[tx.source]}
-                      </td>
                       <td className="whitespace-nowrap p-3">
                         <Badge variant={statusVariant[tx.status]} className="px-1.5 py-0 text-[10px]">
                           {statusLabels[tx.status]}
@@ -294,6 +287,17 @@ function TransacoesContent() {
                         {formatCurrency(Number(tx.amount))}
                       </td>
                       <td className="whitespace-nowrap p-3 text-right">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setViewingTx(tx);
+                          }}
+                          title="Ver detalhes"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
                         <Button
                           size="sm"
                           variant="ghost"
@@ -373,6 +377,43 @@ function TransacoesContent() {
               Excluir lançamento
             </Button>
           </div>
+        )}
+      </Dialog>
+
+      {/* Detalhes (somente leitura) */}
+      <Dialog
+        open={!!viewingTx}
+        onClose={() => setViewingTx(undefined)}
+        title="Detalhes do lançamento"
+      >
+        {viewingTx && (
+          <dl className="space-y-3 text-sm">
+            {[
+              ['Descrição', viewingTx.description],
+              [
+                'Valor',
+                `${typeStyle[viewingTx.type].sign}${formatCurrency(Number(viewingTx.amount))}`,
+              ],
+              ['Data', formatDateBR(viewingTx.transactionDate)],
+              ['Categoria', viewingTx.category?.name ?? '—'],
+              ['Conta', viewingTx.account?.name ?? '—'],
+              ['Origem', sourceLabels[viewingTx.source]],
+              ['Status', statusLabels[viewingTx.status]],
+              [
+                'Recorrência',
+                viewingTx.recurrenceType === 'parcelado' && viewingTx.installmentTotal
+                  ? `Parcelado (${viewingTx.installmentNumber}/${viewingTx.installmentTotal})`
+                  : viewingTx.recurrenceType === 'fixo'
+                    ? 'Fixo (repete todo mês)'
+                    : 'Avulso',
+              ],
+            ].map(([label, value]) => (
+              <div key={label} className="flex items-center justify-between gap-4 border-b border-border pb-2 last:border-0 last:pb-0">
+                <dt className="text-muted-foreground">{label}</dt>
+                <dd className="text-right font-medium">{value}</dd>
+              </div>
+            ))}
+          </dl>
         )}
       </Dialog>
     </div>
