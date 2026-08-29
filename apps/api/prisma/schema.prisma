@@ -157,6 +157,7 @@ model User {
   subscriptions           Subscription[]
   payments                Payment[]
   recurringRules          RecurringRule[]
+  spendingGoals           SpendingGoal[]
 
   @@map("users")
 }
@@ -226,6 +227,7 @@ model Category {
   user           User?           @relation(fields: [userId], references: [id], onDelete: Cascade)
   transactions   Transaction[]
   recurringRules RecurringRule[]
+  spendingGoals  SpendingGoal[]
 
   @@index([userId])
   @@map("categories")
@@ -318,6 +320,22 @@ model RecurringRule {
   @@index([userId])
   @@index([isActive])
   @@map("recurring_rules")
+}
+
+model SpendingGoal {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  categoryId String   @map("category_id")
+  amount     Decimal  @db.Decimal(15, 2)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, categoryId])
+  @@index([userId])
+  @@map("spending_goals")
 }
 
 // ── WhatsApp ──────────────────────────────────────────────────────────────────

@@ -51,6 +51,7 @@ const navItems = {
     { href: '/app/pessoal/dashboard', label: 'Dashboard' },
     { href: '/app/pessoal/lancamentos', label: 'Lançamentos' },
     { href: '/app/pessoal/recorrencias', label: 'Recorrências' },
+    { href: '/app/pessoal/metas', label: 'Metas de Gastos' },
     { href: '/app/pessoal/contas', label: 'Contas' },
     { href: '/app/pessoal/categorias', label: 'Categorias' },
   ],

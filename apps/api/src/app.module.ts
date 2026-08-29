@@ -18,6 +18,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { InternalModule } from './internal/internal.module';
 import { BillingModule } from './billing/billing.module';
 import { RecurringRulesModule } from './recurring-rules/recurring-rules.module';
+import { SpendingGoalsModule } from './spending-goals/spending-goals.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { RecurringRulesModule } from './recurring-rules/recurring-rules.module';
     InternalModule,
     BillingModule,
     RecurringRulesModule,
+    SpendingGoalsModule,
   ],
   controllers: [AppController],
   providers: [
