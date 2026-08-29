@@ -40,6 +40,15 @@ enum RecurrenceType {
   parcelado
 }
 
+// ── Recorrências (despesas/receitas fixas) ────────────────────────────────────
+
+enum RecurringFrequency {
+  monthly
+  bimonthly
+  semiannual
+  annual
+}
+
 enum AccountType {
   checking
   savings
@@ -147,6 +156,7 @@ model User {
   aiExtractedTransactions AiExtractedTransaction[]
   subscriptions           Subscription[]
   payments                Payment[]
+  recurringRules          RecurringRule[]
 
   @@map("users")
 }
@@ -192,8 +202,9 @@ model Account {
   createdAt      DateTime    @default(now()) @map("created_at")
   updatedAt      DateTime    @updatedAt @map("updated_at")
 
-  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  transactions Transaction[]
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions   Transaction[]
+  recurringRules RecurringRule[]
 
   @@index([userId])
   @@map("accounts")
@@ -212,8 +223,9 @@ model Category {
   createdAt   DateTime        @default(now()) @map("created_at")
   updatedAt   DateTime        @updatedAt @map("updated_at")
 
-  user         User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  transactions Transaction[]
+  user           User?           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions   Transaction[]
+  recurringRules RecurringRule[]
 
   @@index([userId])
   @@map("categories")
@@ -235,15 +247,19 @@ model Transaction {
   seriesId          String?        @map("series_id")
   installmentNumber Int?           @map("installment_number")
   installmentTotal  Int?           @map("installment_total")
+  recurringRuleId   String?        @map("recurring_rule_id")
+  competenceMonth   String?        @map("competence_month")
   createdAt       DateTime          @default(now()) @map("created_at")
   updatedAt       DateTime          @updatedAt @map("updated_at")
 
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  account  Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  category Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account       Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  category      Category?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  recurringRule RecurringRule? @relation(fields: [recurringRuleId], references: [id], onDelete: SetNull)
 
   aiExtractedTransactions AiExtractedTransaction[]
 
+  @@unique([recurringRuleId, competenceMonth])
   @@index([userId])
   @@index([transactionDate])
   @@index([type])
@@ -270,6 +286,38 @@ model Contact {
 
   @@index([userId])
   @@map("contacts")
+}
+
+/// Regra de receita/despesa fixa ("Despesas Fixas e Recorrências"). Um cron
+/// diário gera Transaction (source=recurring, status=pending) nos meses em
+/// que a regra vence, respeitando `frequency`. `amount` é o valor nominal da
+/// regra — usado no card "Comprometido com fixos" independente de já ter sido
+/// gerado o lançamento do mês corrente.
+model RecurringRule {
+  id          String             @id @default(uuid())
+  userId      String             @map("user_id")
+  accountId   String             @map("account_id")
+  categoryId  String?            @map("category_id")
+  type        TransactionType
+  description String
+  amount      Decimal            @db.Decimal(15, 2)
+  frequency   RecurringFrequency @default(monthly)
+  /// Dia do mês em que vence (1–28, evita ambiguidade em meses curtos).
+  dueDay      Int                @map("due_day")
+  startDate   DateTime           @map("start_date") @db.Date
+  endDate     DateTime?          @map("end_date") @db.Date
+  isActive    Boolean            @default(true) @map("is_active")
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account      Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  category     Category?     @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  transactions Transaction[]
+
+  @@index([userId])
+  @@index([isActive])
+  @@map("recurring_rules")
 }
 
 // ── WhatsApp ──────────────────────────────────────────────────────────────────

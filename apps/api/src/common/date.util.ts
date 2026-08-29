@@ -49,6 +49,25 @@ export function endOfMonthUtc(year: number, monthIndex: number): Date {
 }
 
 /**
+ * "Hoje" em America/Sao_Paulo, como `{ year, month (1-11 UTC-style... na
+ * verdade 0-based para casar com Date), day }`. Necessário porque `new
+ * Date()` cru reflete o fuso do servidor/UTC — entre 21h e 0h local o dia UTC
+ * já virou o dia seguinte. Usado pelo cron de recorrência e por qualquer
+ * cálculo de "vencido"/"dia do mês" que precise do dia-calendário correto.
+ */
+export function todaySaoPaulo(): { year: number; monthIndex: number; day: number } {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  return { year: get('year'), monthIndex: get('month') - 1, day: get('day') };
+}
+
+/**
  * Soma `months` meses a uma data (UTC), travando o dia no último dia do mês
  * de destino quando ele não existir (ex.: 31/jan + 1 mês → 28 ou 29/fev, em
  * vez de "vazar" para março, que é o comportamento padrão do `Date`).

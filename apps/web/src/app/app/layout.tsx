@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+
 import { useAuth } from '@/contexts/auth-context';
 import { Button } from '@/components/ui/button';
 import type { SubscriptionAccess } from '@/lib/billing';
@@ -49,6 +50,7 @@ const navItems = {
   individual: [
     { href: '/app/pessoal/dashboard', label: 'Dashboard' },
     { href: '/app/pessoal/lancamentos', label: 'Lançamentos' },
+    { href: '/app/pessoal/recorrencias', label: 'Recorrências' },
     { href: '/app/pessoal/contas', label: 'Contas' },
     { href: '/app/pessoal/categorias', label: 'Categorias' },
   ],
