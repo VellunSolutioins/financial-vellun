@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+
 import { PrismaService } from '../prisma/prisma.service';
 import {
   startOfDayUtc,
@@ -22,7 +23,10 @@ export class DashboardService {
 
     const [accounts, incomeAgg, expenseAgg, expensesByCategory, recentTransactions, upcomingBills] =
       await Promise.all([
-        this.prisma.account.findMany({ where: { userId, isActive: true }, select: { currentBalance: true } }),
+        this.prisma.account.findMany({
+          where: { userId, isActive: true, type: { not: 'credit_card' } },
+          select: { currentBalance: true },
+        }),
         this.prisma.transaction.aggregate({
           where: { userId, type: 'income', status: 'confirmed', transactionDate: { gte: start, lte: end } },
           _sum: { amount: true },
@@ -97,7 +101,7 @@ export class DashboardService {
     const [accounts, confirmedInPeriod, expensesByCategory, accountsReceivable, accountsPayable] =
       await Promise.all([
         this.prisma.account.findMany({
-          where: { userId, isActive: true },
+          where: { userId, isActive: true, type: { not: 'credit_card' } },
           select: { currentBalance: true },
         }),
         this.prisma.transaction.findMany({

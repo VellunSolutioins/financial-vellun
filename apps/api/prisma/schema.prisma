@@ -212,9 +212,31 @@ model Account {
   user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   transactions   Transaction[]
   recurringRules RecurringRule[]
+  creditCard     CreditCard?
 
   @@index([userId])
   @@map("accounts")
+}
+
+/// Extensão 1:1 de Account (type=credit_card). "Fatura atual" é derivada do
+/// próprio saldo da conta (currentBalance = initialBalance + income - expense,
+/// e cartão nunca recebe income, então currentBalance é sempre <= 0) — não há
+/// fechamento de fatura nem pagamento nesta versão, é só gestão/controle.
+model CreditCard {
+  id          String   @id @default(uuid())
+  accountId   String   @unique @map("account_id")
+  brand       String?
+  color       String?
+  creditLimit Decimal? @db.Decimal(15, 2) @map("credit_limit")
+  /// Dia do mês em que a fatura vence (1–28).
+  dueDay      Int      @map("due_day")
+  isPrimary   Boolean  @default(false) @map("is_primary")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@map("credit_cards")
 }
 
 model Category {

@@ -20,6 +20,7 @@ import { BillingModule } from './billing/billing.module';
 import { RecurringRulesModule } from './recurring-rules/recurring-rules.module';
 import { SpendingGoalsModule } from './spending-goals/spending-goals.module';
 import { SavingsBoxesModule } from './savings-boxes/savings-boxes.module';
+import { CreditCardsModule } from './credit-cards/credit-cards.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { SavingsBoxesModule } from './savings-boxes/savings-boxes.module';
     RecurringRulesModule,
     SpendingGoalsModule,
     SavingsBoxesModule,
+    CreditCardsModule,
   ],
   controllers: [AppController],
   providers: [

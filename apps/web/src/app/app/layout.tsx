@@ -53,6 +53,7 @@ const navItems = {
     { href: '/app/pessoal/recorrencias', label: 'Recorrências' },
     { href: '/app/pessoal/metas', label: 'Metas de Gastos' },
     { href: '/app/pessoal/caixinhas', label: 'Caixinhas' },
+    { href: '/app/pessoal/cartoes', label: 'Cartões' },
     { href: '/app/pessoal/contas', label: 'Contas' },
     { href: '/app/pessoal/categorias', label: 'Categorias' },
   ],
