@@ -2,6 +2,7 @@
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useState, Suspense } from 'react';
 import { ArrowLeftRight, Eye, Plus, TrendingDown, TrendingUp } from 'lucide-react';
+
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -20,11 +21,6 @@ function formatCurrency(v: number) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 }
 
-const statusVariant: Record<string, 'success' | 'warning' | 'destructive'> = {
-  confirmed: 'success',
-  pending: 'warning',
-  cancelled: 'destructive',
-};
 const statusLabels: Record<string, string> = {
   confirmed: 'Confirmado',
   pending: 'Pendente',
@@ -222,10 +218,8 @@ function TransacoesContent() {
             <table className="w-full min-w-[620px] text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-xs font-medium text-muted-foreground">
-                  <th className="p-3">Data</th>
                   <th className="p-3">Descrição</th>
                   <th className="p-3">Categoria</th>
-                  <th className="p-3">Status</th>
                   <th className="p-3 text-right">Valor</th>
                   <th className="p-3" />
                 </tr>
@@ -240,9 +234,6 @@ function TransacoesContent() {
                       onClick={() => openEdit(tx)}
                       className="cursor-pointer transition-colors hover:bg-muted/40"
                     >
-                      <td className="whitespace-nowrap p-3 text-muted-foreground">
-                        {formatDateBR(tx.transactionDate)}
-                      </td>
                       <td className="p-3">
                         <div className="flex min-w-0 items-center gap-2">
                           <span
@@ -255,23 +246,23 @@ function TransacoesContent() {
                           </span>
                           <div className="min-w-0">
                             <p className="truncate font-medium">{tx.description}</p>
-                            {(tx.recurrenceType === 'parcelado' || tx.recurrenceType === 'fixo') && (
-                              <Badge variant="outline" className="mt-0.5 px-1.5 py-0 text-[10px]">
-                                {tx.recurrenceType === 'parcelado' && tx.installmentTotal
-                                  ? `${tx.installmentNumber}/${tx.installmentTotal}`
-                                  : 'Fixo'}
-                              </Badge>
-                            )}
+                            <div className="flex items-center gap-1.5">
+                              <p className="text-xs text-muted-foreground">
+                                {formatDateBR(tx.transactionDate)}
+                              </p>
+                              {(tx.recurrenceType === 'parcelado' || tx.recurrenceType === 'fixo') && (
+                                <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+                                  {tx.recurrenceType === 'parcelado' && tx.installmentTotal
+                                    ? `${tx.installmentNumber}/${tx.installmentTotal}`
+                                    : 'Fixo'}
+                                </Badge>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </td>
                       <td className="whitespace-nowrap p-3 text-muted-foreground">
                         {tx.category?.name ?? '—'}
-                      </td>
-                      <td className="whitespace-nowrap p-3">
-                        <Badge variant={statusVariant[tx.status]} className="px-1.5 py-0 text-[10px]">
-                          {statusLabels[tx.status]}
-                        </Badge>
                       </td>
                       <td
                         className={cn(
