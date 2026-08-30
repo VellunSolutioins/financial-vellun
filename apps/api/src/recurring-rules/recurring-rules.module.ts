@@ -9,5 +9,6 @@ import { RecurringRulesService } from './recurring-rules.service';
   imports: [BillingModule],
   controllers: [RecurringRulesController],
   providers: [RecurringRulesService],
+  exports: [RecurringRulesService],
 })
 export class RecurringRulesModule {}

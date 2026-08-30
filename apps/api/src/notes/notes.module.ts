@@ -9,5 +9,6 @@ import { NotesService } from './notes.service';
   imports: [BillingModule],
   controllers: [NotesController],
   providers: [NotesService],
+  exports: [NotesService],
 })
 export class NotesModule {}

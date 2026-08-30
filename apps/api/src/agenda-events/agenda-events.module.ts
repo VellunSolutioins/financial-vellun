@@ -9,5 +9,6 @@ import { AgendaEventsService } from './agenda-events.service';
   imports: [BillingModule],
   controllers: [AgendaEventsController],
   providers: [AgendaEventsService],
+  exports: [AgendaEventsService],
 })
 export class AgendaEventsModule {}

@@ -9,5 +9,6 @@ import { SpendingGoalsService } from './spending-goals.service';
   imports: [BillingModule],
   controllers: [SpendingGoalsController],
   providers: [SpendingGoalsService],
+  exports: [SpendingGoalsService],
 })
 export class SpendingGoalsModule {}

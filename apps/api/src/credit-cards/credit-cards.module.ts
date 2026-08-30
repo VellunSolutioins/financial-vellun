@@ -10,5 +10,6 @@ import { CreditCardsService } from './credit-cards.service';
   imports: [BillingModule, AccountsModule],
   controllers: [CreditCardsController],
   providers: [CreditCardsService],
+  exports: [CreditCardsService],
 })
 export class CreditCardsModule {}

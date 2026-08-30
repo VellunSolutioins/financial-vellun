@@ -9,5 +9,6 @@ import { SavingsBoxesService } from './savings-boxes.service';
   imports: [BillingModule],
   controllers: [SavingsBoxesController],
   providers: [SavingsBoxesService],
+  exports: [SavingsBoxesService],
 })
 export class SavingsBoxesModule {}
