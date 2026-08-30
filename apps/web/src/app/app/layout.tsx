@@ -34,6 +34,11 @@ import type { SubscriptionAccess } from '@/lib/billing';
 
 const ASSINATURA_PATH = '/app/conta/assinatura';
 const SIDEBAR_COLLAPSED_KEY = 'fv:sidebar-collapsed';
+const ACTIVE_CONTEXT_KEY = 'fv:active-context';
+const CONTEXT_DASHBOARD: Record<'individual' | 'business', string> = {
+  individual: '/app/pessoal/dashboard',
+  business: '/app/empresa/dashboard',
+};
 
 /** Aviso global de inadimplência/grace, ocultado na própria página de assinatura. */
 function SubscriptionBanner({
@@ -100,11 +105,36 @@ const navItems: Record<'individual' | 'business', { href: string; label: string;
 };
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const { user, loading, logout, subscriptionAccess } = useAuth();
+  const { user, loading, logout, subscriptionAccess, plan } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [activeContext, setActiveContext] = useState<'individual' | 'business'>('individual');
+
+  // Plano Business: dono do plano gerencia Pessoal e Negócio na mesma conta,
+  // alternando o contexto (nav + dashboard) por uma chave — ver doc do Prompt.
+  const isBusinessPlan = plan?.name === 'Business';
+
+  useEffect(() => {
+    if (!isBusinessPlan || !user) return;
+    try {
+      const saved = localStorage.getItem(ACTIVE_CONTEXT_KEY);
+      setActiveContext(saved === 'individual' || saved === 'business' ? saved : user.profileType);
+    } catch {
+      setActiveContext(user.profileType);
+    }
+  }, [isBusinessPlan, user]);
+
+  const switchContext = (next: 'individual' | 'business') => {
+    setActiveContext(next);
+    try {
+      localStorage.setItem(ACTIVE_CONTEXT_KEY, next);
+    } catch {
+      // ignora falha ao persistir
+    }
+    router.push(CONTEXT_DASHBOARD[next]);
+  };
 
   // Fecha o menu lateral ao navegar (relevante apenas em mobile)
   useEffect(() => {
@@ -138,13 +168,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       router.push('/login');
       return;
     }
-    // Profile-based area isolation: individual users cannot access /app/empresa/*
+    // Plano Business tem acesso livre aos dois lados (alterna pela chave
+    // Pessoal/Negócio) — a isolação por perfil só vale pra quem não tem esse plano.
+    if (isBusinessPlan) return;
     if (user.profileType === 'individual' && pathname.startsWith('/app/empresa')) {
       router.push('/app/pessoal/dashboard');
     } else if (user.profileType === 'business' && pathname.startsWith('/app/pessoal/dashboard')) {
       router.push('/app/empresa/dashboard');
     }
-  }, [user, loading, router, pathname]);
+  }, [user, loading, router, pathname, isBusinessPlan]);
 
   if (loading) {
     return (
@@ -155,7 +187,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
   if (!user) return null;
 
-  const items = navItems[user.profileType] ?? navItems.individual;
+  const items = navItems[isBusinessPlan ? activeContext : user.profileType] ?? navItems.individual;
 
   const navLinkClass = (active: boolean) =>
     cn(
@@ -225,6 +257,27 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </svg>
           </button>
         </div>
+        {isBusinessPlan && !collapsed && (
+          <div className="border-b p-4">
+            <div className="inline-flex w-full items-center rounded-full border bg-muted p-1">
+              {(['individual', 'business'] as const).map((ctx) => (
+                <button
+                  key={ctx}
+                  type="button"
+                  onClick={() => switchContext(ctx)}
+                  className={cn(
+                    'flex-1 rounded-full px-3 py-1.5 text-xs font-medium transition-colors',
+                    activeContext === ctx
+                      ? 'bg-primary text-primary-foreground shadow'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  {ctx === 'individual' ? 'Pessoal' : 'Negócio'}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         <nav className="flex-1 space-y-1 overflow-y-auto p-4">
           {items.map((item) => {
             const Icon = item.icon;

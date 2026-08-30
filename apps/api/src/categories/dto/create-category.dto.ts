@@ -1,6 +1,6 @@
 import { IsEnum, IsOptional, IsString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { TransactionType } from '@prisma/client';
+import { ProfileType, TransactionType } from '@prisma/client';
 
 export class CreateCategoryDto {
   @ApiProperty()
@@ -10,6 +10,12 @@ export class CreateCategoryDto {
   @ApiProperty({ enum: TransactionType })
   @IsEnum(TransactionType)
   type!: TransactionType;
+
+  /** Contexto (Pessoal/Negócio) da categoria — quando ausente, usa o perfil do usuário. */
+  @ApiProperty({ enum: ProfileType, required: false })
+  @IsOptional()
+  @IsEnum(ProfileType)
+  profileType?: ProfileType;
 
   @ApiProperty({ required: false })
   @IsOptional()
