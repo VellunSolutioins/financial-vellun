@@ -79,6 +79,12 @@ export class RemindersService {
     return paid;
   }
 
+  /** Desfaz a marcação de pago. Não remove o lembrete do mês seguinte já criado por uma recorrência. */
+  async unpay(userId: string, id: string) {
+    const existing = await this.findOwned(userId, id);
+    return this.prisma.reminder.update({ where: { id: existing.id }, data: { status: 'pending' } });
+  }
+
   async remove(userId: string, id: string) {
     const existing = await this.findOwned(userId, id);
     return this.prisma.reminder.delete({ where: { id: existing.id } });

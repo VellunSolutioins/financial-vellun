@@ -40,6 +40,12 @@ export class RemindersController {
     return this.remindersService.pay(user.id, id);
   }
 
+  @Post(':id/unpay')
+  unpay(@Req() req: Request, @Param('id') id: string) {
+    const user = req.user as any;
+    return this.remindersService.unpay(user.id, id);
+  }
+
   @Delete(':id')
   remove(@Req() req: Request, @Param('id') id: string) {
     const user = req.user as any;

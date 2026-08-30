@@ -48,17 +48,22 @@ export default function LembretesPage() {
     void refetch();
   };
 
-  const handlePay = async (reminder: Reminder) => {
+  const handleTogglePaid = async (reminder: Reminder) => {
     try {
-      await apiClient.post(`/reminders/${reminder.id}/pay`, {});
-      toast.success(
-        reminder.isRecurrent
-          ? 'Marcado como pago — próximo lembrete já criado.'
-          : 'Marcado como pago.',
-      );
+      if (reminder.derivedStatus === 'paid') {
+        await apiClient.post(`/reminders/${reminder.id}/unpay`, {});
+        toast.success('Marcação de pago desfeita.');
+      } else {
+        await apiClient.post(`/reminders/${reminder.id}/pay`, {});
+        toast.success(
+          reminder.isRecurrent
+            ? 'Marcado como pago — próximo lembrete já criado.'
+            : 'Marcado como pago.',
+        );
+      }
       void refetch();
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Erro ao marcar como pago');
+      toast.error(e instanceof Error ? e.message : 'Erro ao atualizar lembrete');
     }
   };
 
@@ -108,9 +113,8 @@ export default function LembretesPage() {
                   <li key={reminder.id} className="flex items-center gap-3 p-4">
                     <button
                       type="button"
-                      onClick={() => reminder.derivedStatus !== 'paid' && void handlePay(reminder)}
-                      disabled={reminder.derivedStatus === 'paid'}
-                      aria-label="Marcar como pago"
+                      onClick={() => void handleTogglePaid(reminder)}
+                      aria-label={reminder.derivedStatus === 'paid' ? 'Desmarcar como pago' : 'Marcar como pago'}
                       className="shrink-0"
                     >
                       {reminder.derivedStatus === 'paid' ? (
