@@ -126,6 +126,27 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     }
   }, [isBusinessPlan, user]);
 
+  // Páginas exclusivas de um lado (/app/empresa/* e o dashboard pessoal)
+  // sincronizam a chave sozinhas — evita nav/dashboard desalinhados quando
+  // se chega direto por link/refresh em vez de clicar na chave. Lançamentos/
+  // Contas são compartilhados entre os dois lados e não mexem na chave.
+  useEffect(() => {
+    if (!isBusinessPlan) return;
+    const target = pathname.startsWith('/app/empresa')
+      ? 'business'
+      : pathname === '/app/pessoal/dashboard' || pathname.startsWith('/app/pessoal/categorias')
+        ? 'individual'
+        : null;
+    if (!target || target === activeContext) return;
+    setActiveContext(target);
+    try {
+      localStorage.setItem(ACTIVE_CONTEXT_KEY, target);
+    } catch {
+      // ignora falha ao persistir
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname, isBusinessPlan]);
+
   const switchContext = (next: 'individual' | 'business') => {
     setActiveContext(next);
     try {

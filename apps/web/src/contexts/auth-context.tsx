@@ -43,9 +43,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     getMe()
-      .then((u) => {
+      // Espera o plano carregar junto — o layout usa `plan` (Business?) pra
+      // decidir se aplica a trava de área por perfil; sem aguardar aqui,
+      // `loading` vira false antes do plano chegar e a trava roda com
+      // `isBusinessPlan` ainda falso, chutando o dono do plano Business pra
+      // fora de /app/empresa mesmo tendo acesso.
+      .then(async (u) => {
         setUser(u);
-        void refreshSubscriptionAccess();
+        await refreshSubscriptionAccess();
       })
       .catch(() => setUser(null))
       .finally(() => setLoading(false));
