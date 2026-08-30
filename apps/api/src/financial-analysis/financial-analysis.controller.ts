@@ -17,6 +17,6 @@ export class FinancialAnalysisController {
   @Get('scores')
   getScores(@Req() req: Request) {
     const user = req.user as any;
-    return this.financialAnalysisService.getScores(user.id);
+    return this.financialAnalysisService.getScores(user.dataOwnerId);
   }
 }

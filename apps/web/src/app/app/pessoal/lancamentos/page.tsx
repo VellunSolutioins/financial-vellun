@@ -11,6 +11,8 @@ import { Select } from '@/components/ui/select';
 import { Dialog } from '@/components/ui/dialog';
 import { TransactionForm } from '@/components/transactions/TransactionForm';
 import { useTransactions, type Transaction } from '@/hooks/useTransactions';
+import { useMembers } from '@/hooks/useMembers';
+import { useAuth } from '@/contexts/auth-context';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
@@ -70,6 +72,12 @@ function TransacoesContent() {
   const router = useRouter();
   const toast = useToast();
   const confirm = useConfirm();
+  const { user } = useAuth();
+  const { data: membersData } = useMembers();
+  const household = membersData
+    ? [membersData.owner, ...membersData.members]
+    : [];
+  const hasMembers = household.length > 1;
   const [modalOpen, setModalOpen] = useState(false);
   const [editingTx, setEditingTx] = useState<Transaction | undefined>();
   const [viewingTx, setViewingTx] = useState<Transaction | undefined>();
@@ -91,6 +99,7 @@ function TransacoesContent() {
     source: searchParams.get('source') ?? undefined,
     categoryId: searchParams.get('categoryId') ?? undefined,
     search: searchParams.get('search') ?? undefined,
+    authorId: searchParams.get('authorId') ?? undefined,
     periodStart: monthStart,
     periodEnd: monthEnd,
   };
@@ -176,7 +185,9 @@ function TransacoesContent() {
 
       {/* Filters */}
       <Card className="rounded-2xl">
-        <CardContent className="grid grid-cols-2 gap-3 p-4 md:grid-cols-5">
+        <CardContent
+          className={cn('grid grid-cols-2 gap-3 p-4', hasMembers ? 'md:grid-cols-6' : 'md:grid-cols-5')}
+        >
           <Input
             placeholder="Buscar descrição..."
             defaultValue={filters.search}
@@ -202,6 +213,19 @@ function TransacoesContent() {
             <option value="">Todas categorias</option>
             <option value="uncategorized">Sem categoria</option>
           </Select>
+          {hasMembers && (
+            <Select
+              defaultValue={filters.authorId}
+              onChange={(e) => setParam('authorId', e.target.value)}
+            >
+              <option value="">Todos os autores</option>
+              {household.map((person) => (
+                <option key={person.id} value={person.id}>
+                  {person.id === user?.id ? 'Você' : person.name}
+                </option>
+              ))}
+            </Select>
+          )}
         </CardContent>
       </Card>
 
@@ -249,6 +273,12 @@ function TransacoesContent() {
                             <div className="flex items-center gap-1.5">
                               <p className="text-xs text-muted-foreground">
                                 {formatDateBR(tx.transactionDate)}
+                                {hasMembers && tx.createdBy && (
+                                  <>
+                                    {' · '}
+                                    {tx.createdBy.id === user?.id ? 'Você' : tx.createdBy.name}
+                                  </>
+                                )}
                               </p>
                               {(tx.recurrenceType === 'parcelado' || tx.recurrenceType === 'fixo') && (
                                 <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
@@ -386,6 +416,9 @@ function TransacoesContent() {
                 `${typeStyle[viewingTx.type].sign}${formatCurrency(Number(viewingTx.amount))}`,
               ],
               ['Data', formatDateBR(viewingTx.transactionDate)],
+              ...(hasMembers
+                ? [['Lançado por', viewingTx.createdBy?.id === user?.id ? 'Você' : (viewingTx.createdBy?.name ?? '—')]]
+                : []),
               ['Categoria', viewingTx.category?.name ?? '—'],
               ['Conta', viewingTx.account?.name ?? '—'],
               ['Origem', sourceLabels[viewingTx.source]],

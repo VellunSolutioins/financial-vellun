@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiCookieAuth, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { Request } from 'express';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+
 import { BillingService } from './billing.service';
 import { CreateCheckoutDto } from './dto/create-checkout.dto';
 
@@ -26,13 +27,21 @@ export class BillingController {
   @Get('subscription')
   getSubscription(@Req() req: Request) {
     const user = req.user as any;
-    return this.billingService.getSubscriptionState(user.id);
+    return this.billingService.getSubscriptionState(user.dataOwnerId);
+  }
+
+  /** Só o dono do plano pode gerenciar cobrança — membro convidado não. */
+  private assertIsOwner(user: any) {
+    if (user.householdOwnerId) {
+      throw new ForbiddenException('Só o dono do plano pode gerenciar a assinatura.');
+    }
   }
 
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('checkout')
   createCheckout(@Req() req: Request, @Body() dto: CreateCheckoutDto) {
     const user = req.user as any;
+    this.assertIsOwner(user);
     return this.billingService.createCheckout(user.id, dto);
   }
 
@@ -40,12 +49,14 @@ export class BillingController {
   @Post('payment-method')
   createPaymentMethodSession(@Req() req: Request) {
     const user = req.user as any;
+    this.assertIsOwner(user);
     return this.billingService.createPaymentMethodSession(user.id);
   }
 
   @Post('cancel')
   cancel(@Req() req: Request) {
     const user = req.user as any;
+    this.assertIsOwner(user);
     return this.billingService.cancel(user.id);
   }
 }

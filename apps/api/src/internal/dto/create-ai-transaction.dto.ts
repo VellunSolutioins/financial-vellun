@@ -13,6 +13,11 @@ export class CreateAiTransactionDto {
   @IsNotEmpty()
   userId!: string;
 
+  /** Quem de fato mandou a mensagem (dono ou membro). Default: userId. */
+  @IsOptional()
+  @IsString()
+  createdByUserId?: string;
+
   @IsString()
   @IsNotEmpty()
   accountId!: string;

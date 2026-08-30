@@ -30,13 +30,14 @@ export class ActiveSubscriptionGuard implements CanActivate {
     if (!this.access.isEnforced()) return true;
 
     const request = context.switchToHttp().getRequest<Request>();
-    const user = request.user as { id?: string } | undefined;
+    const user = request.user as { id?: string; dataOwnerId?: string } | undefined;
     if (!user?.id) {
       // Identidade não resolvida (guard aplicado sem JwtAuthGuard antes).
       throw new ForbiddenException();
     }
 
-    const access = await this.access.canUseProduct(user.id);
+    // Membro do plano Duo usa a assinatura do dono, nunca a própria (não tem).
+    const access = await this.access.canUseProduct(user.dataOwnerId ?? user.id);
     if (!access.allowed) {
       throw new SubscriptionRequiredException();
     }

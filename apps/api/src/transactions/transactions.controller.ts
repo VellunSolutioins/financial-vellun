@@ -12,8 +12,10 @@ import {
 } from '@nestjs/common';
 import { ApiCookieAuth, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
+
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ActiveSubscriptionGuard } from '../billing/guards/active-subscription.guard';
+
 import { TransactionsService } from './transactions.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
@@ -29,31 +31,31 @@ export class TransactionsController {
   @Get()
   findAll(@Req() req: Request, @Query() filters: ListTransactionsDto) {
     const user = req.user as any;
-    return this.transactionsService.findAll(user.id, filters);
+    return this.transactionsService.findAll(user.dataOwnerId, filters);
   }
 
   @Get(':id')
   findOne(@Req() req: Request, @Param('id') id: string) {
     const user = req.user as any;
-    return this.transactionsService.findOne(user.id, id);
+    return this.transactionsService.findOne(user.dataOwnerId, id);
   }
 
   @Get(':id/ai-audit')
   findAiAudit(@Req() req: Request, @Param('id') id: string) {
     const user = req.user as any;
-    return this.transactionsService.findAiAudit(user.id, id);
+    return this.transactionsService.findAiAudit(user.dataOwnerId, id);
   }
 
   @Post()
   create(@Req() req: Request, @Body() dto: CreateTransactionDto) {
     const user = req.user as any;
-    return this.transactionsService.create(user.id, dto);
+    return this.transactionsService.create(user.dataOwnerId, user.id, dto);
   }
 
   @Patch(':id')
   update(@Req() req: Request, @Param('id') id: string, @Body() dto: UpdateTransactionDto) {
     const user = req.user as any;
-    return this.transactionsService.update(user.id, id, dto);
+    return this.transactionsService.update(user.dataOwnerId, id, dto);
   }
 
   @Delete(':id')
@@ -63,6 +65,6 @@ export class TransactionsController {
     @Query('hard_delete') hardDelete?: string,
   ) {
     const user = req.user as any;
-    return this.transactionsService.remove(user.id, id, hardDelete === 'true');
+    return this.transactionsService.remove(user.dataOwnerId, id, hardDelete === 'true');
   }
 }

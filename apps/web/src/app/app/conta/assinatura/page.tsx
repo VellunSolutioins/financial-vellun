@@ -31,7 +31,8 @@ const MANAGED_STATUSES = ['active', 'trialing', 'past_due'];
 export default function AssinaturaPage() {
   const toast = useToast();
   const confirm = useConfirm();
-  const { refreshSubscriptionAccess } = useAuth();
+  const { user, refreshSubscriptionAccess } = useAuth();
+  const isOwner = !user?.householdOwnerId;
 
   const [state, setState] = useState<SubscriptionState | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -134,6 +135,7 @@ export default function AssinaturaPage() {
           <ManagementCard
             state={state!}
             busy={busy}
+            isOwner={isOwner}
             onUpdateCard={handleUpdateCard}
             onCancel={handleCancel}
           />
@@ -142,6 +144,11 @@ export default function AssinaturaPage() {
         <div className="max-w-xl">
           <PendingCard busy={busy} onRefresh={load} />
         </div>
+      ) : !isOwner ? (
+        <p className="text-sm text-muted-foreground">
+          Você faz parte de um plano compartilhado, mas ele não está ativo no momento. Peça para o
+          dono do plano regularizar a assinatura.
+        </p>
       ) : (
         <PlansList plans={plans} busy={busy} onSubscribe={handleSubscribe} />
       )}
@@ -178,11 +185,13 @@ function ReturnNotice({ status }: { status: ReturnStatus }) {
 function ManagementCard({
   state,
   busy,
+  isOwner,
   onUpdateCard,
   onCancel,
 }: {
   state: SubscriptionState;
   busy: boolean;
+  isOwner: boolean;
   onUpdateCard: () => void;
   onCancel: () => void;
 }) {
@@ -220,16 +229,22 @@ function ManagementCard({
           <Field label="Próxima cobrança" value={formatDate(state.currentPeriodEnd)} />
         </dl>
 
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Button variant="outline" onClick={onUpdateCard} disabled={busy}>
-            Atualizar cartão
-          </Button>
-          {!state.cancelAtPeriodEnd && (
-            <Button variant="destructive" onClick={onCancel} disabled={busy}>
-              Cancelar assinatura
+        {isOwner ? (
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button variant="outline" onClick={onUpdateCard} disabled={busy}>
+              Atualizar cartão
             </Button>
-          )}
-        </div>
+            {!state.cancelAtPeriodEnd && (
+              <Button variant="destructive" onClick={onCancel} disabled={busy}>
+                Cancelar assinatura
+              </Button>
+            )}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Só o dono do plano pode gerenciar pagamento e cancelamento.
+          </p>
+        )}
       </CardContent>
     </Card>
   );

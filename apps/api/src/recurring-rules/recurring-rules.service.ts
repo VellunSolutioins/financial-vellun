@@ -197,6 +197,8 @@ export class RecurringRulesService {
         await this.prisma.transaction.create({
           data: {
             userId: rule.userId,
+            // Gerado pelo cron, sem autor humano — atribui ao dono da regra.
+            createdByUserId: rule.userId,
             accountId: rule.accountId,
             categoryId: rule.categoryId,
             type: rule.type,

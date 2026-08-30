@@ -1,17 +1,20 @@
+import { randomUUID } from 'crypto';
+
 import {
   BadRequestException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
+
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountsService } from '../accounts/accounts.service';
+import { parseDateOnly, startOfDayUtc, endOfDayUtc, addMonthsUtc } from '../common/date.util';
+
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { ListTransactionsDto } from './dto/list-transactions.dto';
-import { parseDateOnly, startOfDayUtc, endOfDayUtc, addMonthsUtc } from '../common/date.util';
 
 @Injectable()
 export class TransactionsService {
@@ -23,7 +26,7 @@ export class TransactionsService {
   async findAll(userId: string, filters: ListTransactionsDto) {
     const {
       periodStart, periodEnd, type, categoryId, accountId,
-      status, source, search, page = 1, limit = 20,
+      status, source, search, authorId, page = 1, limit = 20,
       sortBy = 'transactionDate', order = 'desc',
     } = filters;
 
@@ -34,6 +37,7 @@ export class TransactionsService {
       ...(accountId && { accountId }),
       ...(status && { status }),
       ...(source && { source }),
+      ...(authorId && { createdByUserId: authorId }),
       ...(search && { description: { contains: search, mode: 'insensitive' } }),
       ...(periodStart || periodEnd
         ? {
@@ -56,7 +60,11 @@ export class TransactionsService {
     const [data, total] = await Promise.all([
       this.prisma.transaction.findMany({
         where,
-        include: { category: true, account: true },
+        include: {
+          category: true,
+          account: true,
+          createdBy: { select: { id: true, name: true } },
+        },
         orderBy: { [orderByField]: order },
         skip: (page - 1) * limit,
         take: limit,
@@ -78,20 +86,25 @@ export class TransactionsService {
   async findOne(userId: string, id: string) {
     const transaction = await this.prisma.transaction.findUnique({
       where: { id },
-      include: { category: true, account: true },
+      include: {
+        category: true,
+        account: true,
+        createdBy: { select: { id: true, name: true } },
+      },
     });
     if (!transaction) throw new NotFoundException('Lançamento não encontrado');
     if (transaction.userId !== userId) throw new ForbiddenException();
     return transaction;
   }
 
-  async create(userId: string, dto: CreateTransactionDto) {
+  async create(userId: string, createdByUserId: string, dto: CreateTransactionDto) {
     await this.validateOwnership(userId, dto.accountId, dto.categoryId);
 
     const recurrenceType = dto.recurrenceType ?? 'avulso';
     const firstDate = parseDateOnly(dto.transactionDate);
     const baseData = {
       userId,
+      createdByUserId,
       accountId: dto.accountId,
       categoryId: dto.categoryId || null,
       type: dto.type,
@@ -131,7 +144,11 @@ export class TransactionsService {
             installmentNumber: seriesId ? i + 1 : null,
             installmentTotal: seriesId ? occurrences : null,
           },
-          include: { category: true, account: true },
+          include: {
+            category: true,
+            account: true,
+            createdBy: { select: { id: true, name: true } },
+          },
         }),
       ),
     );
@@ -157,7 +174,11 @@ export class TransactionsService {
         categoryId,
         transactionDate: dto.transactionDate ? parseDateOnly(dto.transactionDate) : undefined,
       },
-      include: { category: true, account: true },
+      include: {
+        category: true,
+        account: true,
+        createdBy: { select: { id: true, name: true } },
+      },
     });
 
     await this.accountsService.recalculateBalance(existing.accountId);

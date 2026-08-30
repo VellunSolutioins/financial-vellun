@@ -17,24 +17,24 @@ export class CategoriesController {
   @Get()
   findAll(@Req() req: Request) {
     const user = req.user as any;
-    return this.categoriesService.findAll(user.id, user.profileType);
+    return this.categoriesService.findAll(user.dataOwnerId, user.profileType);
   }
 
   @Post()
   create(@Req() req: Request, @Body() dto: CreateCategoryDto) {
     const user = req.user as any;
-    return this.categoriesService.create(user.id, user.profileType, dto);
+    return this.categoriesService.create(user.dataOwnerId, user.profileType, dto);
   }
 
   @Patch(':id')
   update(@Req() req: Request, @Param('id') id: string, @Body() dto: UpdateCategoryDto) {
     const user = req.user as any;
-    return this.categoriesService.update(user.id, id, dto);
+    return this.categoriesService.update(user.dataOwnerId, id, dto);
   }
 
   @Delete(':id')
   remove(@Req() req: Request, @Param('id') id: string) {
     const user = req.user as any;
-    return this.categoriesService.remove(user.id, id);
+    return this.categoriesService.remove(user.dataOwnerId, id);
   }
 }

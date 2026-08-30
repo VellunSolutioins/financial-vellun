@@ -20,6 +20,7 @@ export interface Plan {
   currency: string;
   interval: BillingInterval;
   isActive: boolean;
+  maxMembers: number;
   features?: Record<string, unknown> | null;
 }
 

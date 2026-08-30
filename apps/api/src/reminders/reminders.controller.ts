@@ -19,36 +19,36 @@ export class RemindersController {
   @Get()
   findAll(@Req() req: Request, @Query('month') month?: string) {
     const user = req.user as any;
-    return this.remindersService.findAll(user.id, month);
+    return this.remindersService.findAll(user.dataOwnerId, month);
   }
 
   @Post()
   create(@Req() req: Request, @Body() dto: CreateReminderDto) {
     const user = req.user as any;
-    return this.remindersService.create(user.id, dto);
+    return this.remindersService.create(user.dataOwnerId, dto);
   }
 
   @Patch(':id')
   update(@Req() req: Request, @Param('id') id: string, @Body() dto: UpdateReminderDto) {
     const user = req.user as any;
-    return this.remindersService.update(user.id, id, dto);
+    return this.remindersService.update(user.dataOwnerId, id, dto);
   }
 
   @Post(':id/pay')
   pay(@Req() req: Request, @Param('id') id: string) {
     const user = req.user as any;
-    return this.remindersService.pay(user.id, id);
+    return this.remindersService.pay(user.dataOwnerId, id);
   }
 
   @Post(':id/unpay')
   unpay(@Req() req: Request, @Param('id') id: string) {
     const user = req.user as any;
-    return this.remindersService.unpay(user.id, id);
+    return this.remindersService.unpay(user.dataOwnerId, id);
   }
 
   @Delete(':id')
   remove(@Req() req: Request, @Param('id') id: string) {
     const user = req.user as any;
-    return this.remindersService.remove(user.id, id);
+    return this.remindersService.remove(user.dataOwnerId, id);
   }
 }

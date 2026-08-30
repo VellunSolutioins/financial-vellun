@@ -19,24 +19,24 @@ export class AgendaEventsController {
   @Get()
   findAll(@Req() req: Request, @Query('month') month?: string) {
     const user = req.user as any;
-    return this.agendaEventsService.findAll(user.id, month);
+    return this.agendaEventsService.findAll(user.dataOwnerId, month);
   }
 
   @Post()
   create(@Req() req: Request, @Body() dto: CreateAgendaEventDto) {
     const user = req.user as any;
-    return this.agendaEventsService.create(user.id, dto);
+    return this.agendaEventsService.create(user.dataOwnerId, dto);
   }
 
   @Patch(':id')
   update(@Req() req: Request, @Param('id') id: string, @Body() dto: UpdateAgendaEventDto) {
     const user = req.user as any;
-    return this.agendaEventsService.update(user.id, id, dto);
+    return this.agendaEventsService.update(user.dataOwnerId, id, dto);
   }
 
   @Delete(':id')
   remove(@Req() req: Request, @Param('id') id: string) {
     const user = req.user as any;
-    return this.agendaEventsService.remove(user.id, id);
+    return this.agendaEventsService.remove(user.dataOwnerId, id);
   }
 }

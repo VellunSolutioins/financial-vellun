@@ -19,30 +19,30 @@ export class SpendingGoalsController {
   @Get()
   findAll(@Req() req: Request) {
     const user = req.user as any;
-    return this.spendingGoalsService.findAll(user.id);
+    return this.spendingGoalsService.findAll(user.dataOwnerId);
   }
 
   @Get('summary')
   summary(@Req() req: Request) {
     const user = req.user as any;
-    return this.spendingGoalsService.summary(user.id);
+    return this.spendingGoalsService.summary(user.dataOwnerId);
   }
 
   @Post()
   create(@Req() req: Request, @Body() dto: CreateSpendingGoalDto) {
     const user = req.user as any;
-    return this.spendingGoalsService.create(user.id, dto);
+    return this.spendingGoalsService.create(user.dataOwnerId, dto);
   }
 
   @Patch(':id')
   update(@Req() req: Request, @Param('id') id: string, @Body() dto: UpdateSpendingGoalDto) {
     const user = req.user as any;
-    return this.spendingGoalsService.update(user.id, id, dto);
+    return this.spendingGoalsService.update(user.dataOwnerId, id, dto);
   }
 
   @Delete(':id')
   remove(@Req() req: Request, @Param('id') id: string) {
     const user = req.user as any;
-    return this.spendingGoalsService.remove(user.id, id);
+    return this.spendingGoalsService.remove(user.dataOwnerId, id);
   }
 }

@@ -1,5 +1,6 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
+
 import { apiClient } from '@/lib/api-client';
 
 export interface Transaction {
@@ -14,6 +15,7 @@ export interface Transaction {
   accountId: string;
   category?: { id: string; name: string };
   account?: { id: string; name: string };
+  createdBy?: { id: string; name: string };
   recurrenceType: 'avulso' | 'fixo' | 'parcelado';
   seriesId?: string | null;
   installmentNumber?: number | null;
@@ -30,6 +32,7 @@ export interface TransactionFilters {
   status?: string;
   source?: string;
   search?: string;
+  authorId?: string;
   periodStart?: string;
   periodEnd?: string;
   sortBy?: string;

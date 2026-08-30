@@ -33,24 +33,24 @@ export class ContactsController {
     @Query('search') search?: string,
   ) {
     const user = req.user as any;
-    return this.contactsService.findAll(user.id, type, search);
+    return this.contactsService.findAll(user.dataOwnerId, type, search);
   }
 
   @Post()
   create(@Req() req: Request, @Body() dto: CreateContactDto) {
     const user = req.user as any;
-    return this.contactsService.create(user.id, dto);
+    return this.contactsService.create(user.dataOwnerId, dto);
   }
 
   @Patch(':id')
   update(@Req() req: Request, @Param('id') id: string, @Body() dto: UpdateContactDto) {
     const user = req.user as any;
-    return this.contactsService.update(user.id, id, dto);
+    return this.contactsService.update(user.dataOwnerId, id, dto);
   }
 
   @Delete(':id')
   remove(@Req() req: Request, @Param('id') id: string) {
     const user = req.user as any;
-    return this.contactsService.remove(user.id, id);
+    return this.contactsService.remove(user.dataOwnerId, id);
   }
 }

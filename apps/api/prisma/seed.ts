@@ -40,6 +40,7 @@ const plans = [
     currency: 'BRL',
     interval: BillingInterval.monthly,
     features: commonFeatures,
+    maxMembers: 2,
   },
   {
     code: 'vellun-duo-anual',
@@ -49,6 +50,7 @@ const plans = [
     currency: 'BRL',
     interval: BillingInterval.annual,
     features: commonFeatures,
+    maxMembers: 2,
   },
   {
     code: 'vellun-business-mensal',
@@ -168,6 +170,7 @@ async function main() {
         interval: plan.interval,
         isActive: true,
         features: plan.features,
+        maxMembers: plan.maxMembers ?? 1,
       },
       create: {
         code: plan.code,
@@ -178,6 +181,7 @@ async function main() {
         interval: plan.interval,
         isActive: true,
         features: plan.features,
+        maxMembers: plan.maxMembers ?? 1,
       },
     });
   }

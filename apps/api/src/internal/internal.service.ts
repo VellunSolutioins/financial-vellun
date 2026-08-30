@@ -53,7 +53,13 @@ export class InternalService {
     }
   }
 
-  /** Busca um usuário pelo número de telefone vinculado no WhatsApp. */
+  /**
+   * Busca um usuário pelo número de telefone vinculado no WhatsApp.
+   * `userId` retornado já é o dono dos dados (household owner, se o telefone
+   * for de um membro do plano Duo) — usar sempre para escopo de leitura/
+   * escrita. `createdByUserId` é quem de fato mandou a mensagem, para
+   * atribuição do lançamento.
+   */
   async findContactByPhone(phone: string) {
     const contact = await this.prisma.whatsappContact.findUnique({
       where: { phoneNumber: normalizePhone(phone) },
@@ -65,7 +71,8 @@ export class InternalService {
     }
 
     return {
-      userId: contact.user.id,
+      userId: contact.user.householdOwnerId ?? contact.user.id,
+      createdByUserId: contact.user.id,
       name: contact.user.name,
       profileType: contact.user.profileType,
       isVerified: contact.isVerified,
@@ -168,6 +175,7 @@ export class InternalService {
     const transaction = await this.prisma.transaction.create({
       data: {
         userId: dto.userId,
+        createdByUserId: dto.createdByUserId ?? dto.userId,
         accountId: dto.accountId,
         categoryId: dto.categoryId,
         type: dto.type,

@@ -19,37 +19,37 @@ export class RecurringRulesController {
   @Get()
   findAll(@Req() req: Request) {
     const user = req.user as any;
-    return this.recurringRulesService.findAll(user.id);
+    return this.recurringRulesService.findAll(user.dataOwnerId);
   }
 
   @Get('summary')
   summary(@Req() req: Request) {
     const user = req.user as any;
-    return this.recurringRulesService.summary(user.id);
+    return this.recurringRulesService.summary(user.dataOwnerId);
   }
 
   @Post()
   create(@Req() req: Request, @Body() dto: CreateRecurringRuleDto) {
     const user = req.user as any;
-    return this.recurringRulesService.create(user.id, dto);
+    return this.recurringRulesService.create(user.dataOwnerId, dto);
   }
 
   @Patch(':id')
   update(@Req() req: Request, @Param('id') id: string, @Body() dto: UpdateRecurringRuleDto) {
     const user = req.user as any;
-    return this.recurringRulesService.update(user.id, id, dto);
+    return this.recurringRulesService.update(user.dataOwnerId, id, dto);
   }
 
   @Delete(':id')
   remove(@Req() req: Request, @Param('id') id: string) {
     const user = req.user as any;
-    return this.recurringRulesService.remove(user.id, id);
+    return this.recurringRulesService.remove(user.dataOwnerId, id);
   }
 
   /** Gatilho manual (catch-up/testes) — gera só as regras do usuário logado. */
   @Post('generate')
   generate(@Req() req: Request) {
     const user = req.user as any;
-    return this.recurringRulesService.generateDue(user.id);
+    return this.recurringRulesService.generateDue(user.dataOwnerId);
   }
 }

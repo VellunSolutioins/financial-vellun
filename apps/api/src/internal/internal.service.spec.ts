@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+
 import { InternalService } from './internal.service';
 
 /** Cria um mock mínimo do PrismaService com as entidades usadas pelo serviço. */

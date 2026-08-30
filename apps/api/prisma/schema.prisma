@@ -140,6 +140,12 @@ model User {
   passwordHash String      @map("password_hash")
   profileType  ProfileType @map("profile_type")
 
+  /// Preenchido quando este usuário é um membro convidado (plano Duo) — os
+  /// dados financeiros (contas, lançamentos, etc.) passam a ser lidos/escritos
+  /// pelo escopo do dono (householdOwnerId), nunca pelo próprio id. Nulo para
+  /// o dono do plano (uso normal, comportamento inalterado).
+  householdOwnerId String? @map("household_owner_id")
+
   // Endereço de cobrança (usado pelo provedor de pagamentos). Nullable para não
   // quebrar usuários anteriores à introdução do campo; obrigatório em novos
   // cadastros via DTO. `city`/`state` são derivados do CEP pelo Asaas, mas
@@ -172,8 +178,38 @@ model User {
   reminders               Reminder[]
   agendaEvents            AgendaEvent[]
   notes                   Note[]
+  createdTransactions     Transaction[]             @relation("TransactionCreatedBy")
+  memberInvites           MemberInvite[]
+
+  householdOwner  User?  @relation("HouseholdMembers", fields: [householdOwnerId], references: [id], onDelete: SetNull)
+  householdMembers User[] @relation("HouseholdMembers")
 
   @@map("users")
+}
+
+enum MemberInviteStatus {
+  pending
+  accepted
+  revoked
+  expired
+}
+
+/// Convite para um membro entrar no plano Duo do dono. O membro aceita
+/// criando login próprio (email/senha) — ver members.service.ts.
+model MemberInvite {
+  id         String             @id @default(uuid())
+  ownerId    String             @map("owner_id")
+  email      String
+  token      String             @unique
+  status     MemberInviteStatus @default(pending)
+  createdAt  DateTime           @default(now()) @map("created_at")
+  expiresAt  DateTime           @map("expires_at")
+  acceptedAt DateTime?          @map("accepted_at")
+
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId])
+  @@map("member_invites")
 }
 
 model IndividualProfile {
@@ -326,6 +362,9 @@ model Category {
 model Transaction {
   id              String            @id @default(uuid())
   userId          String            @map("user_id")
+  /// Quem de fato fez o lançamento (dono ou membro do plano Duo) — userId
+  /// continua sendo o dono dos dados (escopo de leitura/permissão).
+  createdByUserId String            @map("created_by_user_id")
   accountId       String            @map("account_id")
   categoryId      String?           @map("category_id")
   type            TransactionType
@@ -345,6 +384,7 @@ model Transaction {
   updatedAt       DateTime          @updatedAt @map("updated_at")
 
   user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdBy     User           @relation("TransactionCreatedBy", fields: [createdByUserId], references: [id], onDelete: Cascade)
   account       Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
   category      Category?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   recurringRule RecurringRule? @relation(fields: [recurringRuleId], references: [id], onDelete: SetNull)
@@ -553,6 +593,9 @@ model Plan {
   currency    String          @default("BRL")
   interval    BillingInterval
   isActive    Boolean         @default(true) @map("is_active")
+  /// Quantas pessoas podem usar o plano juntas (dono + membros convidados).
+  /// Individual/Business = 1 (sem convite); Duo = 2.
+  maxMembers  Int             @default(1) @map("max_members")
   features    Json?
   createdAt   DateTime        @default(now()) @map("created_at")
   updatedAt   DateTime        @updatedAt @map("updated_at")
