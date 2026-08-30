@@ -21,6 +21,7 @@ import { RecurringRulesModule } from './recurring-rules/recurring-rules.module';
 import { SpendingGoalsModule } from './spending-goals/spending-goals.module';
 import { SavingsBoxesModule } from './savings-boxes/savings-boxes.module';
 import { CreditCardsModule } from './credit-cards/credit-cards.module';
+import { RemindersModule } from './reminders/reminders.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { CreditCardsModule } from './credit-cards/credit-cards.module';
     SpendingGoalsModule,
     SavingsBoxesModule,
     CreditCardsModule,
+    RemindersModule,
   ],
   controllers: [AppController],
   providers: [

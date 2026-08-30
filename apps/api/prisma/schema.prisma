@@ -54,6 +54,11 @@ enum SavingsYieldPeriod {
   annual
 }
 
+enum ReminderStatus {
+  pending
+  paid
+}
+
 enum AccountType {
   checking
   savings
@@ -164,6 +169,7 @@ model User {
   recurringRules          RecurringRule[]
   spendingGoals           SpendingGoal[]
   savingsBoxes            SavingsBox[]
+  reminders               Reminder[]
 
   @@map("users")
 }
@@ -237,6 +243,25 @@ model CreditCard {
   account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
   @@map("credit_cards")
+}
+
+/// Lembrete de conta a pagar. "Vencido" é derivado (pending && dueDate < hoje
+/// em America/Sao_Paulo), nunca persistido — ver reminders.service.ts.
+model Reminder {
+  id          String         @id @default(uuid())
+  userId      String         @map("user_id")
+  title       String
+  amount      Decimal?       @db.Decimal(15, 2)
+  dueDate     DateTime       @map("due_date") @db.Date
+  isRecurrent Boolean        @default(false) @map("is_recurrent")
+  status      ReminderStatus @default(pending)
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("reminders")
 }
 
 model Category {
