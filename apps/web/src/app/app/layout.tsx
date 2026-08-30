@@ -2,12 +2,37 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import {
+  LayoutDashboard,
+  Receipt,
+  Repeat,
+  Target,
+  PiggyBank,
+  CreditCard,
+  Bell,
+  Calendar,
+  StickyNote,
+  Wallet,
+  Tag,
+  ArrowDownCircle,
+  ArrowUpCircle,
+  Users,
+  Truck,
+  User,
+  Sparkles,
+  LogOut,
+  PanelLeftClose,
+  PanelLeftOpen,
+  type LucideIcon,
+} from 'lucide-react';
 
 import { useAuth } from '@/contexts/auth-context';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import type { SubscriptionAccess } from '@/lib/billing';
 
 const ASSINATURA_PATH = '/app/conta/assinatura';
+const SIDEBAR_COLLAPSED_KEY = 'fv:sidebar-collapsed';
 
 /** Aviso global de inadimplência/grace, ocultado na própria página de assinatura. */
 function SubscriptionBanner({
@@ -46,29 +71,29 @@ function SubscriptionBanner({
   return null;
 }
 
-const navItems = {
+const navItems: Record<'individual' | 'business', { href: string; label: string; icon: LucideIcon }[]> = {
   individual: [
-    { href: '/app/pessoal/dashboard', label: 'Dashboard' },
-    { href: '/app/pessoal/lancamentos', label: 'Lançamentos' },
-    { href: '/app/pessoal/recorrencias', label: 'Recorrências' },
-    { href: '/app/pessoal/metas', label: 'Metas de Gastos' },
-    { href: '/app/pessoal/caixinhas', label: 'Caixinhas' },
-    { href: '/app/pessoal/cartoes', label: 'Cartões' },
-    { href: '/app/pessoal/lembretes', label: 'Lembretes' },
-    { href: '/app/pessoal/agenda', label: 'Agenda' },
-    { href: '/app/pessoal/anotacoes', label: 'Anotações' },
-    { href: '/app/pessoal/contas', label: 'Contas' },
-    { href: '/app/pessoal/categorias', label: 'Categorias' },
+    { href: '/app/pessoal/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { href: '/app/pessoal/lancamentos', label: 'Lançamentos', icon: Receipt },
+    { href: '/app/pessoal/recorrencias', label: 'Recorrências', icon: Repeat },
+    { href: '/app/pessoal/metas', label: 'Metas de Gastos', icon: Target },
+    { href: '/app/pessoal/caixinhas', label: 'Caixinhas', icon: PiggyBank },
+    { href: '/app/pessoal/cartoes', label: 'Cartões', icon: CreditCard },
+    { href: '/app/pessoal/lembretes', label: 'Lembretes', icon: Bell },
+    { href: '/app/pessoal/agenda', label: 'Agenda', icon: Calendar },
+    { href: '/app/pessoal/anotacoes', label: 'Anotações', icon: StickyNote },
+    { href: '/app/pessoal/contas', label: 'Contas', icon: Wallet },
+    { href: '/app/pessoal/categorias', label: 'Categorias', icon: Tag },
   ],
   business: [
-    { href: '/app/empresa/dashboard', label: 'Dashboard' },
-    { href: '/app/pessoal/lancamentos', label: 'Lançamentos' },
-    { href: '/app/empresa/contas-a-receber', label: 'Contas a Receber' },
-    { href: '/app/empresa/contas-a-pagar', label: 'Contas a Pagar' },
-    { href: '/app/empresa/clientes', label: 'Clientes' },
-    { href: '/app/empresa/fornecedores', label: 'Fornecedores' },
-    { href: '/app/pessoal/contas', label: 'Contas' },
-    { href: '/app/empresa/categorias', label: 'Categorias' },
+    { href: '/app/empresa/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { href: '/app/pessoal/lancamentos', label: 'Lançamentos', icon: Receipt },
+    { href: '/app/empresa/contas-a-receber', label: 'Contas a Receber', icon: ArrowDownCircle },
+    { href: '/app/empresa/contas-a-pagar', label: 'Contas a Pagar', icon: ArrowUpCircle },
+    { href: '/app/empresa/clientes', label: 'Clientes', icon: Users },
+    { href: '/app/empresa/fornecedores', label: 'Fornecedores', icon: Truck },
+    { href: '/app/pessoal/contas', label: 'Contas', icon: Wallet },
+    { href: '/app/empresa/categorias', label: 'Categorias', icon: Tag },
   ],
 };
 
@@ -77,11 +102,33 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
 
   // Fecha o menu lateral ao navegar (relevante apenas em mobile)
   useEffect(() => {
     setSidebarOpen(false);
   }, [pathname]);
+
+  // Lembra a preferência de sidebar recolhida (só afeta telas grandes).
+  useEffect(() => {
+    try {
+      setCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1');
+    } catch {
+      // localStorage indisponível (ex.: modo privado) — ignora, mantém expandida.
+    }
+  }, []);
+
+  const toggleCollapsed = () => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? '1' : '0');
+      } catch {
+        // ignora falha ao persistir
+      }
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (loading) return;
@@ -107,6 +154,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (!user) return null;
 
   const items = navItems[user.profileType] ?? navItems.individual;
+
+  const navLinkClass = (active: boolean) =>
+    cn(
+      'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+      collapsed && 'lg:justify-center lg:px-2',
+      active
+        ? 'bg-primary/10 text-primary'
+        : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+    );
 
   return (
     <div className="min-h-screen lg:flex lg:h-screen">
@@ -139,15 +195,22 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-64 transform flex-col border-r bg-white transition-transform duration-200 ease-in-out lg:sticky lg:top-0 lg:z-auto lg:h-screen lg:shrink-0 lg:translate-x-0 ${
-          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-        }`}
+        className={cn(
+          'fixed inset-y-0 left-0 z-50 flex w-64 transform flex-col border-r bg-white transition-all duration-200 ease-in-out lg:sticky lg:top-0 lg:z-auto lg:h-screen lg:shrink-0 lg:translate-x-0',
+          sidebarOpen ? 'translate-x-0' : '-translate-x-full',
+          collapsed && 'lg:w-20',
+        )}
       >
-        <div className="flex items-center justify-between gap-2 border-b p-6">
-          <div className="min-w-0">
+        <div className={cn('flex items-center justify-between gap-2 border-b p-6', collapsed && 'lg:justify-center lg:px-3')}>
+          <div className={cn('min-w-0', collapsed && 'lg:hidden')}>
             <span className="font-bold text-primary">Financial Vellun</span>
             <p className="text-xs text-muted-foreground mt-1 truncate">{user.name}</p>
           </div>
+          {collapsed && (
+            <span className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground lg:flex">
+              FV
+            </span>
+          )}
           <button
             type="button"
             aria-label="Fechar menu"
@@ -160,45 +223,58 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </svg>
           </button>
         </div>
-        <nav className="flex-1 space-y-1 p-4">
-          {items.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`block px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                pathname === item.href
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-gray-700 hover:bg-gray-100'
-              }`}
-            >
-              {item.label}
-            </Link>
-          ))}
+        <nav className="flex-1 space-y-1 overflow-y-auto p-4">
+          {items.map((item) => {
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                title={collapsed ? item.label : undefined}
+                className={navLinkClass(pathname === item.href)}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                <span className={cn(collapsed && 'lg:hidden')}>{item.label}</span>
+              </Link>
+            );
+          })}
         </nav>
-        <div className="p-4 border-t space-y-1">
+        <div className="border-t p-4 space-y-1">
           <Link
             href="/app/conta"
-            className={`block px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-              pathname === '/app/conta'
-                ? 'bg-primary text-primary-foreground'
-                : 'text-gray-700 hover:bg-gray-100'
-            }`}
+            title={collapsed ? 'Minha Conta' : undefined}
+            className={navLinkClass(pathname === '/app/conta')}
           >
-            Minha Conta
+            <User className="h-4 w-4 shrink-0" />
+            <span className={cn(collapsed && 'lg:hidden')}>Minha Conta</span>
           </Link>
           <Link
             href="/app/conta/assinatura"
-            className={`block px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-              pathname === '/app/conta/assinatura'
-                ? 'bg-primary text-primary-foreground'
-                : 'text-gray-700 hover:bg-gray-100'
-            }`}
+            title={collapsed ? 'Assinatura' : undefined}
+            className={navLinkClass(pathname === '/app/conta/assinatura')}
           >
-            Assinatura
+            <Sparkles className="h-4 w-4 shrink-0" />
+            <span className={cn(collapsed && 'lg:hidden')}>Assinatura</span>
           </Link>
-          <Button variant="ghost" className="w-full justify-start text-sm" onClick={logout}>
-            Sair
+          <Button
+            variant="ghost"
+            onClick={logout}
+            className={cn('w-full justify-start gap-3 text-sm', collapsed && 'lg:justify-center lg:px-2')}
+          >
+            <LogOut className="h-4 w-4 shrink-0" />
+            <span className={cn(collapsed && 'lg:hidden')}>Sair</span>
           </Button>
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            className={cn(
+              'hidden w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 lg:flex',
+              collapsed && 'lg:justify-center lg:px-2',
+            )}
+          >
+            {collapsed ? <PanelLeftOpen className="h-4 w-4 shrink-0" /> : <PanelLeftClose className="h-4 w-4 shrink-0" />}
+            <span className={cn(collapsed && 'lg:hidden')}>Recolher</span>
+          </button>
         </div>
       </aside>
 
