@@ -115,7 +115,7 @@ export default function AssinaturaPage() {
   const showPending = status === 'pending';
 
   return (
-    <div className="max-w-3xl space-y-6">
+    <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Assinatura</h1>
         <p className="text-sm text-muted-foreground mt-1">
@@ -123,19 +123,25 @@ export default function AssinaturaPage() {
         </p>
       </div>
 
-      <ReturnNotice status={returnStatus} />
+      <div className="max-w-3xl">
+        <ReturnNotice status={returnStatus} />
+      </div>
 
       {loading ? (
         <p className="text-muted-foreground">Carregando...</p>
       ) : showManagement ? (
-        <ManagementCard
-          state={state!}
-          busy={busy}
-          onUpdateCard={handleUpdateCard}
-          onCancel={handleCancel}
-        />
+        <div className="max-w-xl">
+          <ManagementCard
+            state={state!}
+            busy={busy}
+            onUpdateCard={handleUpdateCard}
+            onCancel={handleCancel}
+          />
+        </div>
       ) : showPending ? (
-        <PendingCard busy={busy} onRefresh={load} />
+        <div className="max-w-xl">
+          <PendingCard busy={busy} onRefresh={load} />
+        </div>
       ) : (
         <PlansList plans={plans} busy={busy} onSubscribe={handleSubscribe} />
       )}
@@ -323,7 +329,7 @@ function PlansList({
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
         {tierList.map(({ monthly, annual }) => {
           const plan = billingInterval === 'annual' ? (annual ?? monthly) : (monthly ?? annual);
           if (!plan) return null;
