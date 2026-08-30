@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
+
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { PasswordInput } from '@/components/ui/password-input';
@@ -148,11 +149,15 @@ export default function CadastroPage() {
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Criar conta</CardTitle>
-        <CardDescription>Crie sua conta no Financial Vellun</CardDescription>
-      </CardHeader>
+    <div className="w-full max-w-md">
+      <div className="text-center mb-8">
+        <h1 className="text-2xl font-bold text-primary">Financial Vellun</h1>
+      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Criar conta</CardTitle>
+          <CardDescription>Crie sua conta no Financial Vellun</CardDescription>
+        </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="space-y-1">
@@ -355,6 +360,7 @@ export default function CadastroPage() {
           </p>
         </form>
       </CardContent>
-    </Card>
+      </Card>
+    </div>
   );
 }
