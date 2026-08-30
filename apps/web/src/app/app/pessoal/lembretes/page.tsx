@@ -1,10 +1,12 @@
 'use client';
-import { useState } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
+import { Suspense, useState } from 'react';
 import { Plus, CheckCircle2, Circle } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Select } from '@/components/ui/select';
 import { Dialog } from '@/components/ui/dialog';
 import { ReminderForm } from '@/components/reminders/ReminderForm';
 import { useReminders, type Reminder } from '@/hooks/useReminders';
@@ -21,18 +23,53 @@ function formatDate(v: string) {
   return new Date(`${v.slice(0, 10)}T12:00:00`).toLocaleDateString('pt-BR');
 }
 
+function monthLabel(month: string) {
+  const [year, monthNumber] = month.split('-').map(Number);
+  const label = new Intl.DateTimeFormat('pt-BR', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(Date.UTC(year, monthNumber - 1, 1)));
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function currentMonth() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
 const statusStyles: Record<Reminder['derivedStatus'], { label: string; badge: string }> = {
   paid: { label: 'Pago', badge: 'bg-emerald-100 text-emerald-700' },
   overdue: { label: 'Vencido', badge: 'bg-rose-100 text-rose-700' },
   pending: { label: 'Pendente', badge: 'bg-amber-100 text-amber-700' },
 };
 
-export default function LembretesPage() {
-  const { data, loading, refetch } = useReminders();
+function LembretesContent() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const selectedMonth = searchParams.get('month') ?? currentMonth();
+
+  const monthOptions = Array.from({ length: 12 }, (_, index) => {
+    const now = new Date();
+    // Aritmética inteira em vez de Date.setMonth: evitar "transbordo" de dia
+    // (ex.: dia 30 + setMonth para fevereiro vira 2/março, não fevereiro).
+    const totalMonths = now.getFullYear() * 12 + now.getMonth() + (index - 3);
+    const year = Math.floor(totalMonths / 12);
+    const monthIndex = ((totalMonths % 12) + 12) % 12;
+    return `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
+  });
+
+  const { data, loading, refetch } = useReminders(selectedMonth);
   const [formOpen, setFormOpen] = useState(false);
   const [editingReminder, setEditingReminder] = useState<Reminder | undefined>();
   const toast = useToast();
   const confirm = useConfirm();
+
+  const setMonth = (month: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('month', month);
+    router.push(`?${params.toString()}`);
+  };
 
   const openNew = () => {
     setEditingReminder(undefined);
@@ -91,10 +128,23 @@ export default function LembretesPage() {
           <h1 className="text-xl font-bold sm:text-2xl">Lembretes e Contas a Pagar</h1>
           <p className="text-sm text-muted-foreground">Acompanhe vencimentos e marque como pagos.</p>
         </div>
-        <Button size="sm" onClick={openNew}>
-          <Plus className="mr-1 h-4 w-4" />
-          Novo lembrete
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Select
+            value={selectedMonth}
+            onChange={(e) => setMonth(e.target.value)}
+            className="h-9 w-auto text-sm"
+          >
+            {monthOptions.map((month) => (
+              <option key={month} value={month}>
+                {monthLabel(month)}
+              </option>
+            ))}
+          </Select>
+          <Button size="sm" onClick={openNew}>
+            <Plus className="mr-1 h-4 w-4" />
+            Novo lembrete
+          </Button>
+        </div>
       </div>
 
       <Card className="rounded-2xl">
@@ -103,7 +153,7 @@ export default function LembretesPage() {
             <div className="p-10 text-center text-sm text-muted-foreground">Carregando...</div>
           ) : data.length === 0 ? (
             <div className="p-10 text-center text-sm text-muted-foreground">
-              Nenhum lembrete cadastrado ainda.
+              Nenhum lembrete em {monthLabel(selectedMonth)}.
             </div>
           ) : (
             <ul className="divide-y divide-border">
@@ -169,5 +219,13 @@ export default function LembretesPage() {
         <ReminderForm reminder={editingReminder} onSuccess={handleFormSuccess} onCancel={closeForm} />
       </Dialog>
     </div>
+  );
+}
+
+export default function LembretesPage() {
+  return (
+    <Suspense>
+      <LembretesContent />
+    </Suspense>
   );
 }

@@ -20,6 +20,7 @@ const schema = z.object({
     .refine((v) => !v || CURRENCY_REGEX.test(v), 'Valor inválido'),
   dueDate: z.string().min(1, 'Vencimento obrigatório'),
   isRecurrent: z.boolean(),
+  recurrenceEndDate: z.string().optional(),
 });
 type FormData = z.infer<typeof schema>;
 
@@ -46,6 +47,7 @@ export function ReminderForm({ reminder, onSuccess, onCancel }: Props) {
       amount: reminder?.amount ? formatCurrencyInput(reminder.amount) : '',
       dueDate: reminder?.dueDate ? reminder.dueDate.slice(0, 10) : '',
       isRecurrent: reminder?.isRecurrent ?? false,
+      recurrenceEndDate: reminder?.recurrenceEndDate ? reminder.recurrenceEndDate.slice(0, 10) : '',
     },
   });
 
@@ -58,6 +60,7 @@ export function ReminderForm({ reminder, onSuccess, onCancel }: Props) {
       amount: data.amount ? currencyToNumber(data.amount) : undefined,
       dueDate: data.dueDate,
       isRecurrent: data.isRecurrent,
+      recurrenceEndDate: data.isRecurrent && data.recurrenceEndDate ? data.recurrenceEndDate : undefined,
     };
     try {
       if (reminder) {
@@ -112,8 +115,16 @@ export function ReminderForm({ reminder, onSuccess, onCancel }: Props) {
           onChange={(e) => setValue('isRecurrent', e.target.checked, { shouldDirty: true })}
           className="h-4 w-4 rounded border-input"
         />
-        Recorrente (cria o próximo automaticamente ao marcar como pago)
+        Recorrente (o vencimento rola pro mês seguinte ao marcar como pago)
       </label>
+
+      {isRecurrent && (
+        <div className="space-y-1">
+          <Label>Recorrente até (opcional)</Label>
+          <Input type="date" {...register('recurrenceEndDate')} />
+          <p className="text-xs text-muted-foreground">Sem data, repete indefinidamente.</p>
+        </div>
+      )}
 
       <div className="flex gap-2 pt-2">
         <Button type="submit" disabled={submitting} className="flex-1">

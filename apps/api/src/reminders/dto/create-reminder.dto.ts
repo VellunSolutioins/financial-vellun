@@ -16,8 +16,13 @@ export class CreateReminderDto {
   @IsDateString()
   dueDate!: string;
 
-  @ApiProperty({ default: false, description: 'Se true, ao marcar como pago já cria o lembrete do mês seguinte.' })
+  @ApiProperty({ default: false, description: 'Se true, ao marcar como pago o vencimento rola pro mês seguinte.' })
   @IsOptional()
   @IsBoolean()
   isRecurrent?: boolean;
+
+  @ApiProperty({ required: false, description: 'Só usado se isRecurrent=true. Sem ela, repete indefinidamente.' })
+  @IsOptional()
+  @IsDateString()
+  recurrenceEndDate?: string;
 }

@@ -23,12 +23,32 @@ function derivedStatus(reminder: Pick<Reminder, 'status' | 'dueDate'>): 'paid' |
 export class RemindersService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll(userId: string) {
+  /**
+   * `month` (formato "YYYY-MM") filtra pelo mesmo padrão de abas de mês do
+   * resto do app (ver monthLabel/monthRange em lancamentos/page.tsx). Lembretes
+   * recorrentes aparecem em todas as abas de mês (até `recurrenceEndDate`,
+   * se houver) — só os não recorrentes ficam restritos ao mês do vencimento.
+   */
+  async findAll(userId: string, month?: string) {
     const reminders = await this.prisma.reminder.findMany({
       where: { userId },
       orderBy: { dueDate: 'asc' },
     });
-    return reminders.map((r) => ({ ...r, amount: r.amount ? Number(r.amount) : null, derivedStatus: derivedStatus(r) }));
+    const mapped = reminders.map((r) => ({
+      ...r,
+      amount: r.amount ? Number(r.amount) : null,
+      derivedStatus: derivedStatus(r),
+    }));
+
+    if (!month) return mapped;
+
+    return mapped.filter((r) => {
+      if (r.isRecurrent) {
+        if (!r.recurrenceEndDate) return true;
+        return month <= r.recurrenceEndDate.toISOString().slice(0, 7);
+      }
+      return r.dueDate.toISOString().slice(0, 7) === month;
+    });
   }
 
   async create(userId: string, dto: CreateReminderDto) {
@@ -39,6 +59,7 @@ export class RemindersService {
         amount: dto.amount ?? null,
         dueDate: parseDateOnly(dto.dueDate),
         isRecurrent: dto.isRecurrent ?? false,
+        recurrenceEndDate: dto.recurrenceEndDate ? parseDateOnly(dto.recurrenceEndDate) : null,
       },
     });
   }
@@ -52,23 +73,32 @@ export class RemindersService {
         ...(dto.amount !== undefined && { amount: dto.amount }),
         ...(dto.dueDate !== undefined && { dueDate: parseDateOnly(dto.dueDate) }),
         ...(dto.isRecurrent !== undefined && { isRecurrent: dto.isRecurrent }),
+        ...(dto.recurrenceEndDate !== undefined && {
+          recurrenceEndDate: dto.recurrenceEndDate ? parseDateOnly(dto.recurrenceEndDate) : null,
+        }),
       },
     });
   }
 
   /**
-   * Marca como pago. Se for recorrente, não acumula um lembrete novo por mês:
-   * em vez disso, o próprio registro "rola" para o vencimento do mês seguinte
-   * e volta a ficar pendente (por isso nunca aparece como "Pago" na tela).
+   * Marca como pago. Se for recorrente e ainda dentro de `recurrenceEndDate`
+   * (quando definida), não acumula um lembrete novo por mês: o próprio
+   * registro "rola" para o vencimento do mês seguinte e volta a ficar
+   * pendente. Ao ultrapassar a data-limite, fica marcado como pago de vez
+   * (não rola mais).
    */
   async pay(userId: string, id: string) {
     const existing = await this.findOwned(userId, id);
 
     if (existing.isRecurrent) {
-      return this.prisma.reminder.update({
-        where: { id: existing.id },
-        data: { dueDate: addMonthsUtc(existing.dueDate, 1), status: 'pending' },
-      });
+      const nextDueDate = addMonthsUtc(existing.dueDate, 1);
+      const withinRange = !existing.recurrenceEndDate || nextDueDate <= existing.recurrenceEndDate;
+      if (withinRange) {
+        return this.prisma.reminder.update({
+          where: { id: existing.id },
+          data: { dueDate: nextDueDate, status: 'pending' },
+        });
+      }
     }
 
     return this.prisma.reminder.update({ where: { id: existing.id }, data: { status: 'paid' } });

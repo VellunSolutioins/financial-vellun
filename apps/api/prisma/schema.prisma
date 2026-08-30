@@ -254,6 +254,8 @@ model Reminder {
   amount      Decimal?       @db.Decimal(15, 2)
   dueDate     DateTime       @map("due_date") @db.Date
   isRecurrent Boolean        @default(false) @map("is_recurrent")
+  /// Só relevante quando isRecurrent=true. Sem ela, repete indefinidamente.
+  recurrenceEndDate DateTime? @map("recurrence_end_date") @db.Date
   status      ReminderStatus @default(pending)
   createdAt   DateTime       @default(now()) @map("created_at")
   updatedAt   DateTime       @updatedAt @map("updated_at")

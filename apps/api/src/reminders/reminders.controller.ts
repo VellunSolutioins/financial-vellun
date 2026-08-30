@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiCookieAuth, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 
@@ -17,9 +17,9 @@ export class RemindersController {
   constructor(private remindersService: RemindersService) {}
 
   @Get()
-  findAll(@Req() req: Request) {
+  findAll(@Req() req: Request, @Query('month') month?: string) {
     const user = req.user as any;
-    return this.remindersService.findAll(user.id);
+    return this.remindersService.findAll(user.id, month);
   }
 
   @Post()
