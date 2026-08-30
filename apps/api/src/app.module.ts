@@ -24,6 +24,7 @@ import { CreditCardsModule } from './credit-cards/credit-cards.module';
 import { RemindersModule } from './reminders/reminders.module';
 import { AgendaEventsModule } from './agenda-events/agenda-events.module';
 import { NotesModule } from './notes/notes.module';
+import { FinancialAnalysisModule } from './financial-analysis/financial-analysis.module';
 
 @Module({
   imports: [
@@ -51,6 +52,7 @@ import { NotesModule } from './notes/notes.module';
     RemindersModule,
     AgendaEventsModule,
     NotesModule,
+    FinancialAnalysisModule,
   ],
   controllers: [AppController],
   providers: [

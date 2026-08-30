@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard,
+  Gauge,
   Receipt,
   Repeat,
   Target,
@@ -74,6 +75,7 @@ function SubscriptionBanner({
 const navItems: Record<'individual' | 'business', { href: string; label: string; icon: LucideIcon }[]> = {
   individual: [
     { href: '/app/pessoal/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { href: '/app/pessoal/analise-financeira', label: 'Análise Financeira', icon: Gauge },
     { href: '/app/pessoal/lancamentos', label: 'Lançamentos', icon: Receipt },
     { href: '/app/pessoal/recorrencias', label: 'Recorrências', icon: Repeat },
     { href: '/app/pessoal/metas', label: 'Metas de Gastos', icon: Target },
