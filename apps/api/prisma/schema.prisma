@@ -170,6 +170,7 @@ model User {
   spendingGoals           SpendingGoal[]
   savingsBoxes            SavingsBox[]
   reminders               Reminder[]
+  agendaEvents            AgendaEvent[]
 
   @@map("users")
 }
@@ -264,6 +265,24 @@ model Reminder {
 
   @@index([userId])
   @@map("reminders")
+}
+
+model AgendaEvent {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  title       String
+  description String?
+  eventDate   DateTime @map("event_date") @db.Date
+  /// Formato "HH:mm". Ausente = compromisso do dia todo.
+  eventTime   String?  @map("event_time")
+  color       String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("agenda_events")
 }
 
 model Category {

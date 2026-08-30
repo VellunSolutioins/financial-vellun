@@ -55,6 +55,7 @@ const navItems = {
     { href: '/app/pessoal/caixinhas', label: 'Caixinhas' },
     { href: '/app/pessoal/cartoes', label: 'Cartões' },
     { href: '/app/pessoal/lembretes', label: 'Lembretes' },
+    { href: '/app/pessoal/agenda', label: 'Agenda' },
     { href: '/app/pessoal/contas', label: 'Contas' },
     { href: '/app/pessoal/categorias', label: 'Categorias' },
   ],
