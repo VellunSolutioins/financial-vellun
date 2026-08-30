@@ -10,7 +10,7 @@ import * as bcrypt from 'bcryptjs';
 const prisma = new PrismaClient();
 
 // Preços são placeholders até a definição comercial final (ver Prompt 0).
-// 4 planos por público-alvo (Individual/Duo/Family/Business), mesmo preço e
+// 3 planos por público-alvo (Individual/Duo/Business), mesmo preço e
 // recursos por enquanto — diferenciação por limites/recursos fica para depois.
 const commonFeatures = { web: true, whatsapp: true, ai: true };
 const plans = [
@@ -51,24 +51,6 @@ const plans = [
     features: commonFeatures,
   },
   {
-    code: 'vellun-family-mensal',
-    name: 'Family',
-    description: 'Para famílias acompanharem o orçamento em conjunto.',
-    price: '15.90',
-    currency: 'BRL',
-    interval: BillingInterval.monthly,
-    features: commonFeatures,
-  },
-  {
-    code: 'vellun-family-anual',
-    name: 'Family',
-    description: 'Para famílias acompanharem o orçamento em conjunto.',
-    price: '120.00',
-    currency: 'BRL',
-    interval: BillingInterval.annual,
-    features: commonFeatures,
-  },
-  {
     code: 'vellun-business-mensal',
     name: 'Business',
     description: 'Para pequenos negócios controlarem entradas e saídas.',
@@ -88,9 +70,14 @@ const plans = [
   },
 ];
 
-// Planos antigos (produto único, sem público-alvo) — desativados, não excluídos,
-// para não quebrar assinaturas históricas que ainda referenciem esses códigos.
-const retiredPlanCodes = ['vellun-mensal', 'vellun-anual'];
+// Planos antigos/descontinuados — desativados, não excluídos, para não quebrar
+// assinaturas históricas que ainda referenciem esses códigos.
+const retiredPlanCodes = [
+  'vellun-mensal',
+  'vellun-anual',
+  'vellun-family-mensal',
+  'vellun-family-anual',
+];
 
 const demoUser = {
   name: 'Vellun Solutions',
