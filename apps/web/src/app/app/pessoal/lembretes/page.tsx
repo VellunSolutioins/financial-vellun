@@ -57,7 +57,7 @@ export default function LembretesPage() {
         await apiClient.post(`/reminders/${reminder.id}/pay`, {});
         toast.success(
           reminder.isRecurrent
-            ? 'Marcado como pago — próximo lembrete já criado.'
+            ? 'Pago! Vencimento já rolou para o mês seguinte.'
             : 'Marcado como pago.',
         );
       }

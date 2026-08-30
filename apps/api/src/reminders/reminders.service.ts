@@ -56,30 +56,25 @@ export class RemindersService {
     });
   }
 
-  /** Marca como pago; se recorrente, já cria o lembrete do mês seguinte (mesmo dia, +1 mês clampado). */
+  /**
+   * Marca como pago. Se for recorrente, não acumula um lembrete novo por mês:
+   * em vez disso, o próprio registro "rola" para o vencimento do mês seguinte
+   * e volta a ficar pendente (por isso nunca aparece como "Pago" na tela).
+   */
   async pay(userId: string, id: string) {
     const existing = await this.findOwned(userId, id);
-    const paid = await this.prisma.reminder.update({
-      where: { id: existing.id },
-      data: { status: 'paid' },
-    });
 
     if (existing.isRecurrent) {
-      await this.prisma.reminder.create({
-        data: {
-          userId,
-          title: existing.title,
-          amount: existing.amount,
-          dueDate: addMonthsUtc(existing.dueDate, 1),
-          isRecurrent: true,
-        },
+      return this.prisma.reminder.update({
+        where: { id: existing.id },
+        data: { dueDate: addMonthsUtc(existing.dueDate, 1), status: 'pending' },
       });
     }
 
-    return paid;
+    return this.prisma.reminder.update({ where: { id: existing.id }, data: { status: 'paid' } });
   }
 
-  /** Desfaz a marcação de pago. Não remove o lembrete do mês seguinte já criado por uma recorrência. */
+  /** Desfaz a marcação de pago (só se aplica a lembretes não recorrentes). */
   async unpay(userId: string, id: string) {
     const existing = await this.findOwned(userId, id);
     return this.prisma.reminder.update({ where: { id: existing.id }, data: { status: 'pending' } });
