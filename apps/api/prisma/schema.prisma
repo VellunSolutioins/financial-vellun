@@ -171,6 +171,7 @@ model User {
   savingsBoxes            SavingsBox[]
   reminders               Reminder[]
   agendaEvents            AgendaEvent[]
+  notes                   Note[]
 
   @@map("users")
 }
@@ -283,6 +284,21 @@ model AgendaEvent {
 
   @@index([userId])
   @@map("agenda_events")
+}
+
+model Note {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  title     String
+  content   String
+  isPinned  Boolean  @default(false) @map("is_pinned")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("notes")
 }
 
 model Category {

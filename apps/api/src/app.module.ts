@@ -23,6 +23,7 @@ import { SavingsBoxesModule } from './savings-boxes/savings-boxes.module';
 import { CreditCardsModule } from './credit-cards/credit-cards.module';
 import { RemindersModule } from './reminders/reminders.module';
 import { AgendaEventsModule } from './agenda-events/agenda-events.module';
+import { NotesModule } from './notes/notes.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { AgendaEventsModule } from './agenda-events/agenda-events.module';
     CreditCardsModule,
     RemindersModule,
     AgendaEventsModule,
+    NotesModule,
   ],
   controllers: [AppController],
   providers: [
