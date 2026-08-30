@@ -1,5 +1,7 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
+import { CheckCircle2 } from 'lucide-react';
+
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -7,6 +9,7 @@ import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
 import { useAuth } from '@/contexts/auth-context';
 import { ApiClientError } from '@/lib/api-client';
+import { cn } from '@/lib/utils';
 import {
   type Plan,
   type SubscriptionState,
@@ -245,6 +248,12 @@ function PendingCard({ busy, onRefresh }: { busy: boolean; onRefresh: () => void
   );
 }
 
+const FEATURE_LABELS: Record<string, string> = {
+  ai: 'Categorização e insights com IA',
+  web: 'Acesso completo pela web',
+  whatsapp: 'Lançamentos e lembretes pelo WhatsApp',
+};
+
 function PlansList({
   plans,
   busy,
@@ -254,36 +263,93 @@ function PlansList({
   busy: boolean;
   onSubscribe: (planId: string) => void;
 }) {
+  const [billingInterval, setBillingInterval] = useState<'monthly' | 'annual'>('monthly');
+
   if (plans.length === 0) {
     return <p className="text-muted-foreground">Nenhum plano disponível no momento.</p>;
   }
+
+  const monthly = plans.find((p) => p.interval === 'monthly');
+  const annual = plans.find((p) => p.interval === 'annual');
+  const selected = plans.find((p) => p.interval === billingInterval) ?? plans[0];
+
+  const savingsPct =
+    monthly && annual
+      ? Math.round((1 - Number(annual.price) / (Number(monthly.price) * 12)) * 100)
+      : null;
+
+  const features = selected.features
+    ? Object.entries(selected.features)
+        .filter(([, enabled]) => enabled)
+        .map(([key]) => FEATURE_LABELS[key] ?? key)
+    : [];
+
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-      {plans.map((plan) => (
-        <Card key={plan.id} className="flex flex-col">
-          <CardHeader>
-            <div className="flex items-center justify-between gap-2">
-              <CardTitle className="text-base">{plan.name}</CardTitle>
-              <Badge variant="secondary">{intervalLabel(plan.interval)}</Badge>
-            </div>
-            {plan.description && (
-              <p className="text-xs text-muted-foreground">{plan.description}</p>
-            )}
-          </CardHeader>
-          <CardContent className="flex flex-1 flex-col justify-between gap-4">
-            <p className="text-2xl font-bold">
-              {formatBRL(plan.price)}
-              <span className="text-sm font-normal text-muted-foreground">
-                {' '}
-                /{plan.interval === 'annual' ? 'ano' : 'mês'}
-              </span>
-            </p>
-            <Button onClick={() => onSubscribe(plan.id)} disabled={busy}>
-              Assinar
-            </Button>
-          </CardContent>
-        </Card>
-      ))}
+    <div className="space-y-6">
+      {monthly && annual && (
+        <div className="flex justify-center">
+          <div className="inline-flex items-center rounded-full border bg-muted p-1">
+            {(['monthly', 'annual'] as const).map((opt) => (
+              <button
+                key={opt}
+                type="button"
+                onClick={() => setBillingInterval(opt)}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium transition-colors',
+                  billingInterval === opt
+                    ? 'bg-primary text-primary-foreground shadow'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {intervalLabel(opt)}
+                {opt === 'annual' && savingsPct !== null && savingsPct > 0 && (
+                  <span
+                    className={cn(
+                      'rounded-full px-1.5 py-0.5 text-[10px] font-semibold',
+                      billingInterval === 'annual'
+                        ? 'bg-white/20'
+                        : 'bg-emerald-100 text-emerald-700',
+                    )}
+                  >
+                    -{savingsPct}%
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <Card className="mx-auto max-w-sm rounded-2xl border-2 border-primary shadow-lg">
+        <CardHeader className="text-center">
+          <CardTitle className="text-lg">{selected.name}</CardTitle>
+          {selected.description && (
+            <p className="text-sm text-muted-foreground">{selected.description}</p>
+          )}
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="text-center">
+            <span className="text-4xl font-bold">{formatBRL(selected.price)}</span>
+            <span className="text-sm text-muted-foreground">
+              {' '}
+              /{selected.interval === 'annual' ? 'ano' : 'mês'}
+            </span>
+          </div>
+          <Button onClick={() => onSubscribe(selected.id)} disabled={busy} size="lg" className="w-full">
+            Assinar {selected.name}
+          </Button>
+          {features.length > 0 && (
+            <ul className="space-y-2.5 text-sm">
+              {features.map((label) => (
+                <li key={label} className="flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                  {label}
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
