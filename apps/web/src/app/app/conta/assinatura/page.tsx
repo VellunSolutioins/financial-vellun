@@ -269,24 +269,27 @@ function PlansList({
     return <p className="text-muted-foreground">Nenhum plano disponível no momento.</p>;
   }
 
-  const monthly = plans.find((p) => p.interval === 'monthly');
-  const annual = plans.find((p) => p.interval === 'annual');
-  const selected = plans.find((p) => p.interval === billingInterval) ?? plans[0];
+  // Agrupa por nome (Individual/Duo/Family/Business), guardando a versão
+  // mensal e anual de cada — o toggle troca qual versão aparece nos cards.
+  const tiers = new Map<string, { monthly?: Plan; annual?: Plan }>();
+  for (const plan of plans) {
+    const entry = tiers.get(plan.name) ?? {};
+    if (plan.interval === 'annual') entry.annual = plan;
+    else entry.monthly = plan;
+    tiers.set(plan.name, entry);
+  }
+  const tierList = [...tiers.values()];
 
+  const anyMonthly = tierList.find((t) => t.monthly)?.monthly;
+  const anyAnnual = tierList.find((t) => t.annual)?.annual;
   const savingsPct =
-    monthly && annual
-      ? Math.round((1 - Number(annual.price) / (Number(monthly.price) * 12)) * 100)
+    anyMonthly && anyAnnual
+      ? Math.round((1 - Number(anyAnnual.price) / (Number(anyMonthly.price) * 12)) * 100)
       : null;
-
-  const features = selected.features
-    ? Object.entries(selected.features)
-        .filter(([, enabled]) => enabled)
-        .map(([key]) => FEATURE_LABELS[key] ?? key)
-    : [];
 
   return (
     <div className="space-y-6">
-      {monthly && annual && (
+      {anyMonthly && anyAnnual && (
         <div className="flex justify-center">
           <div className="inline-flex items-center rounded-full border bg-muted p-1">
             {(['monthly', 'annual'] as const).map((opt) => (
@@ -320,36 +323,49 @@ function PlansList({
         </div>
       )}
 
-      <Card className="mx-auto max-w-sm rounded-2xl border-2 border-primary shadow-lg">
-        <CardHeader className="text-center">
-          <CardTitle className="text-lg">{selected.name}</CardTitle>
-          {selected.description && (
-            <p className="text-sm text-muted-foreground">{selected.description}</p>
-          )}
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="text-center">
-            <span className="text-4xl font-bold">{formatBRL(selected.price)}</span>
-            <span className="text-sm text-muted-foreground">
-              {' '}
-              /{selected.interval === 'annual' ? 'ano' : 'mês'}
-            </span>
-          </div>
-          <Button onClick={() => onSubscribe(selected.id)} disabled={busy} size="lg" className="w-full">
-            Assinar {selected.name}
-          </Button>
-          {features.length > 0 && (
-            <ul className="space-y-2.5 text-sm">
-              {features.map((label) => (
-                <li key={label} className="flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
-                  {label}
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {tierList.map(({ monthly, annual }) => {
+          const plan = billingInterval === 'annual' ? (annual ?? monthly) : (monthly ?? annual);
+          if (!plan) return null;
+          const features = plan.features
+            ? Object.entries(plan.features)
+                .filter(([, enabled]) => enabled)
+                .map(([key]) => FEATURE_LABELS[key] ?? key)
+            : [];
+          return (
+            <Card key={plan.name} className="flex flex-col rounded-2xl">
+              <CardHeader className="text-center">
+                <CardTitle className="text-lg">{plan.name}</CardTitle>
+                {plan.description && (
+                  <p className="text-xs text-muted-foreground">{plan.description}</p>
+                )}
+              </CardHeader>
+              <CardContent className="flex flex-1 flex-col gap-4">
+                <div className="text-center">
+                  <span className="text-3xl font-bold">{formatBRL(plan.price)}</span>
+                  <span className="text-sm text-muted-foreground">
+                    {' '}
+                    /{plan.interval === 'annual' ? 'ano' : 'mês'}
+                  </span>
+                </div>
+                <Button onClick={() => onSubscribe(plan.id)} disabled={busy} className="w-full">
+                  Assinar
+                </Button>
+                {features.length > 0 && (
+                  <ul className="space-y-2 text-sm">
+                    {features.map((label) => (
+                      <li key={label} className="flex items-center gap-2">
+                        <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                        {label}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
     </div>
   );
 }
