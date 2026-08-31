@@ -189,13 +189,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       router.push('/login');
       return;
     }
-    // Plano Business tem acesso livre aos dois lados (alterna pela chave
-    // Pessoal/Negócio) — a isolação por perfil só vale pra quem não tem esse plano.
-    if (isBusinessPlan) return;
-    if (user.profileType === 'individual' && pathname.startsWith('/app/empresa')) {
+    // A área Negócio (/app/empresa/*) é exclusiva de quem tem o plano
+    // Business — não depende do profileType de cadastro (CPF/CNPJ é só pra
+    // documento de cobrança). Sem esse plano, cai sempre no lado Pessoal.
+    if (!isBusinessPlan && pathname.startsWith('/app/empresa')) {
       router.push('/app/pessoal/dashboard');
-    } else if (user.profileType === 'business' && pathname.startsWith('/app/pessoal/dashboard')) {
-      router.push('/app/empresa/dashboard');
     }
   }, [user, loading, router, pathname, isBusinessPlan]);
 
@@ -208,7 +206,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
   if (!user) return null;
 
-  const items = navItems[isBusinessPlan ? activeContext : user.profileType] ?? navItems.individual;
+  const items = isBusinessPlan ? navItems[activeContext] : navItems.individual;
 
   const navLinkClass = (active: boolean) =>
     cn(
