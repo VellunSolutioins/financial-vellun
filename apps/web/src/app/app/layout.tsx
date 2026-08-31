@@ -332,14 +332,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <Sparkles className="h-4 w-4 shrink-0" />
             <span className={cn(collapsed && 'lg:hidden')}>Assinatura</span>
           </Link>
-          <Link
-            href="/app/conta/membros"
-            title={collapsed ? 'Membros' : undefined}
-            className={navLinkClass(pathname === '/app/conta/membros')}
-          >
-            <Users className="h-4 w-4 shrink-0" />
-            <span className={cn(collapsed && 'lg:hidden')}>Membros</span>
-          </Link>
+          {(plan?.maxMembers ?? 1) > 1 && (
+            <Link
+              href="/app/conta/membros"
+              title={collapsed ? 'Membros' : undefined}
+              className={navLinkClass(pathname === '/app/conta/membros')}
+            >
+              <Users className="h-4 w-4 shrink-0" />
+              <span className={cn(collapsed && 'lg:hidden')}>Membros</span>
+            </Link>
+          )}
           <Button
             variant="ghost"
             onClick={logout}
