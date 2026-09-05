@@ -11,6 +11,7 @@
     "api:dev": "pnpm --filter @financial-vellun/api dev",
     "web:dev": "pnpm --filter @financial-vellun/web dev",
     "agent:dev": "node apps/ai-agent/scripts/run-python.mjs -m uvicorn src.main:app --reload --port 8010",
+    "agent:worker": "node apps/ai-agent/scripts/run-python.mjs -m src.worker",
     "db:up": "docker compose -f infra/docker/docker-compose.yml up -d",
     "db:down": "docker compose -f infra/docker/docker-compose.yml down",
     "prisma:generate": "pnpm --filter @financial-vellun/api prisma:generate",
@@ -20,7 +21,9 @@
     "lint": "eslint . --ext .ts,.tsx,.js,.jsx",
     "lint:workspaces": "pnpm -r --if-present lint",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "infra:up": "docker compose -f infra/docker/docker-compose.yml up -d",
+    "infra:down": "docker compose -f infra/docker/docker-compose.yml down"
   },
   "engines": {
     "node": ">=20",
