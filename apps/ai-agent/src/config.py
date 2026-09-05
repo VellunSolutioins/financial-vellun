@@ -65,10 +65,42 @@ class Settings(BaseSettings):
     message_buffer_max_retries: int = 3
     message_buffer_retry_base_seconds: float = 1.0
 
+    # ── Pipeline de mensageria (broker durável) ─────────────────────────────
+    # "broker" = webhook publica em fila e consumers processam (padrão);
+    # "legacy" = caminho antigo (message_buffer + asyncio), mantido por uma
+    # release para rollback rápido sem deploy de código.
+    message_pipeline: str = "broker"  # "broker" | "legacy"
+    message_broker: str = "rabbitmq"  # "rabbitmq" | "inmemory"
+    rabbitmq_url: str = "amqp://guest:guest@localhost:5672/"
+    rabbitmq_inbound_queue: str = "whatsapp.inbound.v1"
+    rabbitmq_processing_queue: str = "whatsapp.processing.v1"
+    rabbitmq_prefetch: int = 10
+    inbound_consumer_concurrency: int = 5
+    processing_consumer_concurrency: int = 3
+    message_max_retries: int = 5
+    message_retry_base_seconds: float = 1.0
+    message_retry_max_seconds: float = 300.0
+    # Sobe os consumers junto com a API. `false` = apenas `python -m src.worker`
+    # consome (escala independente da camada HTTP).
+    run_consumers_in_api: bool = True
+    shutdown_drain_seconds: float = 20.0
+
+    # Estado distribuído (agrupamento, locks e conversa)
+    group_store_backend: str = "redis"  # "redis" | "memory"
+    conversation_state_backend: str = "redis"  # "redis" | "memory"
+    conversation_state_ttl_seconds: int = 1800
+    processing_lock_ttl_seconds: int = 120
+    job_dedupe_ttl_seconds: int = 86400
+
     # Contexto conversacional fornecido ao LLM
     conversation_context_message_limit: int = 15
     conversation_context_max_chars: int = 4000
     message_max_chars: int = 2000
+
+    @property
+    def is_broker_pipeline(self) -> bool:
+        """`True` quando o webhook publica em fila (pipeline novo)."""
+        return (self.message_pipeline or "broker").strip().lower() != "legacy"
 
 
 settings = Settings()
