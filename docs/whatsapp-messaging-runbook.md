@@ -1,0 +1,218 @@
+# Runbook — pipeline de mensageria do WhatsApp
+
+Operação do fluxo `webhook → whatsapp.inbound.v1 → agrupamento → whatsapp.processing.v1 → lançamento`.
+As decisões por trás do desenho estão em [docs/adrs/](adrs/README.md); a visão
+geral e as variáveis de ambiente estão no [README](../README.md).
+
+---
+
+## Mapa rápido
+
+| Recurso               | Nome                                                   | Papel                                           |
+| --------------------- | ------------------------------------------------------ | ----------------------------------------------- |
+| Exchange principal    | `whatsapp.x`                                           | routing keys `inbound` e `processing`           |
+| Exchange de retry     | `whatsapp.retry.x`                                     | recebe as republicações com atraso              |
+| Dead-letter exchange  | `whatsapp.dlx`                                         | routing keys `inbound.dlq` e `processing.dlq`   |
+| Fila de entrada       | `whatsapp.inbound.v1`                                  | mensagens individuais do webhook                |
+| Fila de processamento | `whatsapp.processing.v1`                               | jobs consolidados por telefone                  |
+| Retry                 | `whatsapp.{inbound,processing}.retry.{1,4,16,60,300}s` | TTL fixo, dead-letter de volta à fila de origem |
+| DLQ                   | `whatsapp.{inbound,processing}.dlq`                    | falhas permanentes ou tentativas esgotadas      |
+
+Chaves no Redis:
+
+| Chave                 | Papel                                   | TTL                              |
+| --------------------- | --------------------------------------- | -------------------------------- |
+| `group:{phone}`       | mensagens aguardando consolidação       | — (removida no flush)            |
+| `group:first:{phone}` | epoch da primeira mensagem do grupo     | —                                |
+| `group:due`           | sorted-set com o vencimento do debounce | —                                |
+| `group:lock:{phone}`  | lock da consolidação                    | `REDIS_LOCK_TTL_SECONDS`         |
+| `proc:lock:{phone}`   | lock do processamento                   | `PROCESSING_LOCK_TTL_SECONDS`    |
+| `job:done:{jobId}`    | job já concluído (deduplicação)         | `JOB_DEDUPE_TTL_SECONDS`         |
+| `conv:{phone}`        | confirmação pendente                    | `CONVERSATION_STATE_TTL_SECONDS` |
+
+---
+
+## Saúde
+
+```bash
+curl http://localhost:8010/health/live    # o processo está de pé
+curl http://localhost:8010/health/ready   # consegue publicar e consumir
+curl http://localhost:8010/metrics
+```
+
+`/health/ready` responde `503` quando o broker ou o Redis estão fora. É o
+endpoint que o orquestrador deve usar para tirar a instância do balanceador —
+uma instância que não pode publicar não deve receber webhooks. Use
+`/health/live` para a decisão de reiniciar.
+
+Resposta saudável:
+
+```json
+{ "status": "ok", "pipeline": "broker", "broker": "up", "consumers": "up", "redis": "up" }
+```
+
+`consumers: "disabled"` é esperado quando `RUN_CONSUMERS_IN_API=false` (a
+instância só publica).
+
+---
+
+## Métricas e o que elas indicam
+
+| Métrica                                                | Leitura                                                                                                           |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `webhook_received` / `publish_confirmed`               | divergência entre os dois indica mensagens descartadas antes de publicar (longas demais, ou payload sem mensagem) |
+| `publish_failed`                                       | o webhook devolveu `503`; o provedor vai reenviar                                                                 |
+| `webhook_latency_ms`                                   | inclui o _publisher confirm_. Subida sustentada = broker sob pressão                                              |
+| `messages_consumed` / `messages_duplicated`            | duplicadas altas são normais após um reenvio da Meta; sustentadas indicam ack lento                               |
+| `inbound_grouped` / `group_flushed` / `jobs_published` | acompanham o funil de consolidação                                                                                |
+| `receive_to_process_ms`                                | tempo entre receber e começar a processar; inclui o debounce (5 s)                                                |
+| `processing_duration_ms`                               | duração do processamento; dominado pela latência do LLM                                                           |
+| `jobs_deferred`                                        | jobs adiados por lock de telefone. Alto = muita mensagem simultânea do mesmo número                               |
+| `jobs_duplicated`                                      | reentregas descartadas pelo marcador `job:done`                                                                   |
+| `transactions_created` / `transactions_idempotent_hit` | lançamentos criados e lançamentos devolvidos por idempotência                                                     |
+| `transaction_failed`                                   | a API recusou o lançamento (conta/categoria inválida, sem assinatura)                                             |
+| `whatsapp_send_failed`                                 | falha ao responder ao usuário                                                                                     |
+| `dlq` / `dlq_messages`                                 | qualquer valor diferente de zero pede investigação                                                                |
+
+Todo log relacionado ao mesmo evento carrega `correlationId`,
+`providerMessageId`, `jobId` (quando aplicável) e o telefone **hasheado** em
+produção (mascarado em desenvolvimento). Nunca o número completo.
+
+---
+
+## Backlog crescendo
+
+```bash
+docker exec financial-vellun-rabbitmq rabbitmqctl list_queues name messages consumers
+```
+
+1. Confirme que há consumers ligados (`consumers > 0`). Zero = o processo do
+   worker não subiu ou perdeu a conexão; veja `/health/ready`.
+2. Se houver consumers e a fila cresce, aumente
+   `PROCESSING_CONSUMER_CONCURRENCY` ou suba mais réplicas de
+   `python -m src.worker`.
+3. Se `whatsapp.processing.v1` cresce e `jobs_deferred` está alto, o gargalo é
+   contenção por telefone — mais réplicas não ajudam; investigue por que um
+   telefone está preso (`proc:lock:*` no Redis).
+
+---
+
+## Mensagens na DLQ
+
+```bash
+# Quantas
+docker exec financial-vellun-rabbitmq rabbitmqctl list_queues name messages \
+  | grep dlq
+
+# Inspecionar sem consumir: painel → Queues → whatsapp.processing.dlq → Get messages
+# (requeue = Yes, para não remover)
+```
+
+O envelope traz o necessário para o diagnóstico:
+
+```json
+{
+  "schemaVersion": 1,
+  "payload": { "...mensagem original..." },
+  "sourceQueue": "whatsapp.processing.v1",
+  "routingKey": "processing",
+  "attempts": 5,
+  "errorType": "ConnectionError",
+  "errorMessage": "…truncado em 500 caracteres…",
+  "permanent": false,
+  "failedAt": "2026-09-05T18:00:00Z",
+  "correlationId": "…"
+}
+```
+
+- `permanent: true` → contrato inválido ou tipo não suportado. Reprocessar não
+  resolve; corrija a origem.
+- `permanent: false` → as tentativas se esgotaram. Resolva a causa (API fora,
+  OpenAI indisponível) e então reprocesse.
+
+### Reprocessar
+
+Não existe botão de "shovel" configurado. O caminho é republicar o `payload` na
+exchange principal com a routing key de origem, depois de resolver a causa:
+
+```bash
+# 1. Confirme que a causa foi resolvida
+curl http://localhost:8010/health/ready
+
+# 2. Painel do RabbitMQ → Exchanges → whatsapp.x → Publish message
+#    Routing key: inbound   (ou processing)
+#    Payload: o conteúdo do campo `payload` do envelope
+#    Properties: delivery_mode = 2
+```
+
+Reprocessar é seguro: os três níveis de idempotência
+([ADR 0005](adrs/0005-idempotencia-em-tres-niveis.md)) impedem `AiMessage`
+duplicada, job duplicado e lançamento duplicado.
+
+Depois de republicar, remova a mensagem da DLQ (Get messages com
+`requeue = No`, ou `Purge` se você já republicou todas).
+
+---
+
+## Webhook devolvendo 503
+
+Significa que o broker não confirmou a publicação. A Meta vai reenviar, então
+não há perda — mas o relógio de reenvio dela é curto.
+
+```bash
+docker compose -f infra/docker/docker-compose.yml ps rabbitmq
+docker logs financial-vellun-rabbitmq --tail 50
+curl http://localhost:8010/health/ready
+```
+
+A conexão reconecta sozinha (`connect_robust`); assim que o broker volta, o
+`readiness` fica verde e os `202` voltam.
+
+---
+
+## Confirmações pendentes travadas
+
+Um usuário que recebeu "Confirma o lançamento?" e não responde fica com estado
+por `CONVERSATION_STATE_TTL_SECONDS` (30 min).
+
+```bash
+# Ver o estado de um telefone
+docker exec financial-vellun-redis redis-cli GET "conv:+5541999999999"
+
+# Limpar (o usuário recomeça o lançamento do zero)
+docker exec financial-vellun-redis redis-cli DEL "conv:+5541999999999"
+```
+
+## Lock de telefone preso
+
+```bash
+docker exec financial-vellun-redis redis-cli KEYS "proc:lock:*"
+docker exec financial-vellun-redis redis-cli TTL "proc:lock:+5541999999999"
+```
+
+O lock tem TTL, então se resolve sozinho. Se um telefone fica preso além do
+TTL, há um worker travado no processamento — reinicie o worker. Jobs adiados
+mais de 60 vezes deixam de ser adiados e caminham para a DLQ, por desenho
+([ADR 0004](adrs/0004-ordenacao-por-lock-por-telefone.md)).
+
+---
+
+## Deploy
+
+O shutdown é gracioso: o worker de agrupamento para, os consumers cancelam o
+consumo, aguardam o que está em voo até `SHUTDOWN_DRAIN_SECONDS` e devolvem à
+fila o que não terminou. Mensagens confirmadas não se perdem.
+
+Dê ao orquestrador um `terminationGracePeriod` maior que
+`SHUTDOWN_DRAIN_SECONDS`, ou o processo será morto no meio do dreno (as
+mensagens voltam à fila de qualquer forma — sem ack, o broker as reentrega —
+mas o log fica menos claro).
+
+---
+
+## Rollback
+
+`MESSAGE_PIPELINE=legacy` + restart volta ao buffer em processo, sem broker.
+Mensagens já publicadas nas filas **não** serão consumidas enquanto a flag
+estiver em `legacy`; elas ficam lá, e voltam a ser processadas quando o pipeline
+`broker` for reativado. Ver [ADR 0009](adrs/0009-rollout-por-flag-message-pipeline.md).
