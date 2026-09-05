@@ -5,6 +5,7 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  MaxLength,
 } from 'class-validator';
 import { TransactionType, TransactionStatus } from '@prisma/client';
 
@@ -51,4 +52,14 @@ export class CreateAiTransactionDto {
   @IsOptional()
   @IsString()
   aiExtractedTransactionId?: string;
+
+  /**
+   * Chave de idempotência da origem (o `jobId` do pipeline do WhatsApp).
+   * Reenvio com a mesma chave devolve o lançamento já criado, em vez de
+   * duplicar — cobre o timeout que acontece *depois* da criação.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  idempotencyKey?: string;
 }

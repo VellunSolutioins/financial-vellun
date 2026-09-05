@@ -125,9 +125,20 @@ export class InternalService {
     };
   }
 
-  /** Cria um lançamento originado pela IA/WhatsApp e atualiza a rastreabilidade. */
+  /**
+   * Cria um lançamento originado pela IA/WhatsApp e atualiza a rastreabilidade.
+   *
+   * Idempotente quando `idempotencyKey` é informado: a mesma chave sempre
+   * devolve o mesmo lançamento. Isso cobre o caso em que a criação teve êxito
+   * mas a resposta se perdeu (timeout) e a mensagem foi reprocessada pela fila.
+   */
   async createTransactionFromAi(dto: CreateAiTransactionDto) {
     await this.assertCanUseProduct(dto.userId);
+
+    if (dto.idempotencyKey) {
+      const existing = await this.findByIdempotencyKey(dto.idempotencyKey);
+      if (existing) return existing;
+    }
 
     const account = await this.prisma.account.findUnique({ where: { id: dto.accountId } });
     if (!account || account.userId !== dto.userId) {
@@ -141,34 +152,70 @@ export class InternalService {
       }
     }
 
-    const transaction = await this.prisma.transaction.create({
-      data: {
-        userId: dto.userId,
-        accountId: dto.accountId,
-        categoryId: dto.categoryId,
-        type: dto.type,
-        amount: dto.amount,
-        description: dto.description,
-        transactionDate: parseDateOnly(dto.transactionDate),
-        status: dto.status ?? 'confirmed',
-        source: dto.source ?? 'ai',
-        rawInput: dto.rawInput,
-      },
-      include: { category: true, account: true },
-    });
+    let transaction: Awaited<ReturnType<typeof this.persistAiTransaction>>;
+    try {
+      transaction = await this.persistAiTransaction(dto);
+    } catch (err) {
+      // Corrida no unique de idempotencyKey: outro worker criou primeiro.
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002' &&
+        dto.idempotencyKey
+      ) {
+        const existing = await this.findByIdempotencyKey(dto.idempotencyKey);
+        if (existing) return existing;
+      }
+      throw err;
+    }
 
     if (transaction.status === 'confirmed') {
       await this.accountsService.recalculateBalance(dto.accountId);
     }
 
-    if (dto.aiExtractedTransactionId) {
-      await this.prisma.aiExtractedTransaction.update({
-        where: { id: dto.aiExtractedTransactionId },
-        data: { transactionId: transaction.id, status: 'confirmed' },
-      });
-    }
-
     return transaction;
+  }
+
+  /**
+   * Grava o lançamento e a rastreabilidade da extração na **mesma** transação
+   * de banco: ou os dois existem, ou nenhum.
+   */
+  private persistAiTransaction(dto: CreateAiTransactionDto) {
+    return this.prisma.$transaction(async (tx) => {
+      const transaction = await tx.transaction.create({
+        data: {
+          userId: dto.userId,
+          accountId: dto.accountId,
+          categoryId: dto.categoryId,
+          type: dto.type,
+          amount: dto.amount,
+          description: dto.description,
+          transactionDate: parseDateOnly(dto.transactionDate),
+          status: dto.status ?? 'confirmed',
+          source: dto.source ?? 'ai',
+          rawInput: dto.rawInput,
+          idempotencyKey: dto.idempotencyKey,
+        },
+        include: { category: true, account: true },
+      });
+
+      if (dto.aiExtractedTransactionId) {
+        await tx.aiExtractedTransaction.update({
+          where: { id: dto.aiExtractedTransactionId },
+          data: { transactionId: transaction.id, status: 'confirmed' },
+        });
+      }
+
+      return transaction;
+    });
+  }
+
+  /** Lançamento já criado para uma chave de idempotência, marcado como tal. */
+  private async findByIdempotencyKey(idempotencyKey: string) {
+    const existing = await this.prisma.transaction.findUnique({
+      where: { idempotencyKey },
+      include: { category: true, account: true },
+    });
+    return existing ? { ...existing, idempotent: true } : null;
   }
 
   /** Persiste um evento de auditoria do agente de IA. */
@@ -265,18 +312,43 @@ export class InternalService {
       );
     }
 
-    const extraction = await this.prisma.aiExtractedTransaction.create({
-      data: {
-        userId: dto.userId,
-        rawInput: dto.rawInput,
-        extractedPayload: dto.extractedPayload as Prisma.InputJsonValue,
-        confidence: dto.confidence,
-        status: dto.status ?? 'pending',
-        transactionId: dto.transactionId,
-        sourceMessageId: dto.sourceMessageId,
-      },
-    });
+    // Idempotência: o reprocessamento de um job repete esta chamada. Sem isso,
+    // a segunda extração ficaria órfã — a criação do lançamento é deduplicada
+    // antes e não chega a vinculá-la.
+    if (dto.idempotencyKey) {
+      const existing = await this.prisma.aiExtractedTransaction.findUnique({
+        where: { idempotencyKey: dto.idempotencyKey },
+      });
+      if (existing) return { id: existing.id, duplicate: true };
+    }
 
-    return { id: extraction.id };
+    try {
+      const extraction = await this.prisma.aiExtractedTransaction.create({
+        data: {
+          userId: dto.userId,
+          rawInput: dto.rawInput,
+          extractedPayload: dto.extractedPayload as Prisma.InputJsonValue,
+          confidence: dto.confidence,
+          status: dto.status ?? 'pending',
+          transactionId: dto.transactionId,
+          sourceMessageId: dto.sourceMessageId,
+          idempotencyKey: dto.idempotencyKey,
+        },
+      });
+      return { id: extraction.id };
+    } catch (err) {
+      // Corrida no unique: outro worker gravou a mesma extração primeiro.
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002' &&
+        dto.idempotencyKey
+      ) {
+        const existing = await this.prisma.aiExtractedTransaction.findUnique({
+          where: { idempotencyKey: dto.idempotencyKey },
+        });
+        if (existing) return { id: existing.id, duplicate: true };
+      }
+      throw err;
+    }
   }
 }

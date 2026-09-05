@@ -225,6 +225,9 @@ model Transaction {
   status          TransactionStatus @default(confirmed)
   source          TransactionSource @default(manual)
   rawInput        String?           @map("raw_input")
+  // Chave de idempotencia da origem (ex.: jobId do pipeline do WhatsApp).
+  // Um retry apos timeout devolve o lancamento existente em vez de duplicar.
+  idempotencyKey  String?           @unique @map("idempotency_key")
   createdAt       DateTime          @default(now()) @map("created_at")
   updatedAt       DateTime          @updatedAt @map("updated_at")
 
@@ -323,6 +326,9 @@ model AiExtractedTransaction {
   extractedPayload Json               @map("extracted_payload")
   confidence       Float
   status           AiExtractionStatus @default(pending)
+  // Chave de idempotencia da origem (o `jobId` do pipeline do WhatsApp). Um
+  // retry reaproveita a extracao existente em vez de criar outra orfa.
+  idempotencyKey   String?            @unique @map("idempotency_key")
   createdAt        DateTime           @default(now()) @map("created_at")
   updatedAt        DateTime           @updatedAt @map("updated_at")
 
@@ -330,6 +336,8 @@ model AiExtractedTransaction {
   transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
   sourceMessage AiMessage?   @relation(fields: [sourceMessageId], references: [id], onDelete: SetNull)
 
+  @@index([transactionId])
+  @@index([userId])
   @@map("ai_extracted_transactions")
 }
 
