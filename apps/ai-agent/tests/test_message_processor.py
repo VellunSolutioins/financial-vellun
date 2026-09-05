@@ -133,7 +133,7 @@ def test_happy_path_calls_services_in_order():
             )
 
     class FakeTxCreator:
-        async def create_from_intent(self, intent, user_id, raw, ai_extracted_transaction_id=None):
+        async def create_from_intent(self, intent, user_id, raw, **kwargs):
             rec.calls.append("create_transaction")
             return {"ok": True, "message": "Lançamento criado!"}
 
@@ -204,7 +204,7 @@ def test_pending_category_reply_uses_user_categories():
             return {"userId": "u1", "profileType": "personal"}
 
     class FakeTxCreator:
-        async def create_from_intent(self, intent, user_id, raw, ai_extracted_transaction_id=None):
+        async def create_from_intent(self, intent, user_id, raw, **kwargs):
             rec.calls.append(f"create:{intent.category_name}")
             return {"ok": True, "message": f"Criado em {intent.category_name}"}
 
@@ -236,22 +236,20 @@ def test_pending_category_reply_uses_user_categories():
 
     orig_build = mp.MessageProcessor._build_context
     mp.MessageProcessor._build_context = fake_build_context
-    mp.conversation_manager.set_pending(
-        phone,
-        FinancialIntent(
-            intent=IntentType.create_transaction,
-            transaction_type=TransactionTypeEnum.expense,
-            amount=50,
-            description="Compra teste de R$ 50,00",
-            transaction_date="2026-07-07",
-            confidence=0.6,
-            needs_confirmation=True,
-        ),
+    pending = FinancialIntent(
+        intent=IntentType.create_transaction,
+        transaction_type=TransactionTypeEnum.expense,
+        amount=50,
+        description="Compra teste de R$ 50,00",
+        transaction_date="2026-07-07",
+        confidence=0.6,
+        needs_confirmation=True,
     )
+    asyncio.run(mp.conversation_manager.set_pending(phone, pending))
     try:
         reply = asyncio.run(mp.message_processor.process_buffered_message(phone, "Outros", ["m2"]))
     finally:
-        mp.conversation_manager.clear(phone)
+        asyncio.run(mp.conversation_manager.clear(phone))
         mp.MessageProcessor._build_context = orig_build
         _restore(originals)
 

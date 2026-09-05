@@ -6,6 +6,7 @@ from datetime import date
 
 from ..schemas.financial_intent import FinancialIntent
 from .api_client import api_client
+from .metrics import metrics
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +35,14 @@ class TransactionCreator:
         user_id: str,
         raw_message: str,
         ai_extracted_transaction_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> dict:
-        """Retorna ``{ok: bool, message: str, transaction?: dict}``."""
+        """Retorna ``{ok: bool, message: str, transaction?: dict}``.
+
+        ``idempotency_key`` (o ``jobId``) impede que um retry — inclusive um
+        timeout ocorrido *depois* de o lancamento ter sido criado — gere um
+        segundo lancamento: a API devolve o existente.
+        """
         account_id = await self._resolve_account(user_id, intent.account_name)
         if account_id is None:
             return {
@@ -54,11 +61,13 @@ class TransactionCreator:
             "description": intent.description or raw_message,
             "transactionDate": intent.transaction_date or date.today().isoformat(),
             "status": "confirmed",
-            "source": "ai",
+            "source": "whatsapp",
             "rawInput": raw_message,
         }
         if ai_extracted_transaction_id:
             payload["aiExtractedTransactionId"] = ai_extracted_transaction_id
+        if idempotency_key:
+            payload["idempotencyKey"] = idempotency_key
 
         try:
             response = await api_client.post("/internal/transactions/from-ai", json=payload)
@@ -77,6 +86,10 @@ class TransactionCreator:
             }
 
         transaction = response.json()
+        if isinstance(transaction, dict) and transaction.get("idempotent"):
+            metrics.incr("transactions_idempotent_hit")
+            logger.info("Lancamento ja existia para esta chave de idempotencia")
+
         type_label = "Despesa" if payload["type"] == "expense" else "Receita"
         category_label = intent.category_name or "Sem categoria"
         message = (
