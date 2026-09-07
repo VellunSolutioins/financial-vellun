@@ -6,7 +6,14 @@ import {
   endOfDayUtc,
   startOfMonthUtc,
   endOfMonthUtc,
+  todaySaoPaulo,
 } from '../common/date.util';
+
+function todayStartUtc(): Date {
+  const today = todaySaoPaulo();
+  const iso = `${today.year}-${String(today.monthIndex + 1).padStart(2, '0')}-${String(today.day).padStart(2, '0')}`;
+  return startOfDayUtc(iso);
+}
 
 @Injectable()
 export class DashboardService {
@@ -48,7 +55,10 @@ export class DashboardService {
           take: 5,
         }),
         this.prisma.transaction.findMany({
-          where: { userId, type: 'expense', status: 'pending' },
+          // gte hoje: sem esse piso, uma conta pendente antiga (nunca paga/
+          // cancelada) ocupa a vaga pra sempre e as próximas de verdade nunca
+          // aparecem no "take: 5".
+          where: { userId, type: 'expense', status: 'pending', transactionDate: { gte: todayStartUtc() } },
           include: { category: true, account: true },
           orderBy: { transactionDate: 'asc' },
           take: 5,
