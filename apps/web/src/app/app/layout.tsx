@@ -30,7 +30,7 @@ import {
 import { useAuth } from '@/contexts/auth-context';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import type { SubscriptionAccess } from '@/lib/billing';
+import { hasBusinessArea, type SubscriptionAccess } from '@/lib/billing';
 
 const ASSINATURA_PATH = '/app/conta/assinatura';
 const SIDEBAR_COLLAPSED_KEY = 'fv:sidebar-collapsed';
@@ -114,7 +114,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   // Plano Business: dono do plano gerencia Pessoal e Negócio na mesma conta,
   // alternando o contexto (nav + dashboard) por uma chave — ver doc do Prompt.
-  const isBusinessPlan = plan?.name === 'Business';
+  // Comparado por code (imutável), não name (texto de marketing), para incluir
+  // os planos legados que o seed mantém vivos (retiredPlanCodes).
+  const isBusinessPlan = hasBusinessArea(plan);
 
   useEffect(() => {
     if (!isBusinessPlan || !user) return;

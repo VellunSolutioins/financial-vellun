@@ -55,6 +55,23 @@ export const createPaymentMethodSession = () =>
 
 export const cancelSubscription = () => apiClient.post<SubscriptionState>('/billing/cancel', {});
 
+// Planos que liberam a área Empresa. Inclui os códigos legados mantidos vivos
+// no seed (retiredPlanCodes) para não tirar o acesso de quem já assinava
+// antes da introdução dos planos Individual/Duo/Business.
+const BUSINESS_PLAN_CODES = new Set([
+  'vellun-business-mensal',
+  'vellun-business-anual',
+  'vellun-mensal',
+  'vellun-anual',
+  'vellun-family-mensal',
+  'vellun-family-anual',
+]);
+
+/** Deriva o acesso à área Empresa pelo `code` (imutável), não pelo `name` (texto de marketing). */
+export function hasBusinessArea(plan?: { code?: string | null } | null): boolean {
+  return !!plan?.code && BUSINESS_PLAN_CODES.has(plan.code);
+}
+
 /** Formata valor monetário em R$ (pt-BR). */
 export function formatBRL(value: string | number): string {
   return Number(value).toLocaleString('pt-BR', {
