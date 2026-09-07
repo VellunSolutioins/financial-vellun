@@ -4,13 +4,14 @@ import {
   Delete,
   Get,
   Param,
+  ParseEnumPipe,
   Patch,
   Post,
   Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { ApiCookieAuth, ApiTags } from '@nestjs/swagger';
+import { ApiCookieAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ContactType } from '@prisma/client';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -27,9 +28,10 @@ export class ContactsController {
   constructor(private contactsService: ContactsService) {}
 
   @Get()
+  @ApiQuery({ name: 'type', enum: ContactType, required: false })
   findAll(
     @Req() req: Request,
-    @Query('type') type?: ContactType,
+    @Query('type', new ParseEnumPipe(ContactType, { optional: true })) type?: ContactType,
     @Query('search') search?: string,
   ) {
     const user = req.user as any;

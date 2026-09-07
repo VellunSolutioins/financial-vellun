@@ -1,5 +1,17 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
-import { ApiCookieAuth, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  ParseEnumPipe,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import { ApiCookieAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ProfileType } from '@prisma/client';
 import { Request } from 'express';
 
@@ -18,7 +30,12 @@ export class CategoriesController {
   constructor(private categoriesService: CategoriesService) {}
 
   @Get()
-  findAll(@Req() req: Request, @Query('profileType') profileType?: ProfileType) {
+  @ApiQuery({ name: 'profileType', enum: ProfileType, required: false })
+  findAll(
+    @Req() req: Request,
+    @Query('profileType', new ParseEnumPipe(ProfileType, { optional: true }))
+    profileType?: ProfileType,
+  ) {
     const user = req.user as any;
     return this.categoriesService.findAll(user.dataOwnerId, profileType ?? user.profileType);
   }
