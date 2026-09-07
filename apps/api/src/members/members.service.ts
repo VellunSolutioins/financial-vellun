@@ -126,9 +126,17 @@ export class MembersService {
     if (!member || member.householdOwnerId !== ownerId) {
       throw new NotFoundException('Membro não encontrado');
     }
+    // Libera o e-mail para um novo convite. Não dá pra excluir o usuário: os
+    // lançamentos que ele criou referenciam createdByUserId em cascade, e
+    // excluir apagaria esse histórico junto. Login antigo fica inutilizável
+    // (senha aleatória) já que o e-mail original não existe mais na conta.
     await this.prisma.user.update({
       where: { id: memberId },
-      data: { householdOwnerId: null },
+      data: {
+        householdOwnerId: null,
+        email: `removed+${memberId}@${member.email.split('@')[1] ?? 'invalid.local'}`,
+        passwordHash: await bcrypt.hash(randomUUID(), 12),
+      },
     });
     return { message: 'Membro removido' };
   }
