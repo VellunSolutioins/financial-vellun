@@ -118,7 +118,9 @@ export class CreditCardsService {
   }
 
   async create(userId: string, dto: CreateCreditCardDto) {
-    const existingCount = await this.prisma.creditCard.count({ where: { account: { userId } } });
+    const existingCount = await this.prisma.creditCard.count({
+      where: { account: { userId, isActive: true } },
+    });
 
     const account = await this.accountsService.create(userId, {
       name: dto.name,
@@ -162,7 +164,7 @@ export class CreditCardsService {
     const existing = await this.findOwned(userId, id);
     await this.prisma.$transaction([
       this.prisma.creditCard.updateMany({
-        where: { account: { userId } },
+        where: { account: { userId, isActive: true } },
         data: { isPrimary: false },
       }),
       this.prisma.creditCard.update({ where: { id: existing.id }, data: { isPrimary: true } }),
@@ -176,7 +178,20 @@ export class CreditCardsService {
 
   async remove(userId: string, id: string) {
     const existing = await this.findOwned(userId, id);
-    await this.accountsService.deactivate(userId, existing.accountId);
+
+    // Cartão em uso tem lançamentos por definição — arquivar direto, sem passar
+    // pela regra de accountsService.deactivate (desenhada para conta corrente,
+    // que recusa desativar contas com lançamentos vinculados).
+    await this.prisma.account.update({
+      where: { id: existing.accountId },
+      data: { isActive: false },
+    });
+
+    await this.prisma.creditCard.update({
+      where: { id: existing.id },
+      data: { isPrimary: false },
+    });
+
     if (existing.isPrimary) {
       const nextPrimary = await this.prisma.creditCard.findFirst({
         where: { account: { userId, isActive: true } },
