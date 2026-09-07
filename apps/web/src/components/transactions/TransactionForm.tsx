@@ -31,12 +31,16 @@ const schema = z
     recurrenceMonths: z.string().optional(),
   })
   .refine(
-    (data) => data.recurrenceType !== 'parcelado' || Number(data.installments) >= 2,
-    { message: 'Informe pelo menos 2 parcelas', path: ['installments'] },
+    (data) =>
+      data.recurrenceType !== 'parcelado' ||
+      (Number(data.installments) >= 2 && Number(data.installments) <= 72),
+    { message: 'Informe entre 2 e 72 parcelas', path: ['installments'] },
   )
   .refine(
-    (data) => data.recurrenceType !== 'fixo' || Number(data.recurrenceMonths) >= 2,
-    { message: 'Informe pelo menos 2 meses', path: ['recurrenceMonths'] },
+    (data) =>
+      data.recurrenceType !== 'fixo' ||
+      (Number(data.recurrenceMonths) >= 2 && Number(data.recurrenceMonths) <= 120),
+    { message: 'Informe entre 2 e 120 meses', path: ['recurrenceMonths'] },
   );
 type FormData = z.infer<typeof schema>;
 
@@ -240,6 +244,7 @@ export function TransactionForm({ transaction, defaultType, onSuccess, onCancel 
               <Input
                 type="number"
                 min={2}
+                max={72}
                 placeholder="Número de parcelas"
                 {...register('installments')}
               />
@@ -253,6 +258,7 @@ export function TransactionForm({ transaction, defaultType, onSuccess, onCancel 
               <Input
                 type="number"
                 min={2}
+                max={120}
                 placeholder="Repetir por quantos meses"
                 {...register('recurrenceMonths')}
               />

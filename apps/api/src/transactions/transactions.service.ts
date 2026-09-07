@@ -116,13 +116,13 @@ export class TransactionsService {
 
     let occurrences: number;
     if (recurrenceType === 'parcelado') {
-      if (!dto.installments || dto.installments < 2) {
-        throw new BadRequestException('Informe o número de parcelas (mínimo 2)');
+      if (!dto.installments || dto.installments < 2 || dto.installments > 72) {
+        throw new BadRequestException('Número de parcelas inválido (mínimo 2, máximo 72)');
       }
       occurrences = dto.installments;
     } else if (recurrenceType === 'fixo') {
-      if (!dto.recurrenceMonths || dto.recurrenceMonths < 2) {
-        throw new BadRequestException('Informe por quantos meses repetir (mínimo 2)');
+      if (!dto.recurrenceMonths || dto.recurrenceMonths < 2 || dto.recurrenceMonths > 120) {
+        throw new BadRequestException('Quantidade de meses inválida (mínimo 2, máximo 120)');
       }
       occurrences = dto.recurrenceMonths;
     } else {

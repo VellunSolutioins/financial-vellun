@@ -6,6 +6,7 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  Max,
   Min,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
@@ -52,21 +53,23 @@ export class CreateTransactionDto {
 
   @ApiProperty({
     required: false,
-    description: 'Número de parcelas — obrigatório quando recurrenceType = parcelado (mínimo 2).',
+    description: 'Número de parcelas — obrigatório quando recurrenceType = parcelado (mínimo 2, máximo 72).',
   })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(2)
+  @Max(72)
   installments?: number;
 
   @ApiProperty({
     required: false,
-    description: 'Quantidade de meses a gerar — obrigatório quando recurrenceType = fixo (mínimo 2).',
+    description: 'Quantidade de meses a gerar — obrigatório quando recurrenceType = fixo (mínimo 2, máximo 120).',
   })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(2)
+  @Max(120)
   recurrenceMonths?: number;
 }
