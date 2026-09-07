@@ -80,13 +80,15 @@ export function SavingsBoxForm({ box, onSuccess, onCancel }: Props) {
 
   const onSubmit = async (data: FormData) => {
     setSubmitting(true);
+    // null (não undefined) para os opcionais: JSON.stringify remove chaves com
+    // undefined, então limpar um campo na edição nunca chegaria ao backend.
     const payload = {
       name: data.name,
       color: data.color,
-      targetAmount: data.targetAmount ? currencyToNumber(data.targetAmount) : undefined,
-      targetDate: data.targetDate || undefined,
-      yieldRate: data.yieldRate ? Number(data.yieldRate.replace(',', '.')) : undefined,
-      yieldPeriod: data.yieldRate ? data.yieldPeriod : undefined,
+      targetAmount: data.targetAmount ? currencyToNumber(data.targetAmount) : null,
+      targetDate: data.targetDate || null,
+      yieldRate: data.yieldRate ? Number(data.yieldRate.replace(',', '.')) : null,
+      yieldPeriod: data.yieldRate ? data.yieldPeriod : null,
     };
     try {
       if (box) {

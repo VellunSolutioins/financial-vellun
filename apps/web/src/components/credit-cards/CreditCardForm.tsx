@@ -61,11 +61,13 @@ export function CreditCardForm({ card, onSuccess, onCancel }: Props) {
 
   const onSubmit = async (data: FormData) => {
     setSubmitting(true);
+    // null (não undefined) para os opcionais: JSON.stringify remove chaves com
+    // undefined, então limpar um campo na edição nunca chegaria ao backend.
     const payload = {
       name: data.name,
-      brand: data.brand || undefined,
+      brand: data.brand || null,
       color: data.color,
-      creditLimit: data.creditLimit ? currencyToNumber(data.creditLimit) : undefined,
+      creditLimit: data.creditLimit ? currencyToNumber(data.creditLimit) : null,
       dueDay: Number(data.dueDay),
     };
     try {

@@ -55,12 +55,14 @@ export function ReminderForm({ reminder, onSuccess, onCancel }: Props) {
 
   const onSubmit = async (data: FormData) => {
     setSubmitting(true);
+    // null (não undefined) para os opcionais: JSON.stringify remove chaves com
+    // undefined, então limpar um campo na edição nunca chegaria ao backend.
     const payload = {
       title: data.title,
-      amount: data.amount ? currencyToNumber(data.amount) : undefined,
+      amount: data.amount ? currencyToNumber(data.amount) : null,
       dueDate: data.dueDate,
       isRecurrent: data.isRecurrent,
-      recurrenceEndDate: data.isRecurrent && data.recurrenceEndDate ? data.recurrenceEndDate : undefined,
+      recurrenceEndDate: data.isRecurrent && data.recurrenceEndDate ? data.recurrenceEndDate : null,
     };
     try {
       if (reminder) {
