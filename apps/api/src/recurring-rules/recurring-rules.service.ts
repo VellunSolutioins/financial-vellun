@@ -3,7 +3,7 @@ import { Cron } from '@nestjs/schedule';
 import { Prisma, RecurringFrequency, RecurringRule } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
-import { parseDateOnly, todaySaoPaulo } from '../common/date.util';
+import { parseDateOnly, todaySaoPaulo, subtractDaysSaoPaulo } from '../common/date.util';
 
 import { CreateRecurringRuleDto } from './dto/create-recurring-rule.dto';
 import { UpdateRecurringRuleDto } from './dto/update-recurring-rule.dto';
@@ -30,7 +30,7 @@ function healthFromPercentage(percentage: number): { key: string; label: string 
   return { key: 'alto_risco', label: 'Alto risco' };
 }
 
-/** A regra vence hoje (São Paulo)? Considera frequência, janela e dia clampado ao fim do mês. */
+/** A regra vence no dia informado (São Paulo)? Considera frequência, janela e dia clampado ao fim do mês. */
 function isRuleDueOn(
   rule: Pick<RecurringRule, 'startDate' | 'endDate' | 'frequency' | 'dueDay'>,
   today: { year: number; monthIndex: number; day: number },
@@ -39,19 +39,23 @@ function isRuleDueOn(
   const startM = rule.startDate.getUTCMonth();
   if (today.year < startY || (today.year === startY && today.monthIndex < startM)) return false;
 
-  if (rule.endDate) {
-    const endY = rule.endDate.getUTCFullYear();
-    const endM = rule.endDate.getUTCMonth();
-    if (today.year > endY || (today.year === endY && today.monthIndex > endM)) return false;
-  }
-
   const monthsSinceStart = (today.year - startY) * 12 + (today.monthIndex - startM);
   const step = FREQUENCY_STEP_MONTHS[rule.frequency];
   if (monthsSinceStart % step !== 0) return false;
 
   const daysInMonth = new Date(Date.UTC(today.year, today.monthIndex + 1, 0)).getUTCDate();
   const effectiveDueDay = Math.min(rule.dueDay, daysInMonth);
-  return today.day === effectiveDueDay;
+  if (today.day !== effectiveDueDay) return false;
+
+  // Janela [startDate, endDate] comparada por data completa (meio-dia UTC, o
+  // mesmo horário que parseDateOnly grava) — comparar só ano+mês deixava
+  // passar vencimentos antes do início / depois do término dentro do mês de
+  // borda (ex.: endDate no dia 10 ainda gerava no dia 25 do mesmo mês).
+  const dueDate = Date.UTC(today.year, today.monthIndex, effectiveDueDay, 12, 0, 0);
+  if (dueDate < rule.startDate.getTime()) return false;
+  if (rule.endDate && dueDate > rule.endDate.getTime()) return false;
+
+  return true;
 }
 
 @Injectable()
@@ -180,44 +184,62 @@ export class RecurringRulesService {
     }
   }
 
-  /** Gera os lançamentos pendentes de hoje. Sem `userId`, roda para todos (uso do cron); com `userId`, só dele (endpoint manual). */
-  async generateDue(userId?: string): Promise<{ created: number }> {
+  /**
+   * Gera as ocorrências pendentes, varrendo uma janela para trás (padrão 7
+   * dias) além de hoje. Sem essa varredura, um cron perdido (deploy, container
+   * reiniciando, instância fora do ar) pula o vencimento em silêncio: no dia
+   * seguinte a regra não vence mais e não há caminho de recuperação. O
+   * `@@unique` (recurringRuleId, competenceMonth) torna o reprocessamento
+   * idempotente, então revarrer dias já gerados é seguro.
+   * Sem `userId`, roda para todos (uso do cron); com `userId`, só dele (endpoint manual).
+   */
+  async generateDue(userId?: string, lookbackDays = 7): Promise<{ created: number }> {
     const today = todaySaoPaulo();
-    const competenceMonth = `${today.year}-${String(today.monthIndex + 1).padStart(2, '0')}`;
-    const dueDateOnly = `${competenceMonth}-${String(today.day).padStart(2, '0')}`;
-
     const rules = await this.prisma.recurringRule.findMany({
       where: { isActive: true, ...(userId ? { userId } : {}) },
     });
 
     let created = 0;
-    for (const rule of rules) {
-      if (!isRuleDueOn(rule, today)) continue;
-      try {
-        await this.prisma.transaction.create({
-          data: {
-            userId: rule.userId,
-            // Gerado pelo cron, sem autor humano — atribui ao dono da regra.
-            createdByUserId: rule.userId,
-            accountId: rule.accountId,
-            categoryId: rule.categoryId,
-            type: rule.type,
-            amount: rule.amount,
-            description: rule.description,
-            transactionDate: parseDateOnly(dueDateOnly),
-            status: 'pending',
-            source: 'recurring',
-            recurringRuleId: rule.id,
-            competenceMonth,
-          },
-        });
-        created += 1;
-      } catch (error) {
-        // Já gerado nesse mês (corrida do cron / chamada manual duplicada) — idempotente, ignora.
-        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-          continue;
+    for (let offset = lookbackDays; offset >= 0; offset--) {
+      const day = offset === 0 ? today : subtractDaysSaoPaulo(today, offset);
+      const competenceMonth = `${day.year}-${String(day.monthIndex + 1).padStart(2, '0')}`;
+      const dueDateOnly = `${competenceMonth}-${String(day.day).padStart(2, '0')}`;
+
+      for (const rule of rules) {
+        if (!isRuleDueOn(rule, day)) continue;
+        try {
+          await this.prisma.transaction.create({
+            data: {
+              userId: rule.userId,
+              // Gerado pelo cron, sem autor humano — atribui ao dono da regra.
+              createdByUserId: rule.userId,
+              accountId: rule.accountId,
+              categoryId: rule.categoryId,
+              type: rule.type,
+              amount: rule.amount,
+              description: rule.description,
+              // Data de vencimento do dia varrido, não a data em que o cron
+              // rodou — senão o lançamento recuperado aparece com data errada.
+              transactionDate: parseDateOnly(dueDateOnly),
+              status: 'pending',
+              source: 'recurring',
+              recurringRuleId: rule.id,
+              competenceMonth,
+            },
+          });
+          created += 1;
+          if (offset > 0) {
+            this.logger.warn(
+              `Recorrência ${rule.id}: backfill de ${offset} dia(s) atrás (competência ${competenceMonth}) — sinal de que o cron falhou.`,
+            );
+          }
+        } catch (error) {
+          // Já gerado nesse mês (corrida do cron / chamada manual duplicada) — idempotente, ignora.
+          if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+            continue;
+          }
+          throw error;
         }
-        throw error;
       }
     }
     return { created };

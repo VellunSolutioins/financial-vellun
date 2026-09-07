@@ -67,6 +67,16 @@ export function todaySaoPaulo(): { year: number; monthIndex: number; day: number
   return { year: get('year'), monthIndex: get('month') - 1, day: get('day') };
 }
 
+/** Subtrai `days` dias de um dia-calendário (opera em meio-dia UTC, independe de fuso). */
+export function subtractDaysSaoPaulo(
+  date: { year: number; monthIndex: number; day: number },
+  days: number,
+): { year: number; monthIndex: number; day: number } {
+  const d = new Date(Date.UTC(date.year, date.monthIndex, date.day, 12, 0, 0));
+  d.setUTCDate(d.getUTCDate() - days);
+  return { year: d.getUTCFullYear(), monthIndex: d.getUTCMonth(), day: d.getUTCDate() };
+}
+
 /**
  * Soma `months` meses a uma data (UTC), travando o dia no último dia do mês
  * de destino quando ele não existir (ex.: 31/jan + 1 mês → 28 ou 29/fev, em
