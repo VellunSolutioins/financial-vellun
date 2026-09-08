@@ -72,6 +72,28 @@ const plans = [
   },
 ];
 
+/**
+ * Plano de R$ 0,00 usado só para desenvolvimento local: dá acesso a tudo sem
+ * passar pelo Asaas (que recusa cobranças abaixo de R$ 5,00 — ver
+ * `activateFreeSubscription` em billing). Antes ele existia apenas como uma
+ * linha inserida à mão no banco, então sumia a cada `prisma migrate reset`.
+ *
+ * `maxMembers: 2` para permitir testar o fluxo de convite/membros, e o código
+ * está em BUSINESS_PLAN_CODES (apps/web/src/lib/billing.ts) para liberar
+ * também a área Empresa. Só mensal: a tela de assinatura cai no plano mensal
+ * quando a aba "Anual" não encontra a versão anual do mesmo nome.
+ */
+const localDevPlan = {
+  code: 'vellun-local-dev',
+  name: 'Local Dev Active',
+  description: 'Somente para desenvolvimento local — acesso total, sem cobrança.',
+  price: '0.00',
+  currency: 'BRL',
+  interval: BillingInterval.monthly,
+  features: commonFeatures,
+  maxMembers: 2,
+};
+
 // Planos antigos/descontinuados — desativados, não excluídos, para não quebrar
 // assinaturas históricas que ainda referenciem esses códigos.
 const retiredPlanCodes = [
@@ -192,6 +214,29 @@ async function main() {
     where: { code: { in: retiredPlanCodes } },
     data: { isActive: false },
   });
+
+  // Plano gratuito de desenvolvimento: criado fora de produção e, em produção,
+  // desativado de forma ativa. A desativação é intencional — se a linha algum
+  // dia vazar para o banco de produção (dump restaurado, seed rodado com o
+  // ambiente errado), a próxima execução do seed a neutraliza em vez de deixar
+  // um plano de R$ 0,00 assinável por qualquer um.
+  if (process.env.NODE_ENV === 'production') {
+    const { count } = await prisma.plan.updateMany({
+      where: { code: localDevPlan.code, isActive: true },
+      data: { isActive: false },
+    });
+    if (count > 0) {
+      console.warn(`ATENCAO: plano ${localDevPlan.code} estava ativo em producao e foi desativado.`);
+    }
+  } else {
+    const { code, ...planData } = localDevPlan;
+    await prisma.plan.upsert({
+      where: { code },
+      update: { ...planData, isActive: true },
+      create: { code, ...planData, isActive: true },
+    });
+    console.log(`Plano de desenvolvimento "${localDevPlan.name}" disponivel (NODE_ENV != production).`);
+  }
 
   console.log('Criando usuario demo...');
 

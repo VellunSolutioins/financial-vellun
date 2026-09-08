@@ -65,6 +65,10 @@ const BUSINESS_PLAN_CODES = new Set([
   'vellun-anual',
   'vellun-family-mensal',
   'vellun-family-anual',
+  // Plano de desenvolvimento local (seed só o cria fora de produção), para que
+  // a área Empresa possa ser testada com ele. Inerte em produção: o plano não
+  // existe lá e o usuário não escolhe o próprio `code`.
+  'vellun-local-dev',
 ]);
 
 /** Deriva o acesso à área Empresa pelo `code` (imutável), não pelo `name` (texto de marketing). */
