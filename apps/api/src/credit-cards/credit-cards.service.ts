@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountsService } from '../accounts/accounts.service';
+import { monthlyEquivalent } from '../recurring-rules/recurring-rules.service';
 
 import { CreateCreditCardDto } from './dto/create-credit-card.dto';
 import { UpdateCreditCardDto } from './dto/update-credit-card.dto';
@@ -100,11 +101,14 @@ export class CreditCardsService {
     const totalCommitted = cards.reduce((sum, c) => sum + c.currentInvoice, 0);
     const totalLimit = cards.reduce((sum, c) => sum + (c.creditLimit ?? 0), 0);
 
-    const incomeAgg = await this.prisma.recurringRule.aggregate({
+    // Não dá pra somar com aggregate: uma receita anual de R$ 24.000 entraria
+    // inteira no denominador e faria a fatura parecer irrisória perto da renda.
+    // monthlyEquivalent() traz cada regra para a mesma unidade mensal.
+    const incomeRules = await this.prisma.recurringRule.findMany({
       where: { userId, type: 'income', isActive: true },
-      _sum: { amount: true },
+      select: { amount: true, frequency: true },
     });
-    const monthlyIncome = Number(incomeAgg._sum.amount ?? 0);
+    const monthlyIncome = incomeRules.reduce((sum, r) => sum + monthlyEquivalent(r), 0);
     const incomePercentage = monthlyIncome > 0 ? (totalCommitted / monthlyIncome) * 100 : null;
 
     return {

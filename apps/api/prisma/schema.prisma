@@ -439,6 +439,11 @@ model RecurringRule {
   startDate   DateTime           @map("start_date") @db.Date
   endDate     DateTime?          @map("end_date") @db.Date
   isActive    Boolean            @default(true) @map("is_active")
+  /// Ultimo dia-calendario ja varrido pelo gerador de ocorrencias. Serve de
+  /// marca-d'agua para o backfill: dias <= este valor nunca sao reprocessados,
+  /// entao um lancamento que o usuario excluiu de vez nao volta na proxima
+  /// varredura. Null = regra nunca varrida (comeca do startDate).
+  lastGeneratedAt DateTime?      @map("last_generated_at") @db.Date
   createdAt   DateTime           @default(now()) @map("created_at")
   updatedAt   DateTime           @updatedAt @map("updated_at")
 

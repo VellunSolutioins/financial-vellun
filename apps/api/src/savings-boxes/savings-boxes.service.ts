@@ -3,7 +3,13 @@ import { Cron } from '@nestjs/schedule';
 import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
-import { parseDateOnly, todaySaoPaulo } from '../common/date.util';
+import {
+  calendarDayFromUtcDate,
+  dateOnlyString,
+  parseDateOnly,
+  todaySaoPaulo,
+  type CalendarDay,
+} from '../common/date.util';
 
 import { CreateSavingsBoxDto } from './dto/create-savings-box.dto';
 import { UpdateSavingsBoxDto } from './dto/update-savings-box.dto';
@@ -133,32 +139,69 @@ export class SavingsBoxesService {
     }
   }
 
-  /** Aplica o rendimento pendente. Sem `userId`, roda para todos (cron); com `userId`, só dele (endpoint manual). */
+  /**
+   * Aplica o rendimento do **período já fechado** imediatamente anterior a hoje
+   * (mês anterior, ou ano anterior quando a taxa é anual).
+   *
+   * Creditar o período corrente na primeira vez que o cron enxerga a caixinha
+   * pagava juros por tempo que ainda não passou: uma caixinha criada em 31/12
+   * com 10% ao ano recebia os 10% cheios em 01/01, e uma mensal criada no dia
+   * 30 recebia dois meses de juros em dois dias. Fechar o período resolve o
+   * "ainda não passou"; o pró-rata por dias de existência resolve o "existiu só
+   * um pedaço dele".
+   *
+   * Sem `userId`, roda para todos (cron); com `userId`, só dele (endpoint manual).
+   */
   async applyYield(userId?: string): Promise<{ applied: number }> {
     const today = todaySaoPaulo();
     const boxes = await this.prisma.savingsBox.findMany({
-      where: { yieldRate: { not: null }, yieldPeriod: { not: null }, ...(userId ? { userId } : {}) },
+      where: {
+        yieldRate: { not: null },
+        yieldPeriod: { not: null },
+        ...(userId ? { userId } : {}),
+      },
       include: { contributions: true },
     });
 
     let applied = 0;
     for (const box of boxes) {
-      const competence =
-        box.yieldPeriod === 'monthly'
-          ? `${today.year}-${String(today.monthIndex + 1).padStart(2, '0')}`
-          : `${today.year}`;
+      if (!box.yieldRate) continue;
 
-      const saved = box.contributions.reduce((sum, c) => sum + Number(c.amount), 0);
-      if (saved <= 0 || !box.yieldRate) continue;
+      const monthly = box.yieldPeriod === 'monthly';
+      const period = monthly ? previousMonth(today) : previousYear(today);
+      const competence = monthly ? competenceOf(period.start) : String(period.start.year);
 
-      const yieldAmount = saved * (Number(box.yieldRate) / 100);
+      const createdOn = calendarDayFromUtcDate(box.createdAt);
+      // Caixinha criada depois do fim do período não rendeu nada nele.
+      if (toUtcMillis(createdOn) > toUtcMillis(period.end)) continue;
+
+      // Só conta o que já estava guardado quando o período fechou — um aporte
+      // feito depois não pode render retroativamente.
+      const periodEndMillis = toUtcMillis(period.end);
+      const saved = box.contributions
+        .filter((c) => c.contributedAt.getTime() <= periodEndMillis)
+        .reduce((sum, c) => sum + Number(c.amount), 0);
+      if (saved <= 0) continue;
+
+      // Pró-rata: fração do período em que a caixinha existiu.
+      const periodDays = daysInclusive(period.start, period.end);
+      const accruingFrom =
+        toUtcMillis(createdOn) > toUtcMillis(period.start) ? createdOn : period.start;
+      const accruingDays = daysInclusive(accruingFrom, period.end);
+      const yieldAmount = saved * (Number(box.yieldRate) / 100) * (accruingDays / periodDays);
+      if (yieldAmount <= 0) continue;
+
+      const partial =
+        accruingDays < periodDays ? ` — proporcional a ${accruingDays}/${periodDays} dias` : '';
       try {
         await this.prisma.savingsContribution.create({
           data: {
             savingsBoxId: box.id,
             amount: yieldAmount,
-            contributedAt: parseDateOnly(`${today.year}-${String(today.monthIndex + 1).padStart(2, '0')}-${String(today.day).padStart(2, '0')}`),
-            note: `Rendimento (${box.yieldRate}% ${box.yieldPeriod === 'monthly' ? 'ao mês' : 'ao ano'})`,
+            // Creditado no dia em que o período fechou, não no dia em que o
+            // cron rodou — senão um backfill lançaria o juro com data errada.
+            contributedAt: parseDateOnly(dateOnlyString(period.end)),
+            note: `Rendimento ${competence} (${box.yieldRate}% ${monthly ? 'ao mês' : 'ao ano'})${partial}`,
             yieldCompetence: competence,
           },
         });
@@ -183,6 +226,39 @@ export class SavingsBoxesService {
 }
 
 function todayIso(): string {
-  const { year, monthIndex, day } = todaySaoPaulo();
-  return `${year}-${String(monthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  return dateOnlyString(todaySaoPaulo());
+}
+
+/** Instante de referência (meio-dia UTC) de um dia-calendário, para comparar datas. */
+function toUtcMillis(day: CalendarDay): number {
+  return Date.UTC(day.year, day.monthIndex, day.day, 12, 0, 0);
+}
+
+/** Quantidade de dias no intervalo `[from, to]`, incluindo as duas pontas. */
+function daysInclusive(from: CalendarDay, to: CalendarDay): number {
+  return Math.round((toUtcMillis(to) - toUtcMillis(from)) / 86_400_000) + 1;
+}
+
+/** Primeiro e último dia do mês anterior ao dia informado. */
+function previousMonth(today: CalendarDay): { start: CalendarDay; end: CalendarDay } {
+  const start = new Date(Date.UTC(today.year, today.monthIndex - 1, 1));
+  const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0));
+  return {
+    start: { year: start.getUTCFullYear(), monthIndex: start.getUTCMonth(), day: 1 },
+    end: { year: end.getUTCFullYear(), monthIndex: end.getUTCMonth(), day: end.getUTCDate() },
+  };
+}
+
+/** Primeiro e último dia do ano anterior ao dia informado. */
+function previousYear(today: CalendarDay): { start: CalendarDay; end: CalendarDay } {
+  const year = today.year - 1;
+  return {
+    start: { year, monthIndex: 0, day: 1 },
+    end: { year, monthIndex: 11, day: 31 },
+  };
+}
+
+/** Competência `"YYYY-MM"` de um dia-calendário. */
+function competenceOf(day: CalendarDay): string {
+  return `${day.year}-${String(day.monthIndex + 1).padStart(2, '0')}`;
 }

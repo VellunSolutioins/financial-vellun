@@ -50,7 +50,8 @@ export function SpendingGoalForm({ goal, existingCategoryIds, onSuccess, onCance
 
   useEffect(() => {
     apiClient
-      .get<{ id: string; name: string; type: string }[]>('/categories')
+      // Tela Pessoal — ver comentário em RecurringRuleForm sobre o filtro.
+      .get<{ id: string; name: string; type: string }[]>('/categories?profileType=individual')
       .then(setCategories)
       .catch(console.error);
   }, []);

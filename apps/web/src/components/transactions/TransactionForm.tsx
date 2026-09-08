@@ -90,11 +90,36 @@ export function TransactionForm({ transaction, defaultType, onSuccess, onCancel 
 
   const selectedType = watch('type');
   const selectedRecurrenceType = watch('recurrenceType');
+  const watchedAmount = watch('amount');
+  const watchedInstallments = watch('installments');
+
+  // Em "parcelado" o campo Valor é o TOTAL da compra e o backend reparte — a
+  // prévia existe pra ninguém digitar o valor da parcela por engano.
+  const isInstallment = !transaction && selectedRecurrenceType === 'parcelado';
+  const installmentPreview = (() => {
+    if (!isInstallment) return null;
+    const total = currencyToNumber(watchedAmount ?? '');
+    const count = Number(watchedInstallments);
+    if (!total || !Number.isInteger(count) || count < 2 || count > 72) return null;
+    // Espelha installmentAmounts() da API: base arredondada pra baixo, última
+    // parcela absorve a sobra de centavos.
+    const totalCents = Math.round(total * 100);
+    const baseCents = Math.floor(totalCents / count);
+    const lastCents = baseCents + (totalCents - baseCents * count);
+    const base = formatCurrencyInput(baseCents / 100);
+    const last = formatCurrencyInput(lastCents / 100);
+    return baseCents === lastCents
+      ? `${count}x de R$ ${base}`
+      : `${count - 1}x de R$ ${base} + última de R$ ${last}`;
+  })();
 
   useEffect(() => {
     Promise.all([
       apiClient.get<{ id: string; name: string }[]>('/accounts'),
-      apiClient.get<{ id: string; name: string; type: string }[]>('/categories'),
+      // Tela Pessoal — ver comentário em RecurringRuleForm sobre o filtro.
+      apiClient.get<{ id: string; name: string; type: string }[]>(
+        '/categories?profileType=individual',
+      ),
     ])
       .then(([acc, cat]) => {
         setAccounts(acc);
@@ -175,7 +200,7 @@ export function TransactionForm({ transaction, defaultType, onSuccess, onCancel 
         </div>
       </div>
       <div className="space-y-1">
-        <Label>Valor (R$)</Label>
+        <Label>{isInstallment ? 'Valor total da compra (R$)' : 'Valor (R$)'}</Label>
         <Input
           inputMode="decimal"
           placeholder="0,00"
@@ -250,6 +275,9 @@ export function TransactionForm({ transaction, defaultType, onSuccess, onCancel 
               />
               {errors.installments && (
                 <p className="text-xs text-destructive">{errors.installments.message}</p>
+              )}
+              {!errors.installments && installmentPreview && (
+                <p className="pt-1 text-xs text-muted-foreground">{installmentPreview}</p>
               )}
             </div>
           )}

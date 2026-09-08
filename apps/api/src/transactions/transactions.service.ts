@@ -131,11 +131,20 @@ export class TransactionsService {
 
     const seriesId = occurrences > 1 ? randomUUID() : null;
 
+    // Em "parcelado" o usuário informa o valor TOTAL da compra e o backend
+    // divide; em "fixo" o valor é o de cada ocorrência (uma mensalidade de
+    // R$ 200 por 12 meses são 12 lançamentos de R$ 200, não de R$ 16,67).
+    const amountFor =
+      recurrenceType === 'parcelado'
+        ? installmentAmounts(dto.amount, occurrences)
+        : () => dto.amount;
+
     const [firstTransaction] = await this.prisma.$transaction(
       Array.from({ length: occurrences }, (_, i) =>
         this.prisma.transaction.create({
           data: {
             ...baseData,
+            amount: amountFor(i),
             transactionDate: i === 0 ? firstDate : addMonthsUtc(firstDate, i),
             // A primeira ocorrência respeita o status escolhido; as futuras
             // nascem pendentes, já que ainda não aconteceram.
@@ -235,4 +244,19 @@ export class TransactionsService {
       }
     }
   }
+}
+
+/**
+ * Reparte um valor total em `count` parcelas de centavos exatos.
+ *
+ * Dividir e arredondar cada parcela isoladamente perde ou cria centavos
+ * (R$ 100,00 em 3x viraria 3 × 33,33 = 99,99). Aqui todas as parcelas ficam com
+ * o valor arredondado para baixo e a **última** absorve a sobra, então a soma
+ * bate com o total informado até o último centavo.
+ */
+export function installmentAmounts(total: number, count: number): (index: number) => number {
+  const totalCents = Math.round(total * 100);
+  const baseCents = Math.floor(totalCents / count);
+  const remainderCents = totalCents - baseCents * count;
+  return (index) => (index === count - 1 ? baseCents + remainderCents : baseCents) / 100;
 }

@@ -81,7 +81,11 @@ export function RecurringRuleForm({ rule, defaultType, onSuccess, onCancel }: Pr
   useEffect(() => {
     Promise.all([
       apiClient.get<{ id: string; name: string }[]>('/accounts'),
-      apiClient.get<{ id: string; name: string; type: string }[]>('/categories'),
+      // Recorrências só existem na área Pessoal — sem o filtro explícito, o
+      // dono de um plano Business recebe as categorias de Negócio aqui.
+      apiClient.get<{ id: string; name: string; type: string }[]>(
+        '/categories?profileType=individual',
+      ),
     ])
       .then(([acc, cat]) => {
         setAccounts(acc);
@@ -96,8 +100,10 @@ export function RecurringRuleForm({ rule, defaultType, onSuccess, onCancel }: Pr
       ...data,
       amount: currencyToNumber(data.amount),
       dueDay: Number(data.dueDay),
-      categoryId: data.categoryId || undefined,
-      endDate: data.endDate || undefined,
+      // null (não undefined) para os opcionais: JSON.stringify remove chaves com
+      // undefined, então limpar um campo na edição nunca chegaria ao backend.
+      categoryId: data.categoryId || null,
+      endDate: data.endDate || null,
     };
     try {
       if (rule) {

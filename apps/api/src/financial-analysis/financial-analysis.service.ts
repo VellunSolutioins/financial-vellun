@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.service';
-import { startOfMonthUtc, endOfMonthUtc } from '../common/date.util';
+import { startOfMonthUtc, endOfMonthUtc, todaySaoPaulo, type CalendarDay } from '../common/date.util';
 import { CreditCardsService } from '../credit-cards/credit-cards.service';
 import { SavingsBoxesService } from '../savings-boxes/savings-boxes.service';
 import { SpendingGoalsService } from '../spending-goals/spending-goals.service';
@@ -56,12 +56,16 @@ export class FinancialAnalysisService {
   ) {}
 
   async getScores(userId: string): Promise<ScoreResult[]> {
-    const now = new Date();
-    const curStart = startOfMonthUtc(now.getFullYear(), now.getMonth());
-    const curEnd = endOfMonthUtc(now.getFullYear(), now.getMonth());
+    // Mês corrente pelo calendário de São Paulo, não pelo relógio do processo:
+    // os lançamentos são gravados ao meio-dia UTC (parseDateOnly) e agrupados
+    // por mês UTC, então derivar o "mês atual" de getMonth()/getUTCMonth()
+    // fazia os dois lados discordarem nas primeiras horas de cada mês.
+    const today = todaySaoPaulo();
+    const curStart = startOfMonthUtc(today.year, today.monthIndex);
+    const curEnd = endOfMonthUtc(today.year, today.monthIndex);
 
     // Janela de 6 meses (mês atual + 5 anteriores), usada por vários scores.
-    const sixMonthsStart = startOfMonthUtc(now.getFullYear(), now.getMonth() - 5);
+    const sixMonthsStart = startOfMonthUtc(today.year, today.monthIndex - 5);
 
     const [
       accounts,
@@ -95,7 +99,7 @@ export class FinancialAnalysisService {
       this.remindersService.findAll(userId),
     ]);
 
-    const monthTotals = this.buildMonthTotals(transactions6m, now);
+    const monthTotals = this.buildMonthTotals(transactions6m, today);
     const currentMonth = monthTotals[monthTotals.length - 1];
     const income = currentMonth.income;
     const expense = currentMonth.expense;
@@ -110,7 +114,7 @@ export class FinancialAnalysisService {
 
     return [
       this.saudeFinanceira(income, expense),
-      this.investimento(income, contributions6m, boxes),
+      this.investimento(income, contributions6m, boxes, today),
       this.seguranca(monthTotals, boxes),
       this.credito(cards, income),
       this.controle(accounts.length, goals.length, categorizedRatio),
@@ -122,11 +126,11 @@ export class FinancialAnalysisService {
   /** Agrega receitas/despesas confirmadas por mês (últimos 6 meses, incluindo o atual). */
   private buildMonthTotals(
     transactions: { type: string; amount: unknown; transactionDate: Date }[],
-    now: Date,
+    today: CalendarDay,
   ): MonthTotals[] {
     const months: MonthTotals[] = [];
     for (let i = 5; i >= 0; i--) {
-      const ref = new Date(Date.UTC(now.getFullYear(), now.getMonth() - i, 1));
+      const ref = new Date(Date.UTC(today.year, today.monthIndex - i, 1));
       const key = `${ref.getUTCFullYear()}-${String(ref.getUTCMonth() + 1).padStart(2, '0')}`;
       months.push({ month: key, income: 0, expense: 0 });
     }
@@ -164,9 +168,9 @@ export class FinancialAnalysisService {
     income: number,
     contributions6m: { amount: unknown; contributedAt: Date; yieldCompetence: string | null }[],
     boxes: Awaited<ReturnType<SavingsBoxesService['findAll']>>,
+    today: CalendarDay,
   ): ScoreResult {
-    const now = new Date();
-    const curKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+    const curKey = `${today.year}-${String(today.monthIndex + 1).padStart(2, '0')}`;
     const contributedInMonth = contributions6m
       .filter((c) => `${c.contributedAt.getUTCFullYear()}-${String(c.contributedAt.getUTCMonth() + 1).padStart(2, '0')}` === curKey)
       .reduce((sum, c) => sum + Number(c.amount), 0);
@@ -175,7 +179,7 @@ export class FinancialAnalysisService {
 
     // Meses (últimos 3) com pelo menos um aporte manual (yieldCompetence null = não veio do rendimento automático).
     const last3Keys = [0, 1, 2].map((i) => {
-      const ref = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+      const ref = new Date(Date.UTC(today.year, today.monthIndex - i, 1));
       return `${ref.getUTCFullYear()}-${String(ref.getUTCMonth() + 1).padStart(2, '0')}`;
     });
     const monthsWithManualContribution = new Set(

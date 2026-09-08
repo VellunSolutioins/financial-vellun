@@ -26,8 +26,13 @@ export class RemindersService {
   /**
    * `month` (formato "YYYY-MM") filtra pelo mesmo padrão de abas de mês do
    * resto do app (ver monthLabel/monthRange em lancamentos/page.tsx). Lembretes
-   * recorrentes aparecem em todas as abas de mês (até `recurrenceEndDate`,
-   * se houver) — só os não recorrentes ficam restritos ao mês do vencimento.
+   * recorrentes aparecem de `dueDate` em diante (até `recurrenceEndDate`, se
+   * houver) — só os não recorrentes ficam restritos ao mês do vencimento.
+   *
+   * O piso em `dueDate` importa: sem ele o lembrete aparecia em meses
+   * anteriores ao próprio vencimento, e marcar como pago numa aba antiga
+   * empurrava a data real para frente, pulando um mês de verdade em silêncio
+   * (ver pay(), que "rola" o mesmo registro).
    */
   async findAll(userId: string, month?: string) {
     const reminders = await this.prisma.reminder.findMany({
@@ -43,11 +48,13 @@ export class RemindersService {
     if (!month) return mapped;
 
     return mapped.filter((r) => {
+      const dueMonth = r.dueDate.toISOString().slice(0, 7);
       if (r.isRecurrent) {
+        if (month < dueMonth) return false;
         if (!r.recurrenceEndDate) return true;
         return month <= r.recurrenceEndDate.toISOString().slice(0, 7);
       }
-      return r.dueDate.toISOString().slice(0, 7) === month;
+      return dueMonth === month;
     });
   }
 

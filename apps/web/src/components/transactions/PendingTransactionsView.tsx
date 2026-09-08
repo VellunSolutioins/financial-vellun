@@ -48,7 +48,10 @@ export function PendingTransactionsView({ type, title, actionLabel }: Props) {
 
   useEffect(() => {
     Promise.all([
-      apiClient.get<{ id: string; name: string; type: string }[]>('/categories'),
+      // Contas a pagar/receber vivem só na área Empresa.
+      apiClient.get<{ id: string; name: string; type: string }[]>(
+        '/categories?profileType=business',
+      ),
       apiClient.get<{ id: string; name: string }[]>('/accounts'),
     ])
       .then(([cat, acc]) => {

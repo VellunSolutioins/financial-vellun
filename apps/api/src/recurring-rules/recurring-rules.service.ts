@@ -3,17 +3,41 @@ import { Cron } from '@nestjs/schedule';
 import { Prisma, RecurringFrequency, RecurringRule } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
-import { parseDateOnly, todaySaoPaulo, subtractDaysSaoPaulo } from '../common/date.util';
+import {
+  addDaysSaoPaulo,
+  calendarDayFromUtcDate,
+  compareCalendarDays,
+  competenceString,
+  dateOnlyString,
+  daysBetweenCalendarDays,
+  maxCalendarDay,
+  parseDateOnly,
+  subtractDaysSaoPaulo,
+  todaySaoPaulo,
+} from '../common/date.util';
 
 import { CreateRecurringRuleDto } from './dto/create-recurring-rule.dto';
 import { UpdateRecurringRuleDto } from './dto/update-recurring-rule.dto';
 
-const FREQUENCY_STEP_MONTHS: Record<RecurringFrequency, number> = {
+export const FREQUENCY_STEP_MONTHS: Record<RecurringFrequency, number> = {
   monthly: 1,
   bimonthly: 2,
   semiannual: 6,
   annual: 12,
 };
+
+/**
+ * Valor mensal equivalente de uma regra. Somar o valor nominal de regras com
+ * frequências diferentes trata um seguro anual de R$ 2.400 como se fossem
+ * R$ 2.400 por mês — o que distorce o percentual de comprometimento e a faixa
+ * de saúde. Dividir pelo passo em meses coloca todas na mesma unidade.
+ */
+export function monthlyEquivalent(rule: {
+  amount: unknown;
+  frequency: RecurringFrequency;
+}): number {
+  return Number(rule.amount) / FREQUENCY_STEP_MONTHS[rule.frequency];
+}
 
 /** Faixas de comprometimento da receita com fixos (doc "Recorrências"). */
 const HEALTH_BANDS = [
@@ -78,12 +102,13 @@ export class RecurringRulesService {
       include: { category: true },
     });
 
+    // Tudo normalizado para o equivalente mensal — ver monthlyEquivalent().
     const income = rules
       .filter((r) => r.type === 'income')
-      .reduce((sum, r) => sum + Number(r.amount), 0);
+      .reduce((sum, r) => sum + monthlyEquivalent(r), 0);
     const committed = rules
       .filter((r) => r.type === 'expense')
-      .reduce((sum, r) => sum + Number(r.amount), 0);
+      .reduce((sum, r) => sum + monthlyEquivalent(r), 0);
 
     if (income <= 0) {
       return {
@@ -115,7 +140,7 @@ export class RecurringRulesService {
         color: rule.category?.color ?? null,
         total: 0,
       };
-      entry.total += Number(rule.amount);
+      entry.total += monthlyEquivalent(rule);
       byCategoryMap.set(key, entry);
     }
     const byCategory = [...byCategoryMap.values()]
@@ -185,28 +210,46 @@ export class RecurringRulesService {
   }
 
   /**
-   * Gera as ocorrências pendentes, varrendo uma janela para trás (padrão 7
-   * dias) além de hoje. Sem essa varredura, um cron perdido (deploy, container
-   * reiniciando, instância fora do ar) pula o vencimento em silêncio: no dia
-   * seguinte a regra não vence mais e não há caminho de recuperação. O
-   * `@@unique` (recurringRuleId, competenceMonth) torna o reprocessamento
-   * idempotente, então revarrer dias já gerados é seguro.
+   * Gera as ocorrências pendentes de cada regra, varrendo os dias ainda não
+   * processados (limitado a `lookbackDays`). Sem essa varredura, um cron
+   * perdido (deploy, container reiniciando, instância fora do ar) pula o
+   * vencimento em silêncio: no dia seguinte a regra não vence mais e não há
+   * caminho de recuperação.
+   *
+   * A janela de cada regra começa em `lastGeneratedAt + 1 dia`, e ao final a
+   * marca-d'água avança para hoje. É ela — e não o `@@unique`
+   * (recurringRuleId, competenceMonth) — que garante que um dia já varrido
+   * nunca é reprocessado: o índice único some junto com a linha quando o
+   * usuário exclui o lançamento de vez (`hard_delete=true`, o que a tela de
+   * Lançamentos sempre faz), e a varredura seguinte o recriaria.
+   *
    * Sem `userId`, roda para todos (uso do cron); com `userId`, só dele (endpoint manual).
    */
   async generateDue(userId?: string, lookbackDays = 7): Promise<{ created: number }> {
     const today = todaySaoPaulo();
+    const todayDate = parseDateOnly(dateOnlyString(today));
     const rules = await this.prisma.recurringRule.findMany({
       where: { isActive: true, ...(userId ? { userId } : {}) },
     });
 
     let created = 0;
-    for (let offset = lookbackDays; offset >= 0; offset--) {
-      const day = offset === 0 ? today : subtractDaysSaoPaulo(today, offset);
-      const competenceMonth = `${day.year}-${String(day.monthIndex + 1).padStart(2, '0')}`;
-      const dueDateOnly = `${competenceMonth}-${String(day.day).padStart(2, '0')}`;
+    for (const rule of rules) {
+      // Dias a varrer: do primeiro não processado até hoje, no máximo
+      // `lookbackDays` para trás (regra nova ou parada há meses não dispara
+      // uma enxurrada retroativa).
+      const oldestAllowed = subtractDaysSaoPaulo(today, lookbackDays);
+      const firstUnscanned = rule.lastGeneratedAt
+        ? addDaysSaoPaulo(calendarDayFromUtcDate(rule.lastGeneratedAt), 1)
+        : oldestAllowed;
+      const from = maxCalendarDay(firstUnscanned, oldestAllowed);
 
-      for (const rule of rules) {
+      for (let day = from; compareCalendarDays(day, today) <= 0; day = addDaysSaoPaulo(day, 1)) {
         if (!isRuleDueOn(rule, day)) continue;
+
+        const competenceMonth = competenceString(day);
+        const dueDateOnly = dateOnlyString(day);
+        const lateBy = daysBetweenCalendarDays(day, today);
+
         try {
           await this.prisma.transaction.create({
             data: {
@@ -228,19 +271,27 @@ export class RecurringRulesService {
             },
           });
           created += 1;
-          if (offset > 0) {
+          if (lateBy > 0) {
             this.logger.warn(
-              `Recorrência ${rule.id}: backfill de ${offset} dia(s) atrás (competência ${competenceMonth}) — sinal de que o cron falhou.`,
+              `Recorrência ${rule.id}: backfill de ${lateBy} dia(s) atrás (competência ${competenceMonth}) — sinal de que o cron falhou.`,
             );
           }
         } catch (error) {
-          // Já gerado nesse mês (corrida do cron / chamada manual duplicada) — idempotente, ignora.
+          // Segunda linha de defesa contra duplicata (duas instâncias do cron
+          // rodando ao mesmo tempo, ou chamada manual concorrente).
           if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
             continue;
           }
           throw error;
         }
       }
+
+      // Avança a marca-d'água mesmo quando nada foi gerado: o que importa é
+      // que os dias até hoje já foram avaliados.
+      await this.prisma.recurringRule.update({
+        where: { id: rule.id },
+        data: { lastGeneratedAt: todayDate },
+      });
     }
     return { created };
   }

@@ -18,7 +18,12 @@ export class CreateTransactionDto {
   @IsEnum(TransactionType)
   type!: TransactionType;
 
-  @ApiProperty()
+  @ApiProperty({
+    description:
+      'Em `avulso` e `fixo`, o valor de cada lançamento. Em `parcelado`, o valor ' +
+      'TOTAL da compra — o backend divide por `installments` e a última parcela ' +
+      'absorve os centavos da sobra.',
+  })
   @Type(() => Number)
   @IsNumber()
   @IsPositive()

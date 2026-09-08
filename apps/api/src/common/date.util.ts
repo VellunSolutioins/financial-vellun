@@ -67,14 +67,53 @@ export function todaySaoPaulo(): { year: number; monthIndex: number; day: number
   return { year: get('year'), monthIndex: get('month') - 1, day: get('day') };
 }
 
-/** Subtrai `days` dias de um dia-calendário (opera em meio-dia UTC, independe de fuso). */
-export function subtractDaysSaoPaulo(
-  date: { year: number; monthIndex: number; day: number },
-  days: number,
-): { year: number; monthIndex: number; day: number } {
+/** Dia-calendário puro, sem horário nem fuso — a unidade com que o app raciocina. */
+export type CalendarDay = { year: number; monthIndex: number; day: number };
+
+/** Soma `days` dias a um dia-calendário (opera em meio-dia UTC, independe de fuso). */
+export function addDaysSaoPaulo(date: CalendarDay, days: number): CalendarDay {
   const d = new Date(Date.UTC(date.year, date.monthIndex, date.day, 12, 0, 0));
-  d.setUTCDate(d.getUTCDate() - days);
+  d.setUTCDate(d.getUTCDate() + days);
   return { year: d.getUTCFullYear(), monthIndex: d.getUTCMonth(), day: d.getUTCDate() };
+}
+
+/** Subtrai `days` dias de um dia-calendário (opera em meio-dia UTC, independe de fuso). */
+export function subtractDaysSaoPaulo(date: CalendarDay, days: number): CalendarDay {
+  return addDaysSaoPaulo(date, -days);
+}
+
+/** Serializa um dia-calendário como `"YYYY-MM-DD"`. */
+export function dateOnlyString(date: CalendarDay): string {
+  return `${date.year}-${String(date.monthIndex + 1).padStart(2, '0')}-${String(date.day).padStart(2, '0')}`;
+}
+
+/** Serializa a competência (`"YYYY-MM"`) de um dia-calendário. */
+export function competenceString(date: CalendarDay): string {
+  return `${date.year}-${String(date.monthIndex + 1).padStart(2, '0')}`;
+}
+
+/**
+ * Converte uma coluna `@db.Date` do Prisma (meia-noite UTC) no dia-calendário
+ * que ela representa. Ler os componentes em UTC é obrigatório: `getDate()` cru
+ * devolveria o dia anterior em qualquer fuso negativo.
+ */
+export function calendarDayFromUtcDate(date: Date): CalendarDay {
+  return { year: date.getUTCFullYear(), monthIndex: date.getUTCMonth(), day: date.getUTCDate() };
+}
+
+/** Ordena dois dias-calendário: negativo se `a` vem antes de `b`, 0 se iguais. */
+export function compareCalendarDays(a: CalendarDay, b: CalendarDay): number {
+  return Date.UTC(a.year, a.monthIndex, a.day, 12) - Date.UTC(b.year, b.monthIndex, b.day, 12);
+}
+
+/** O mais recente entre dois dias-calendário. */
+export function maxCalendarDay(a: CalendarDay, b: CalendarDay): CalendarDay {
+  return compareCalendarDays(a, b) >= 0 ? a : b;
+}
+
+/** Dias inteiros de `from` até `to` (negativo se `to` vem antes). */
+export function daysBetweenCalendarDays(from: CalendarDay, to: CalendarDay): number {
+  return Math.round(compareCalendarDays(to, from) / 86_400_000);
 }
 
 /**
