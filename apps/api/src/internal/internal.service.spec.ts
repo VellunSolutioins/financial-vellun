@@ -26,6 +26,8 @@ function createPrismaMock() {
   };
   // `$transaction(fn)` executa o callback com o próprio mock como client.
   mock.$transaction = jest.fn(async (fn: any) => fn(mock));
+  // `SELECT ... FOR UPDATE` que serializa a criação da conversa por contato.
+  mock.$queryRaw = jest.fn().mockResolvedValue([]);
   return mock;
 }
 
@@ -231,6 +233,82 @@ describe('InternalService', () => {
         where: { id: 'ext1' },
         data: { transactionId: 't1', status: 'confirmed' },
       });
+    });
+  });
+
+  describe('recordEvent (message) — concorrência', () => {
+    const dto = {
+      eventType: 'message',
+      phone: '+5541999999999',
+      direction: 'inbound',
+      content: 'gastei 50',
+    } as any;
+
+    it('trata corrida ao criar o contato (P2002) em vez de estourar 500', async () => {
+      // `upsert` não é atômico: duas primeiras mensagens do mesmo número
+      // chegando juntas faziam as duas tentarem o INSERT.
+      prisma.whatsappContact.upsert.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('unique', {
+          code: 'P2002',
+          clientVersion: '5',
+        }),
+      );
+      prisma.whatsappContact.findUnique.mockResolvedValue({ id: 'contact1', userId: 'u1' });
+      prisma.aiConversation.findFirst.mockResolvedValue({ id: 'conv1' });
+      prisma.aiConversation.update.mockResolvedValue({ id: 'conv1' });
+      prisma.aiMessage.create.mockResolvedValue({ id: 'msg1', conversationId: 'conv1' });
+
+      const result = await service.recordEvent(dto);
+
+      expect(result).toEqual({ id: 'msg1', conversationId: 'conv1' });
+      expect(prisma.whatsappContact.findUnique).toHaveBeenCalledWith({
+        where: { phoneNumber: '+5541999999999' },
+      });
+    });
+
+    it('propaga erro que não seja corrida no unique do contato', async () => {
+      prisma.whatsappContact.upsert.mockRejectedValue(new Error('banco fora'));
+
+      await expect(service.recordEvent(dto)).rejects.toThrow('banco fora');
+    });
+
+    it('resolve a conversa travando a linha do contato', async () => {
+      // Sem a trava, dois requests concorrentes criavam duas conversas ativas
+      // e o histórico da IA ficava partido entre elas.
+      prisma.whatsappContact.upsert.mockResolvedValue({ id: 'contact1', userId: 'u1' });
+      prisma.aiConversation.findFirst.mockResolvedValue(null);
+      prisma.aiConversation.create.mockResolvedValue({ id: 'conv1' });
+      prisma.aiMessage.create.mockResolvedValue({ id: 'msg1', conversationId: 'conv1' });
+
+      await service.recordEvent(dto);
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+      const [fragmentos, ...valores] = prisma.$queryRaw.mock.calls[0];
+      expect(fragmentos.join('?')).toContain('FOR UPDATE');
+      expect(valores).toEqual(['contact1']); // parametrizado, não interpolado
+    });
+
+    it('trava antes de decidir se cria a conversa', async () => {
+      const ordem: string[] = [];
+      prisma.whatsappContact.upsert.mockResolvedValue({ id: 'contact1', userId: 'u1' });
+      prisma.$queryRaw.mockImplementation(async () => {
+        ordem.push('lock');
+        return [];
+      });
+      prisma.aiConversation.findFirst.mockImplementation(async () => {
+        ordem.push('findFirst');
+        return null;
+      });
+      prisma.aiConversation.create.mockImplementation(async () => {
+        ordem.push('create');
+        return { id: 'conv1' };
+      });
+      prisma.aiMessage.create.mockResolvedValue({ id: 'msg1', conversationId: 'conv1' });
+
+      await service.recordEvent(dto);
+
+      expect(ordem).toEqual(['lock', 'findFirst', 'create']);
     });
   });
 

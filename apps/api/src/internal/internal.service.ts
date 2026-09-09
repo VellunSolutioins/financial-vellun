@@ -248,32 +248,8 @@ export class InternalService {
       }
     }
 
-    const contact = await this.prisma.whatsappContact.upsert({
-      where: { phoneNumber: normalizePhone(dto.phone) },
-      update: {},
-      create: { phoneNumber: normalizePhone(dto.phone) },
-    });
-
-    let conversation = await this.prisma.aiConversation.findFirst({
-      where: { whatsappContactId: contact.id, status: 'active' },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    if (!conversation) {
-      conversation = await this.prisma.aiConversation.create({
-        data: {
-          whatsappContactId: contact.id,
-          userId: contact.userId,
-          status: 'active',
-          lastMessageAt: new Date(),
-        },
-      });
-    } else {
-      await this.prisma.aiConversation.update({
-        where: { id: conversation.id },
-        data: { lastMessageAt: new Date() },
-      });
-    }
+    const contact = await this.ensureContact(normalizePhone(dto.phone));
+    const conversation = await this.resolveActiveConversation(contact);
 
     try {
       const message = await this.prisma.aiMessage.create({
@@ -303,6 +279,78 @@ export class InternalService {
       }
       throw err;
     }
+  }
+
+  /**
+   * Contato do telefone, criando se ainda não existe.
+   *
+   * `upsert` não é atômico contra inserts concorrentes: duas primeiras
+   * mensagens do mesmo número chegando juntas faziam as duas tentarem o INSERT,
+   * e uma estourava `P2002` — que virava `500`. Com o processamento por filas
+   * isso passou a ser a norma, não a exceção.
+   */
+  private async ensureContact(phoneNumber: string) {
+    try {
+      return await this.prisma.whatsappContact.upsert({
+        where: { phoneNumber },
+        update: {},
+        create: { phoneNumber },
+      });
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        const existing = await this.prisma.whatsappContact.findUnique({
+          where: { phoneNumber },
+        });
+        if (existing) return existing;
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Conversa ativa do contato, criando se ainda não existe.
+   *
+   * O `findFirst` seguido de `create` deixava duas mensagens concorrentes
+   * criarem **duas** conversas ativas para o mesmo contato. Não dava erro
+   * nenhum, e o estrago era silencioso: `listRecentMessagesByPhone` devolve só
+   * a conversa ativa mais recente, então o histórico que alimenta a IA ficava
+   * partido entre elas.
+   *
+   * Serializamos travando a linha do contato — quem chega junto espera, lê a
+   * conversa que o primeiro criou e a reaproveita. Contatos diferentes não se
+   * bloqueiam.
+   *
+   * Um índice único parcial (`WHERE status = 'active'`) diria isso de forma
+   * declarativa, mas o Prisma não expressa índice parcial no schema, e um
+   * índice criado só em SQL aparece como drift na próxima `prisma migrate dev`
+   * — que geraria uma migration para removê-lo.
+   */
+  private resolveActiveConversation(contact: { id: string; userId: string | null }) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM whatsapp_contacts WHERE id = ${contact.id} FOR UPDATE`;
+
+      const existing = await tx.aiConversation.findFirst({
+        where: { whatsappContactId: contact.id, status: 'active' },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      if (existing) {
+        await tx.aiConversation.update({
+          where: { id: existing.id },
+          data: { lastMessageAt: new Date() },
+        });
+        return existing;
+      }
+
+      return tx.aiConversation.create({
+        data: {
+          whatsappContactId: contact.id,
+          userId: contact.userId,
+          status: 'active',
+          lastMessageAt: new Date(),
+        },
+      });
+    });
   }
 
   private async recordExtraction(dto: AiEventDto) {
