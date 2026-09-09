@@ -12,7 +12,23 @@ import json
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 
+from ..config import settings
 from ..messaging.contracts import utcnow
+
+
+def due_at(now: float, first_at: float, length: int) -> float:
+    """Quando o grupo deve ser consolidado.
+
+    Imediato ao atingir o limite de mensagens; senao, ``now + debounce``, nunca
+    passando de ``first_at + idade maxima``. O teto conta da **primeira**
+    mensagem do grupo, entao um fluxo continuo nao adia o flush para sempre.
+    """
+    if length >= settings.message_buffer_max_messages:
+        return now
+    return min(
+        now + settings.message_buffer_debounce_seconds,
+        first_at + settings.message_buffer_max_age_seconds,
+    )
 
 
 @dataclass
@@ -47,12 +63,25 @@ class GroupStore(ABC):
         """Telefones cujo debounce venceu."""
 
     @abstractmethod
-    async def peek(self, phone: str) -> list[GroupEntry]:
-        """Le o grupo **sem** remover (so limpamos apos o confirm da publicacao)."""
+    async def peek(self, phone: str, limit: int | None = None) -> list[GroupEntry]:
+        """Le as primeiras ``limit`` mensagens **sem** remover.
+
+        Nao remove porque a limpeza so pode acontecer depois do confirm da
+        publicacao: melhor republicar (o job e deduplicado) do que perder.
+        """
+
+    @abstractmethod
+    async def consume(self, phone: str, count: int) -> int:
+        """Descarta as ``count`` primeiras mensagens, ja publicadas.
+
+        Devolve quantas restaram. Se sobrou alguma, o telefone e reagendado com
+        a mesma regra do ``append`` — o excedente vira o proximo grupo em vez de
+        engordar o atual.
+        """
 
     @abstractmethod
     async def clear(self, phone: str) -> None:
-        """Remove o grupo e o agendamento."""
+        """Remove o grupo inteiro e o agendamento."""
 
     @abstractmethod
     async def acquire_lock(self, phone: str, ttl_seconds: int) -> bool:

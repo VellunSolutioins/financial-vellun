@@ -380,13 +380,15 @@ def veredito(
     checagens.append(("nenhum 503 (falha de publicação)", results.statuses.get(503, 0) == 0, ""))
     checagens.append(("nenhum erro de conexão", results.statuses.get(0, 0) == 0, ""))
 
+    # O aquecimento também bate no endpoint, então entra na conta do servidor.
+    enviados = args.total + args.warmup
     recebidos = delta.get("webhook_received", 0)
     checagens.append(
-        ("webhook contabilizou todos", recebidos == args.total, f"{recebidos}/{args.total}")
+        ("webhook contabilizou todos", recebidos == enviados, f"{recebidos}/{enviados}")
     )
 
     confirmadas = delta.get("publish_confirmed", 0)
-    esperadas = results.published
+    esperadas = results.published + args.warmup * max(args.batch, 1)
     checagens.append(
         ("publicações confirmadas", confirmadas == esperadas, f"{confirmadas}/{esperadas}")
     )

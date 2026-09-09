@@ -8,8 +8,7 @@ from __future__ import annotations
 
 import time
 
-from ..config import settings
-from .base import GroupEntry, GroupStore
+from .base import GroupEntry, GroupStore, due_at
 
 
 class InMemoryGroupStore(GroupStore):
@@ -25,20 +24,29 @@ class InMemoryGroupStore(GroupStore):
         entries.append(entry)
         self._first.setdefault(phone, now)
 
-        max_due = self._first[phone] + settings.message_buffer_max_age_seconds
-        if len(entries) >= settings.message_buffer_max_messages:
-            due = now
-        else:
-            due = min(now + settings.message_buffer_debounce_seconds, max_due)
-        self._due[phone] = due
+        self._due[phone] = due_at(now, self._first[phone], len(entries))
         return len(entries)
 
     async def due_phones(self) -> list[str]:
         now = time.time()
         return [phone for phone, due in sorted(self._due.items()) if due <= now]
 
-    async def peek(self, phone: str) -> list[GroupEntry]:
-        return list(self._buffers.get(phone, []))
+    async def peek(self, phone: str, limit: int | None = None) -> list[GroupEntry]:
+        entries = self._buffers.get(phone, [])
+        return list(entries if limit is None else entries[:limit])
+
+    async def consume(self, phone: str, count: int) -> int:
+        now = time.time()
+        restantes = self._buffers.get(phone, [])[count:]
+        if not restantes:
+            await self.clear(phone)
+            return 0
+
+        # O excedente vira um grupo novo: o teto de idade passa a contar daqui.
+        self._buffers[phone] = restantes
+        self._first[phone] = now
+        self._due[phone] = due_at(now, now, len(restantes))
+        return len(restantes)
 
     async def clear(self, phone: str) -> None:
         self._buffers.pop(phone, None)

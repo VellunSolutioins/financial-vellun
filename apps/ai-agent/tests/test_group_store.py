@@ -160,3 +160,105 @@ async def test_grupo_vazio_apenas_limpa_o_agendamento(broker):
 
     assert await worker.tick() == 0
     assert await store.due_phones() == []
+
+
+# ── Fatiamento no limite de mensagens ────────────────────────────────────────
+async def test_rajada_e_fatiada_no_limite_de_mensagens(broker, group_store, monkeypatch):
+    """Regressão: o limite marcava o grupo como vencido mas não o cortava, e
+    uma rajada virava um único job gigante."""
+    monkeypatch.setattr(settings, "message_buffer_max_messages", 10)
+    worker = GroupFlusherWorker(group_store, InMemoryPublisher(broker))
+
+    for index in range(1, 26):
+        await group_store.append(PHONE, entry(f"msg{index}", index))
+
+    # Duas fatias cheias; as 5 restantes voltam a esperar o debounce.
+    assert await worker.tick() == 2
+
+    jobs = [ProcessingJobV1.model_validate_json(m.body) for m in broker.published[ROUTE_PROCESSING]]
+    assert [len(job.source_message_ids) for job in jobs] == [10, 10]
+    assert jobs[0].combined_message.split() == [f"msg{i}" for i in range(1, 11)]
+    assert jobs[1].combined_message.split() == [f"msg{i}" for i in range(11, 21)]
+
+    restantes = await group_store.peek(PHONE)
+    assert [e.text for e in restantes] == [f"msg{i}" for i in range(21, 26)]
+
+
+async def test_fatias_nao_perdem_nem_duplicam_mensagem(broker, group_store, monkeypatch):
+    monkeypatch.setattr(settings, "message_buffer_max_messages", 4)
+    monkeypatch.setattr(settings, "message_buffer_debounce_seconds", 0)
+    worker = GroupFlusherWorker(group_store, InMemoryPublisher(broker))
+
+    for index in range(1, 15):
+        await group_store.append(PHONE, entry(f"msg{index}", index))
+
+    # Ticks sucessivos até drenar (o resto abaixo do limite espera o debounce).
+    for _ in range(5):
+        group_store.force_due(PHONE)
+        await worker.tick()
+
+    jobs = [ProcessingJobV1.model_validate_json(m.body) for m in broker.published[ROUTE_PROCESSING]]
+    entregues = [msg_id for job in jobs for msg_id in job.source_message_ids]
+
+    assert entregues == [f"ai-{i}" for i in range(1, 15)]  # ordem, sem buraco
+    assert len(entregues) == len(set(entregues))  # sem duplicata
+    assert await group_store.peek(PHONE) == []
+
+
+async def test_fatia_republicada_apos_crash_mantem_o_mesmo_job_id(broker, group_store, monkeypatch):
+    """Crash entre o confirm e o descarte republica a **mesma** fatia."""
+    monkeypatch.setattr(settings, "message_buffer_max_messages", 3)
+    worker = GroupFlusherWorker(group_store, InMemoryPublisher(broker))
+
+    for index in range(1, 7):
+        await group_store.append(PHONE, entry(f"msg{index}", index))
+
+    primeira = build_job(PHONE, await group_store.peek(PHONE, limit=3))
+    await worker.tick()
+
+    jobs = [ProcessingJobV1.model_validate_json(m.body) for m in broker.published[ROUTE_PROCESSING]]
+    assert jobs[0].job_id == primeira.job_id
+    # Fatias distintas nunca colidem.
+    assert jobs[0].job_id != jobs[1].job_id
+
+
+async def test_limite_de_fatias_por_tick_adia_o_resto(broker, group_store, monkeypatch):
+    """Um backlog enorme não pode segurar o lock além do TTL."""
+    from src.grouping.flusher import MAX_SLICES_PER_TICK
+
+    monkeypatch.setattr(settings, "message_buffer_max_messages", 2)
+    worker = GroupFlusherWorker(group_store, InMemoryPublisher(broker))
+
+    for index in range(1, 2 * MAX_SLICES_PER_TICK + 11):
+        await group_store.append(PHONE, entry(f"msg{index}", index))
+
+    assert await worker.tick() == MAX_SLICES_PER_TICK
+    assert await group_store.peek(PHONE) != []  # o resto ficou para o próximo tick
+
+
+# ── peek/consume ─────────────────────────────────────────────────────────────
+async def test_peek_com_limite_le_apenas_o_prefixo(group_store):
+    for index in range(1, 6):
+        await group_store.append(PHONE, entry(f"msg{index}", index))
+
+    assert [e.text for e in await group_store.peek(PHONE, limit=2)] == ["msg1", "msg2"]
+    assert len(await group_store.peek(PHONE)) == 5
+
+
+async def test_consume_descarta_o_prefixo_e_reagenda(group_store):
+    for index in range(1, 6):
+        await group_store.append(PHONE, entry(f"msg{index}", index))
+
+    restantes = await group_store.consume(PHONE, 2)
+
+    assert restantes == 3
+    assert [e.text for e in await group_store.peek(PHONE)] == ["msg3", "msg4", "msg5"]
+    assert PHONE in group_store._due  # continua agendado
+
+
+async def test_consume_de_tudo_limpa_o_agendamento(group_store):
+    await group_store.append(PHONE, entry("msg1", 1))
+
+    assert await group_store.consume(PHONE, 1) == 0
+    assert await group_store.peek(PHONE) == []
+    assert await group_store.due_phones() == []

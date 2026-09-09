@@ -268,3 +268,31 @@ async def test_lock_de_processamento_e_marcador_de_job_no_redis(redis_client):
     await store.mark(marker, 30)
     assert await store.exists(marker) is True
     await store.release(marker)
+
+
+async def test_fatiamento_do_grupo_no_redis(redis_client):
+    """`peek(limit)` + `consume` usam LRANGE/LTRIM de verdade."""
+    from src.config import settings
+    from src.grouping import GroupEntry
+    from src.grouping.redis_store import DUE_KEY, RedisGroupStore
+    from src.services.redis_client import RedisProvider
+
+    phone = "+5541900000004"
+    store = RedisGroupStore(RedisProvider(REDIS_URL))
+    await store.clear(phone)
+
+    for index in range(1, 13):
+        await store.append(phone, GroupEntry(text=f"msg{index}", ai_message_id=f"ai-{index}"))
+
+    fatia = await store.peek(phone, limit=settings.message_buffer_max_messages)
+    assert [e.text for e in fatia] == [f"msg{i}" for i in range(1, 11)]
+
+    restantes = await store.consume(phone, len(fatia))
+    assert restantes == 2
+    assert [e.text for e in await store.peek(phone)] == ["msg11", "msg12"]
+    # Continua agendado, com o teto de idade contando do novo inicio.
+    assert await redis_client.zscore(DUE_KEY, phone) is not None
+
+    assert await store.consume(phone, 2) == 0
+    assert await store.peek(phone) == []
+    assert await redis_client.zscore(DUE_KEY, phone) is None

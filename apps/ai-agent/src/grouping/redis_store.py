@@ -17,9 +17,8 @@ from __future__ import annotations
 import logging
 import time
 
-from ..config import settings
 from ..services.redis_client import RedisProvider, redis_provider
-from .base import GroupEntry, GroupStore
+from .base import GroupEntry, GroupStore, due_at as _due_at
 
 logger = logging.getLogger(__name__)
 
@@ -52,23 +51,37 @@ class RedisGroupStore(GroupStore):
         first = await client.get(_first_key(phone))
         first_at = float(first) if first is not None else now
 
-        max_due = first_at + settings.message_buffer_max_age_seconds
-        if length >= settings.message_buffer_max_messages:
-            due = now  # flush imediato ao atingir o limite de mensagens
-        else:
-            due = min(now + settings.message_buffer_debounce_seconds, max_due)
-
-        await client.zadd(DUE_KEY, {phone: due})
+        await client.zadd(DUE_KEY, {phone: _due_at(now, first_at, int(length))})
         return int(length)
 
     async def due_phones(self) -> list[str]:
         client = await self._provider.client()
         return list(await client.zrangebyscore(DUE_KEY, "-inf", time.time()))
 
-    async def peek(self, phone: str) -> list[GroupEntry]:
+    async def peek(self, phone: str, limit: int | None = None) -> list[GroupEntry]:
         client = await self._provider.client()
-        raw = await client.lrange(_buffer_key(phone), 0, -1)
+        fim = -1 if limit is None else limit - 1
+        raw = await client.lrange(_buffer_key(phone), 0, fim)
         return [GroupEntry.from_json(item) for item in raw]
+
+    async def consume(self, phone: str, count: int) -> int:
+        client = await self._provider.client()
+        now = time.time()
+
+        async with client.pipeline(transaction=True) as pipe:
+            pipe.ltrim(_buffer_key(phone), count, -1)
+            pipe.llen(_buffer_key(phone))
+            _, restantes = await pipe.execute()
+
+        restantes = int(restantes)
+        if restantes <= 0:
+            await self.clear(phone)
+            return 0
+
+        # O excedente vira um grupo novo: o teto de idade passa a contar daqui.
+        await client.set(_first_key(phone), now)
+        await client.zadd(DUE_KEY, {phone: _due_at(now, now, restantes)})
+        return restantes
 
     async def clear(self, phone: str) -> None:
         client = await self._provider.client()

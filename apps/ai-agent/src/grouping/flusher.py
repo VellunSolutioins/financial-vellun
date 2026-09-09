@@ -28,6 +28,11 @@ from .base import GroupEntry, GroupStore
 
 logger = logging.getLogger(__name__)
 
+#: Fatias publicadas por telefone em um unico tick. Limita o trabalho feito com
+#: o lock na mao — um backlog grande e drenado ao longo de varios ticks, em vez
+#: de segurar o lock alem do TTL.
+MAX_SLICES_PER_TICK = 10
+
 
 def build_job(phone: str, entries: list[GroupEntry]) -> ProcessingJobV1:
     """Consolida as mensagens do grupo, na ordem de recebimento."""
@@ -95,39 +100,60 @@ class GroupFlusherWorker:
             await asyncio.sleep(settings.worker_poll_interval_seconds)
 
     async def tick(self) -> int:
-        """Consolida todos os grupos vencidos. Retorna quantos foram publicados."""
+        """Consolida todos os grupos vencidos. Retorna quantos jobs publicou."""
         published = 0
         for phone in await self._store.due_phones():
-            if await self._flush_phone(phone):
-                published += 1
+            published += await self._flush_phone(phone)
         return published
 
-    async def _flush_phone(self, phone: str) -> bool:
+    async def _flush_phone(self, phone: str) -> int:
+        """Consolida o telefone em fatias. Devolve quantos jobs publicou."""
         if not await self._store.acquire_lock(phone, settings.redis_lock_ttl_seconds):
             # Outra instancia ja esta consolidando este telefone.
-            return False
-        try:
-            entries = await self._store.peek(phone)
-            if not entries:
-                await self._store.clear(phone)
-                return False
+            return 0
 
-            job = build_job(phone, entries)
-            with log_context(correlation_id=job.correlation_id, job_id=job.job_id, phone=phone):
-                await self._publisher.publish(
-                    ROUTE_PROCESSING, job, correlation_id=job.correlation_id
+        publicados = 0
+        try:
+            for _ in range(MAX_SLICES_PER_TICK):
+                entries = await self._store.peek(
+                    phone, limit=settings.message_buffer_max_messages
                 )
-                # Publicacao confirmada: agora e seguro limpar o buffer.
-                await self._store.clear(phone)
-                metrics.incr("group_flushed")
-                metrics.incr("jobs_published")
-                logger.info(
-                    "Grupo consolidado e publicado (%d mensagem(ns))", len(entries)
+                if not entries:
+                    await self._store.clear(phone)
+                    break
+
+                job = build_job(phone, entries)
+                with log_context(
+                    correlation_id=job.correlation_id, job_id=job.job_id, phone=phone
+                ):
+                    await self._publisher.publish(
+                        ROUTE_PROCESSING, job, correlation_id=job.correlation_id
+                    )
+                    # Publicacao confirmada: so agora e seguro descartar a fatia.
+                    restantes = await self._store.consume(phone, len(entries))
+                    metrics.incr("group_flushed")
+                    metrics.incr("jobs_published")
+                    logger.info(
+                        "Grupo consolidado e publicado (%d mensagem(ns), %d na fila)",
+                        len(entries),
+                        restantes,
+                    )
+                publicados += 1
+                # Sobra abaixo do limite volta a esperar o debounce: pode ser
+                # que o usuario ainda esteja digitando o resto da frase.
+                if restantes < settings.message_buffer_max_messages:
+                    break
+            else:
+                # Saiu pelo limite de fatias: o resto fica para o proximo tick,
+                # para nao segurar o lock alem do TTL.
+                logger.warning(
+                    "Limite de %d fatias por tick atingido; restante adiado",
+                    MAX_SLICES_PER_TICK,
                 )
-            return True
+            return publicados
         except Exception:
             metrics.incr("group_flush_failed")
             logger.exception("Falha ao consolidar grupo; buffer preservado para retry")
-            return False
+            return publicados
         finally:
             await self._store.release_lock(phone)
