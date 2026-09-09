@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import time
 
-from .base import GroupEntry, GroupStore, due_at
+from .base import AppendResult, GroupEntry, GroupStore, due_at
 
 
 class InMemoryGroupStore(GroupStore):
@@ -18,14 +18,21 @@ class InMemoryGroupStore(GroupStore):
         self._due: dict[str, float] = {}
         self._locks: dict[str, float] = {}
 
-    async def append(self, phone: str, entry: GroupEntry) -> int:
+    async def append(self, phone: str, entry: GroupEntry) -> AppendResult:
         now = time.time()
         entries = self._buffers.setdefault(phone, [])
+
+        if entry.provider_message_id is not None and any(
+            existing.provider_message_id == entry.provider_message_id
+            for existing in entries
+        ):
+            return AppendResult(length=len(entries), added=False)
+
         entries.append(entry)
         self._first.setdefault(phone, now)
 
         self._due[phone] = due_at(now, self._first[phone], len(entries))
-        return len(entries)
+        return AppendResult(length=len(entries), added=True)
 
     async def due_phones(self) -> list[str]:
         now = time.time()

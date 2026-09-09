@@ -61,6 +61,20 @@ async def test_telefones_diferentes_sao_isolados(group_store):
     assert len(await group_store.peek("+5511888887777")) == 1
 
 
+async def test_append_e_idempotente_por_provider_message_id(group_store):
+    """O append pode ser chamado de novo no retry sem duplicar no grupo."""
+    primeiro = await group_store.append(PHONE, entry("gastei 10", 1))
+    repetido = await group_store.append(PHONE, entry("gastei 10", 1))
+
+    assert (primeiro.length, primeiro.added) == (1, True)
+    assert (repetido.length, repetido.added) == (1, False)
+    assert len(await group_store.peek(PHONE)) == 1
+
+    # Sem providerMessageId não há como deduplicar; entra como mensagem nova.
+    sem_id = await group_store.append(PHONE, GroupEntry(text="e mais 5"))
+    assert (sem_id.length, sem_id.added) == (2, True)
+
+
 async def test_limite_de_mensagens_vence_o_debounce_na_hora(group_store, monkeypatch):
     monkeypatch.setattr(settings, "message_buffer_max_messages", 3)
 

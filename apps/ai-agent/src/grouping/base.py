@@ -31,6 +31,19 @@ def due_at(now: float, first_at: float, length: int) -> float:
     )
 
 
+@dataclass(frozen=True)
+class AppendResult:
+    """Resultado de :meth:`GroupStore.append`.
+
+    ``added`` e ``False`` quando a mensagem ja estava no grupo (mesmo
+    ``providerMessageId``) — o append e idempotente, entao o retry de uma
+    entrega que falhou **depois** de agrupar nao duplica a mensagem no grupo.
+    """
+
+    length: int
+    added: bool
+
+
 @dataclass
 class GroupEntry:
     """Uma mensagem ja persistida, aguardando consolidacao."""
@@ -55,8 +68,15 @@ class GroupStore(ABC):
     """Buffer por telefone com agendamento de flush e exclusao mutua."""
 
     @abstractmethod
-    async def append(self, phone: str, entry: GroupEntry) -> int:
-        """Adiciona a mensagem e (re)agenda o flush. Retorna o tamanho do grupo."""
+    async def append(self, phone: str, entry: GroupEntry) -> AppendResult:
+        """Adiciona a mensagem e (re)agenda o flush.
+
+        **Idempotente por ``providerMessageId`` dentro do grupo**: se a mensagem
+        ja esta no buffer, nao e adicionada de novo e ``added`` vem ``False``.
+        Isso permite que o consumer chame ``append`` mesmo quando a persistencia
+        acusou duplicata — sem isso, um retry que falhou entre persistir e
+        agrupar era ackado sem agrupar, e a mensagem se perdia.
+        """
 
     @abstractmethod
     async def due_phones(self) -> list[str]:

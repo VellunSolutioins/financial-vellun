@@ -224,6 +224,36 @@ async def test_agrupamento_no_redis_preserva_ordem_e_lock(redis_client, monkeypa
     assert await store.peek(phone) == []
 
 
+async def test_append_deduplica_por_provider_message_id_no_redis(redis_client):
+    """O RPUSH condicional roda como script Lua — só o Redis real o exercita."""
+    from src.grouping import GroupEntry
+    from src.grouping.redis_store import DUE_KEY, RedisGroupStore
+    from src.services.redis_client import RedisProvider
+
+    phone = "+5541900000005"
+    store = RedisGroupStore(RedisProvider(REDIS_URL))
+    await store.clear(phone)
+
+    entry = GroupEntry(text="gastei 10", ai_message_id="ai-1", provider_message_id="wamid.1")
+    primeiro = await store.append(phone, entry)
+    vencimento = await redis_client.zscore(DUE_KEY, phone)
+    repetido = await store.append(phone, entry)
+
+    assert (primeiro.length, primeiro.added) == (1, True)
+    assert (repetido.length, repetido.added) == (1, False)
+    assert len(await store.peek(phone)) == 1
+    # A duplicata não reagenda o flush: o vencimento vigente continua valendo.
+    assert await redis_client.zscore(DUE_KEY, phone) == vencimento
+
+    # Outro providerMessageId entra normalmente.
+    outro = await store.append(
+        phone, GroupEntry(text="no mercado", ai_message_id="ai-2", provider_message_id="wamid.2")
+    )
+    assert (outro.length, outro.added) == (2, True)
+
+    await store.clear(phone)
+
+
 async def test_confirmacao_pendente_sobrevive_no_redis(redis_client):
     from src.schemas.financial_intent import FinancialIntent, IntentType
     from src.services.conversation_manager import ConversationManager

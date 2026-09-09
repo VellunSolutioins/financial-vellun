@@ -18,11 +18,33 @@ import logging
 import time
 
 from ..services.redis_client import RedisProvider, redis_provider
-from .base import GroupEntry, GroupStore, due_at as _due_at
+from .base import AppendResult, GroupEntry, GroupStore, due_at as _due_at
 
 logger = logging.getLogger(__name__)
 
 DUE_KEY = "group:due"
+
+#: RPUSH condicional: só empilha se nenhuma entrada do grupo carregar o mesmo
+#: ``provider_message_id``. Precisa ser um script porque ler a lista e empilhar
+#: em dois comandos deixaria janela para duas entregas concorrentes da mesma
+#: mensagem entrarem as duas. Devolve ``{tamanho, adicionou}``.
+APPEND_DEDUPED_LUA = """
+local key = KEYS[1]
+local entry = ARGV[1]
+local provider_id = ARGV[2]
+
+if provider_id ~= '' then
+  local items = redis.call('LRANGE', key, 0, -1)
+  for index = 1, #items do
+    local ok, decoded = pcall(cjson.decode, items[index])
+    if ok and decoded['provider_message_id'] == provider_id then
+      return {#items, 0}
+    end
+  end
+end
+
+return {redis.call('RPUSH', key, entry), 1}
+"""
 
 
 def _buffer_key(phone: str) -> str:
@@ -41,18 +63,29 @@ class RedisGroupStore(GroupStore):
     def __init__(self, provider: RedisProvider | None = None) -> None:
         self._provider = provider or redis_provider
 
-    async def append(self, phone: str, entry: GroupEntry) -> int:
+    async def append(self, phone: str, entry: GroupEntry) -> AppendResult:
         client = await self._provider.client()
         now = time.time()
 
-        length = await client.rpush(_buffer_key(phone), entry.to_json())
+        length, added = await client.eval(
+            APPEND_DEDUPED_LUA,
+            1,
+            _buffer_key(phone),
+            entry.to_json(),
+            entry.provider_message_id or "",
+        )
+        length = int(length)
+        if not int(added):
+            # Ja estava no grupo: nada a reagendar, o vencimento vigente vale.
+            return AppendResult(length=length, added=False)
+
         # Marca o inicio do grupo apenas na primeira mensagem.
         await client.set(_first_key(phone), now, nx=True)
         first = await client.get(_first_key(phone))
         first_at = float(first) if first is not None else now
 
-        await client.zadd(DUE_KEY, {phone: _due_at(now, first_at, int(length))})
-        return int(length)
+        await client.zadd(DUE_KEY, {phone: _due_at(now, first_at, length)})
+        return AppendResult(length=length, added=True)
 
     async def due_phones(self) -> list[str]:
         client = await self._provider.client()

@@ -12,11 +12,19 @@ Responsabilidades (nesta ordem, porque a ordem define o que pode ser ackado):
 
 Falha em qualquer etapa levanta exceção: transitória vira retry com backoff,
 permanente vai para a DLQ.
+
+**Duplicata na persistência não encerra o fluxo.** Antes ela retornava cedo, e o
+retry de uma entrega que falhou entre (2) e (4) — Redis fora, por exemplo —
+encontrava a mensagem como duplicata, ackava sem agrupar e a mensagem se perdia
+em silêncio; o mesmo caminho tornava o reprocessamento manual um no-op. Agora o
+id já persistido é reaproveitado e o agrupamento segue, deduplicando por
+``providerMessageId`` dentro do grupo.
 """
 
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 from pydantic import ValidationError
 
@@ -38,6 +46,18 @@ from ..services.metrics import metrics
 from ..services.subscription_gate import subscription_gate
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class PersistedInbound:
+    """Resultado de persistir a ``AiMessage`` inbound.
+
+    ``duplicate`` é informativo (métrica e log): o fluxo continua igual, porque a
+    duplicata carrega o **mesmo** ``ai_message_id`` e o agrupamento é idempotente.
+    """
+
+    ai_message_id: str | None
+    duplicate: bool
 
 
 class InboundMessageConsumer:
@@ -76,21 +96,18 @@ class InboundMessageConsumer:
 
     # ── Texto ───────────────────────────────────────────────────────────────
     async def _handle_text(self, message: InboundMessageV1) -> None:
-        persisted_id = await self._persist_inbound(message, message.text or "")
-        if persisted_id is False:  # duplicata: já processada
-            return
+        persisted = await self._persist_inbound(message, message.text or "")
 
-        await self.store.append(
-            message.phone,
+        await self._group(
+            message,
             GroupEntry(
                 text=message.text or "",
-                ai_message_id=persisted_id,
+                ai_message_id=persisted.ai_message_id,
                 provider_message_id=message.provider_message_id,
                 received_at=message.received_at.isoformat(),
                 correlation_id=message.correlation_id,
             ),
         )
-        metrics.incr("inbound_grouped")
 
     # ── Mídia ───────────────────────────────────────────────────────────────
     async def _handle_media(self, message: InboundMessageV1) -> None:
@@ -128,28 +145,27 @@ class InboundMessageConsumer:
             await message_processor.respond(message.phone, resolution.fallback_message)
             return
 
-        persisted_id = await self._persist_inbound(message, resolution.log_content)
-        if persisted_id is False:  # duplicata: já processada
-            return
+        persisted = await self._persist_inbound(message, resolution.log_content)
 
         if resolution.transcript is not None:
             # Áudio entra no agrupamento como texto, ecoando a transcrição.
-            await self.store.append(
-                message.phone,
+            await self._group(
+                message,
                 GroupEntry(
                     text=resolution.transcript,
-                    ai_message_id=persisted_id,
+                    ai_message_id=persisted.ai_message_id,
                     provider_message_id=message.provider_message_id,
                     received_at=message.received_at.isoformat(),
                     response_prefix=f'Entendi: "{resolution.transcript}".\n',
                     correlation_id=message.correlation_id,
                 ),
             )
-            metrics.incr("inbound_grouped")
             return
 
         # Comprovante: job próprio, com o intent já extraído e confirmação forçada.
-        await self._publish_receipt_job(message, resolution, persisted_id)
+        # Republicar é seguro: o ``jobId`` deriva do id persistido, então uma
+        # duplicata gera o mesmo job e o consumer de processamento o descarta.
+        await self._publish_receipt_job(message, resolution, persisted.ai_message_id)
 
     async def _publish_receipt_job(
         self, message: InboundMessageV1, resolution, persisted_id: str | None
@@ -182,16 +198,32 @@ class InboundMessageConsumer:
             )
             metrics.incr("jobs_published")
 
+    # ── Agrupamento ─────────────────────────────────────────────────────────
+    async def _group(self, message: InboundMessageV1, entry: GroupEntry) -> None:
+        """Grava a mensagem no agrupamento por telefone.
+
+        O append é idempotente por ``providerMessageId``, então chamar isto para
+        uma duplicata é seguro: se a mensagem já está no grupo nada acontece; se
+        não está — retry que falhou depois de persistir — ela finalmente entra.
+        """
+        result = await self.store.append(message.phone, entry)
+        if result.added:
+            metrics.incr("inbound_grouped")
+            return
+
+        metrics.incr("inbound_group_deduplicated")
+        logger.info("Mensagem já estava no grupo; agrupamento não duplicou")
+
     # ── Persistência ────────────────────────────────────────────────────────
     async def _persist_inbound(
         self, message: InboundMessageV1, content: str
-    ) -> str | None | bool:
-        """Grava a ``AiMessage`` inbound.
+    ) -> PersistedInbound:
+        """Grava a ``AiMessage`` inbound, de forma idempotente.
 
-        Devolve o id persistido, ``None`` quando a API não devolveu id, ou
-        ``False`` quando é duplicata (o chamador deve parar, o que é sucesso).
-        Levanta :class:`TransientError` quando a API está indisponível — assim a
-        mensagem é reprocessada em vez de ackada sem efeito.
+        Devolve sempre o id da mensagem (a API responde com o id existente
+        quando é duplicata), marcando em ``duplicate`` se já existia. Levanta
+        :class:`TransientError` quando a API está indisponível — assim a mensagem
+        é reprocessada em vez de ackada sem efeito.
         """
         metadata: dict = {}
         if message.provider_message_id:
@@ -204,8 +236,9 @@ class InboundMessageConsumer:
         )
         if result is None:
             raise TransientError("API principal indisponível ao persistir a inbound")
-        if result.get("duplicate"):
+
+        duplicate = bool(result.get("duplicate"))
+        if duplicate:
             metrics.incr("messages_duplicated")
-            logger.info("Inbound duplicada ignorada")
-            return False
-        return result.get("id")
+            logger.info("Inbound já persistida; reaproveitando o id existente")
+        return PersistedInbound(ai_message_id=result.get("id"), duplicate=duplicate)

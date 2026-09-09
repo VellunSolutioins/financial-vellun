@@ -110,6 +110,42 @@ async def test_reenvio_do_mesmo_provider_id_nao_duplica(broker, consumer, group_
     assert len(broker.acked) == 2  # duplicata é sucesso, não reprocessa
 
 
+async def test_falha_ao_agrupar_nao_perde_a_mensagem_no_retry(
+    broker, consumer, group_store, audit, monkeypatch
+):
+    """Regressão: a duplicata na persistência não pode encerrar o fluxo.
+
+    A mensagem é persistida e o agrupamento falha (Redis fora). No retry, a API
+    devolve ``duplicate: true`` — e antes disso o consumer retornava cedo e
+    ackava **sem agrupar**, perdendo a mensagem em silêncio.
+    """
+    from src.messaging.base import TransientError
+
+    original = group_store.append
+    falhas = {"restantes": 1}
+
+    async def append_falhando_uma_vez(phone, entry):
+        if falhas["restantes"] > 0:
+            falhas["restantes"] -= 1
+            raise TransientError("Redis indisponível ao agrupar")
+        return await original(phone, entry)
+
+    monkeypatch.setattr(group_store, "append", append_falhando_uma_vez)
+
+    await publish(broker, text_message())
+    await broker.drain()
+
+    # A AiMessage foi criada uma vez só, e a mensagem chegou ao grupo.
+    assert len(audit.seen) == 1
+    entries = await group_store.peek("+5541999999999")
+    assert len(entries) == 1
+    assert entries[0].ai_message_id == "ai-msg-1"
+    assert entries[0].text == "gastei 50"
+    assert len(broker.retried) == 1
+    assert len(broker.acked) == 1
+    assert broker.dlq == []
+
+
 # ── Ack e persistência ───────────────────────────────────────────────────────
 async def test_acka_somente_apos_persistir_e_agrupar(broker, consumer, group_store, audit):
     await publish(broker, text_message(text="gastei 47,50 no mercado"))
