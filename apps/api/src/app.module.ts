@@ -17,6 +17,7 @@ import { TransactionsModule } from './transactions/transactions.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { InternalModule } from './internal/internal.module';
 import { BillingModule } from './billing/billing.module';
+import { OpsModule } from './ops/ops.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { BillingModule } from './billing/billing.module';
     DashboardModule,
     InternalModule,
     BillingModule,
+    OpsModule,
   ],
   controllers: [AppController],
   providers: [

@@ -100,4 +100,47 @@ describe('CsrfGuard', () => {
       ForbiddenException,
     );
   });
+
+  // ── Sessão de operações ────────────────────────────────────────────────────
+  // O guard libera requisições sem cookie de sessão. Enquanto `ops_session` não
+  // contava como sessão, todo POST da área de operações — reprocessar mensagem,
+  // descartar item, promover operador — passava sem verificação de CSRF.
+  it('exige CSRF quando a sessão é a de operações', () => {
+    expect(() =>
+      guard.canActivate(context('POST', { ops_session: 'jwt' }, {}, '/ops/failures/1/reprocess')),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('libera a sessão de operações com double-submit válido', () => {
+    expect(
+      guard.canActivate(
+        context(
+          'POST',
+          { ops_session: 'jwt', csrf_token: 'abc' },
+          { 'x-csrf-token': 'abc' },
+          '/ops/failures/1/reprocess',
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it('bloqueia a sessão de operações vinda de origem desconhecida', () => {
+    expect(() =>
+      guard.canActivate(
+        context(
+          'POST',
+          { ops_session: 'jwt' },
+          { origin: 'https://evil.example' },
+          '/ops/auth/logout',
+        ),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
+  it('não confunde a rota de login do produto com a área de operações', () => {
+    // `/auth/login` é isento de CSRF; `/ops/auth/...` nunca herda essa isenção.
+    expect(() =>
+      guard.canActivate(context('POST', { ops_session: 'jwt' }, {}, '/ops/auth/logout')),
+    ).toThrow(ForbiddenException);
+  });
 });

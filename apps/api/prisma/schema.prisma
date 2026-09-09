@@ -105,6 +105,24 @@ enum WebhookEventStatus {
   failed
 }
 
+// ── Operações ───────────────────────────────────────────────────────────────
+
+/// Papel do operador na área de operações. `viewer` só lê, `operator` age sobre
+/// falhas, `ops_admin` administra operadores e permissões.
+enum OpsRole {
+  viewer
+  operator
+  ops_admin
+}
+
+/// Desfecho registrado na trilha de auditoria. `denied` existe para que uma
+/// tentativa recusada por autorização também deixe rastro.
+enum OpsAuditResult {
+  success
+  failure
+  denied
+}
+
 // ── Core ──────────────────────────────────────────────────────────────────────
 
 model User {
@@ -443,4 +461,67 @@ model SubscriptionAudit {
 
   @@index([subscriptionId])
   @@map("subscription_audits")
+}
+
+// ── Operações ───────────────────────────────────────────────────────────────
+
+/// Operador da área de operações, identificado pelo GitHub.
+///
+/// **Tabela separada de `users` por construção**: nenhum cliente do produto vira
+/// operador por ser admin da própria conta, porque não existe caminho de código
+/// entre as duas identidades. A sessão também é separada (cookie e segredo
+/// próprios), então um `access_token` de cliente nunca serve aqui.
+///
+/// O primeiro login entra como `viewer` **inativo** — um `ops_admin` precisa
+/// ativar. Pertencer à organização é condição necessária, não suficiente.
+model OpsOperator {
+  id           String  @id @default(uuid())
+  githubLogin  String  @unique @map("github_login")
+  githubUserId String  @unique @map("github_user_id")
+  name         String?
+  email        String?
+  role         OpsRole @default(viewer)
+
+  /// Permissão extra para ver dados sensíveis em claro (telefone, conteúdo de
+  /// mensagem). Separada do papel de propósito: `operator` reprocessa sem
+  /// precisar ler o conteúdo. Cada visualização gera linha de auditoria.
+  canViewSensitive Boolean @default(false) @map("can_view_sensitive")
+
+  active      Boolean   @default(false)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  lastLoginAt DateTime? @map("last_login_at")
+
+  auditEntries OpsAuditLog[]
+
+  @@map("ops_operators")
+}
+
+/// Trilha append-only das ações de operadores.
+///
+/// Sem `update` nem `delete` no service, e o usuário de banco da aplicação não
+/// recebe `DELETE` nesta tabela (ver a migration). A relação com `OpsOperator`
+/// é `Restrict` por omissão: apagar um operador com histórico é recusado pelo
+/// banco, em vez de levar a trilha embora.
+model OpsAuditLog {
+  id          String         @id @default(uuid())
+  operatorId  String         @map("operator_id")
+  action      String
+  targetType  String         @map("target_type")
+  targetId    String?        @map("target_id")
+  reason      String?
+  result      OpsAuditResult
+  /// Correlaciona as linhas de uma mesma operação (um lote, por exemplo).
+  operationId String         @map("operation_id")
+  beforeState Json?          @map("before_state")
+  afterState  Json?          @map("after_state")
+  createdAt   DateTime       @default(now()) @map("created_at")
+
+  operator OpsOperator @relation(fields: [operatorId], references: [id])
+
+  @@index([createdAt])
+  @@index([operatorId, createdAt])
+  @@index([operationId])
+  @@index([targetType, targetId])
+  @@map("ops_audit_log")
 }
