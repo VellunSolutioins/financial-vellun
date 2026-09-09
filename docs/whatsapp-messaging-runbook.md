@@ -80,6 +80,67 @@ produção (mascarado em desenvolvimento). Nunca o número completo.
 
 ---
 
+## Teste de carga
+
+Dois scripts em `apps/ai-agent/scripts/`. O `loadtest.py` dispara e mede a
+latência **do lado do cliente**; o `monitor.py` acompanha o pipeline em um
+segundo terminal.
+
+> **Antes de rodar:** com os consumers ligados, cada mensagem processada vira
+> uma resposta ao usuário. Use `WHATSAPP_PROVIDER=log`, ou a carga vira centenas
+> de chamadas reais à API da Meta.
+
+```bash
+cd apps/ai-agent
+
+# 500 requests, 50 em paralelo, espalhados por 50 telefones,
+# esperando o pipeline drenar e com veredito no fim
+.venv/Scripts/python.exe scripts/loadtest.py --total 500 --concurrency 50 --wait-drain 120
+
+# contenção proposital: tudo no mesmo telefone (exercita o lock e o defer)
+.venv/Scripts/python.exe scripts/loadtest.py --total 200 --phones 1 --wait-drain 60
+
+# payload real da Meta, 5 mensagens por request
+.venv/Scripts/python.exe scripts/loadtest.py --total 100 --batch 5
+
+# em outro terminal, ao vivo
+.venv/Scripts/python.exe scripts/monitor.py --interval 1
+```
+
+O veredito confere o que importa: todos os requests aceitos com `202`, nenhum
+`503`, contadores batendo, filas **e** grupos do Redis drenados, todos os jobs
+processados e DLQ vazia. Sai com código 1 se algo falhar, então serve em CI.
+
+### Números de referência
+
+Medidos nesta máquina (Windows, Docker Desktop, um processo uvicorn,
+`RUN_CONSUMERS_IN_API=false`, 400 requests por rodada):
+
+| Concorrência | Throughput | p50     | p95     | p99     |
+| ------------ | ---------- | ------- | ------- | ------- |
+| 5            | 476 req/s  | 9,8 ms  | 14,1 ms | 16,3 ms |
+| 10           | 594 req/s  | 15,8 ms | 21,2 ms | 32,1 ms |
+| 25           | 575 req/s  | 33,7 ms | 95,4 ms | 127 ms  |
+| 50           | 486 req/s  | 71,1 ms | 259 ms  | 382 ms  |
+
+O joelho fica entre 10 e 25 requests simultâneos: acima disso o throughput para
+de crescer e a latência sobe, porque as publicações disputam o mesmo canal
+AMQP à espera do _publisher confirm_. Para mais vazão, escale em processos
+(réplicas da API) em vez de empilhar concorrência num só.
+
+Duas leituras que confundem se você não souber:
+
+- **`webhook_latency_ms` do `/metrics` é sempre menor que o p50 do cliente.** A
+  métrica mede só o tempo dentro do handler; o cliente mede também a espera na
+  fila do event loop. Sob concorrência alta a diferença chega a 5x — é o
+  esperado, não é erro de medição.
+- **Fila vazia não é pipeline drenado.** Mensagem consumida vai para o buffer de
+  agrupamento no Redis e só vira job quando o debounce vence. Por isso o
+  `--wait-drain` também olha `ZCARD group:due` e compara
+  `jobs_published`/`jobs_processed`.
+
+---
+
 ## Backlog crescendo
 
 ```bash

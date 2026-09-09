@@ -11,7 +11,9 @@ def create_messenger() -> Messenger:
     """Instancia o messenger conforme ``WHATSAPP_PROVIDER`` (espelha
     ``llm/factory.py``). Em caso de falha de configuração do provedor real,
     cai para o ``LogMessenger`` para não impedir a subida do serviço."""
-    provider = (settings.whatsapp_provider or "log").lower()
+    # `strip` porque um espaço sobrando no .env faria o provedor cair no ramo
+    # desconhecido — funciona por acidente, mas esconde a configuração real.
+    provider = (settings.whatsapp_provider or "log").strip().lower()
 
     if provider in ("", "log", "none"):
         return LogMessenger()
