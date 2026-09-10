@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 // Todo caminho e todo comando aqui é resolvido contra a raiz derivada deste arquivo, nunca contra o
 // diretório de trabalho de quem invoca: o cwd do processo que dispara o gancho é livre, e resolver
-// contra ele mede outro diretório — sem erro, respondendo que falta `npm ci` onde nada falta.
+// contra ele mede outro diretório — sem erro, respondendo que falta `pnpm install` onde nada falta.
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 function run(cmd) {
@@ -57,9 +57,13 @@ if (!existsSync(pkgPath)) {
 // Sem dependência instalada, lint, tipos e testes falham em bloco por módulo ausente: a parede de
 // erro resultante não distingue defeito no código de ambiente incompleto, e passaria por
 // verificação feita.
+//
+// Os comandos abaixo usam pnpm porque este é um monorepo pnpm: `npm ci` desmontaria o link farm e
+// reinstalaria tudo com outra topologia de node_modules. Os scripts continuam sendo descobertos em
+// package.json, e não fixados aqui — um repositório sem `typecheck` simplesmente pula esse passo.
 if (!existsSync(path.join(projectRoot, 'node_modules'))) {
   block(
-    'Dependências não instaladas. Rode `npm ci` — sem elas lint, tipos e testes falham por módulo ausente e a checagem não prova nada sobre o código.',
+    'Dependências não instaladas. Rode `pnpm install` — sem elas lint, tipos e testes falham por módulo ausente e a checagem não prova nada sobre o código.',
   );
 }
 
@@ -73,7 +77,7 @@ const scripts = pkg.scripts || {};
 const failures = [];
 
 if (scripts.lint) {
-  const lint = run('npm run lint --silent');
+  const lint = run('pnpm --silent lint');
   if (!lint.ok) failures.push(`lint:\n${lint.out.trim()}`);
 }
 
@@ -81,15 +85,15 @@ if (scripts.lint) {
 // substitui esta checagem: tsconfig.build.json exclui **/*spec.ts, então erro de tipo em arquivo de
 // teste só apareceria no CI.
 if (scripts.typecheck) {
-  const typecheck = run('npm run typecheck --silent');
+  const typecheck = run('pnpm --silent typecheck');
   if (!typecheck.ok) failures.push(`typecheck:\n${typecheck.out.trim()}`);
 }
 
 if (scripts['test:cov']) {
-  const coverage = run('npm run test:cov --silent');
+  const coverage = run('pnpm --silent test:cov');
   if (!coverage.ok) failures.push(`test:cov:\n${coverage.out.trim()}`);
 } else if (scripts.test) {
-  const test = run('npm test --silent');
+  const test = run('pnpm --silent test');
   if (!test.ok) failures.push(`test:\n${test.out.trim()}`);
 }
 
