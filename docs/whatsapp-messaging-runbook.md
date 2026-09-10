@@ -245,58 +245,224 @@ docker exec financial-vellun-rabbitmq rabbitmqctl list_queues name messages cons
 
 ## Mensagens na DLQ
 
-```bash
-# Quantas
-docker exec financial-vellun-rabbitmq rabbitmqctl list_queues name messages \
-  | grep dlq
+A DLQ é o fim da linha do pipeline: chegar aqui significa que o retry com backoff
+já se esgotou, ou que o contrato era inválido desde o começo. Nada se perde — mas
+nada anda sozinho a partir daqui.
 
-# Inspecionar sem consumir: painel → Queues → whatsapp.processing.dlq → Get messages
-# (requeue = Yes, para não remover)
+> **Leia [O painel do RabbitMQ não é um banco de dados](#o-painel-do-rabbitmq-não-é-um-banco-de-dados)
+> antes de clicar em qualquer coisa no Management.** Duas operações que parecem
+> leitura — "Get messages" e "Purge" — descartam mensagem sem registro.
+
+### 1. Ver o tamanho do estrago
+
+```bash
+docker exec financial-vellun-rabbitmq \
+  rabbitmqctl list_queues name messages messages_ready messages_unacknowledged consumers
 ```
 
-O envelope traz o necessário para o diagnóstico:
+Leia as colunas juntas, porque isoladas enganam:
+
+| Sintoma                                    | Leitura                                                              |
+| ------------------------------------------ | -------------------------------------------------------------------- |
+| `.dlq` com `messages > 0`                  | falha definitiva esperando ação humana                               |
+| `.v1` com `messages > 0` e `consumers = 0` | **nada está sendo processado** — o worker caiu; veja `/health/ready` |
+| `.retry.*s` com `messages > 0`             | normal: esperam o TTL vencer, e não têm consumidor por construção    |
+| `messages_unacknowledged` alto e parado    | consumidor travado segurando mensagem sem ackar                      |
+
+### 2. Ler o envelope
+
+O envelope (`DlqEnvelopeV1`, em `apps/ai-agent/src/messaging/contracts.py`) traz
+tudo que o diagnóstico precisa:
 
 ```json
 {
   "schemaVersion": 1,
-  "payload": { "...mensagem original..." },
+  "payload": { "...mensagem original, íntegra..." },
   "sourceQueue": "whatsapp.processing.v1",
   "routingKey": "processing",
   "attempts": 5,
   "errorType": "ConnectionError",
   "errorMessage": "…truncado em 500 caracteres…",
   "permanent": false,
+  "firstFailedAt": "2026-09-05T17:59:12Z",
   "failedAt": "2026-09-05T18:00:00Z",
   "correlationId": "…"
 }
 ```
 
-- `permanent: true` → contrato inválido ou tipo não suportado. Reprocessar não
-  resolve; corrija a origem.
-- `permanent: false` → as tentativas se esgotaram. Resolva a causa (API fora,
-  OpenAI indisponível) e então reprocesse.
+O campo que decide o que fazer é o `permanent`:
 
-### Reprocessar
+- **`permanent: true`** → contrato inválido ou tipo não suportado. **Reprocessar
+  não resolve**: a mensagem falha de novo, do mesmo jeito. Corrija a origem — ou
+  aceite que aquela mensagem não é processável — e descarte com registro.
+- **`permanent: false`** → as tentativas se esgotaram contra uma causa externa
+  (API principal fora, OpenAI indisponível, Redis inacessível). Resolva a causa e
+  então reprocesse.
 
-Não existe botão de "shovel" configurado. O caminho é republicar o `payload` na
-exchange principal com a routing key de origem, depois de resolver a causa:
+As **duas datas são campos diferentes**, e confundi-las leva a diagnóstico errado:
+
+- `firstFailedAt` — quando a mensagem tropeçou pela **primeira** vez. Viaja no
+  header `x-first-failed-at`, escrito no primeiro retry.
+- `failedAt` — quando ela **desistiu**, depois de esgotar as tentativas.
+
+A distância entre as duas diz se você está diante de uma falha nova ou de algo que
+vem se arrastando. `firstFailedAt` vem nulo quando a falha foi permanente logo na
+primeira tentativa: aí não houve retry, e as duas datas seriam a mesma.
+
+O `correlationId` é a ponte para o resto da investigação: com ele,
+`{service="ai-agent"} |= "<id>"` no Loki mostra o caminho inteiro da mensagem, do
+webhook até a falha.
+
+### 3. Investigar a causa — **antes** de reprocessar
+
+Reprocessar sem resolver a causa devolve a mensagem à mesma parede: ela percorre
+os cinco retries de novo e volta para a DLQ minutos depois, com o `attempts`
+zerado e um `failedAt` novo. O único efeito é apagar o rastro de quando ela falhou
+pela primeira vez.
 
 ```bash
-# 1. Confirme que a causa foi resolvida
-curl http://localhost:8010/health/ready
-
-# 2. Painel do RabbitMQ → Exchanges → whatsapp.x → Publish message
-#    Routing key: inbound   (ou processing)
-#    Payload: o conteúdo do campo `payload` do envelope
-#    Properties: delivery_mode = 2
+# A causa ainda está de pé?
+curl -s http://localhost:8010/health/ready   # broker, consumers, redis
+curl -s http://localhost:3001/health/ready   # postgres
 ```
 
-Reprocessar é seguro: os três níveis de idempotência
+Confirme que o `errorType` bate com o que você corrigiu. Um `ConnectionError` que
+some depois de a API principal voltar é uma coisa; um `ValidationError`
+recorrente é outra, e nenhum restart conserta.
+
+### 4. Republicar
+
+Não há shovel configurado. O caminho é republicar o **conteúdo do campo
+`payload`** — não o envelope inteiro — na exchange principal, com a routing key de
+origem:
+
+| Campo do envelope | Para onde vai                           |
+| ----------------- | --------------------------------------- |
+| `payload`         | corpo da mensagem                       |
+| `routingKey`      | routing key (`inbound` ou `processing`) |
+| —                 | exchange: `whatsapp.x`                  |
+
+Pelo painel: **Exchanges → `whatsapp.x` → Publish message**, com
+`delivery_mode = 2`. Pela linha de comando, que é reproduzível e deixa rastro no
+histórico do shell:
+
+```bash
+curl -u guest:guest -H 'content-type: application/json' \
+  -X POST http://localhost:15672/api/exchanges/%2F/whatsapp.x/publish \
+  -d '{
+        "properties": { "delivery_mode": 2 },
+        "routing_key": "processing",
+        "payload": "COLE_AQUI_O_CAMPO_payload_DO_ENVELOPE",
+        "payload_encoding": "string"
+      }'
+```
+
+`{"routed":true}` confirma que a exchange encontrou uma fila. `{"routed":false}`
+significa routing key errada — a mensagem foi descartada e republicar com a key
+certa é seguro.
+
+Republicar não duplica: os três níveis de idempotência
 ([ADR 0005](adrs/0005-idempotencia-em-tres-niveis.md)) impedem `AiMessage`
 duplicada, job duplicado e lançamento duplicado.
 
-Depois de republicar, remova a mensagem da DLQ (Get messages com
-`requeue = No`, ou `Purge` se você já republicou todas).
+### 5. Confirmar o resultado
+
+Republicar não é concluir.
+
+```bash
+# A fila consumiu a mensagem republicada?
+docker exec financial-vellun-rabbitmq rabbitmqctl list_queues name messages consumers
+
+# O processamento terminou? (jobs_processed sobe; processing_error NÃO sobe)
+curl -s -H "Authorization: Bearer $METRICS_TOKEN" http://localhost:8010/metrics.json
+```
+
+Siga o `correlationId` no Loki até o lançamento criado. Se a mensagem voltou para
+a DLQ com `attempts` reiniciado, a causa **não** estava resolvida e o passo 3
+precisa ser refeito.
+
+---
+
+## O painel do RabbitMQ não é um banco de dados
+
+O Management é a ponte enquanto o catálogo de falhas (Entrega 5) não existe. Ele
+serve, mas tem duas armadilhas que custam mensagem — e as duas parecem operação
+de leitura.
+
+### "Get messages" é uma operação **sobre a fila**, não um `SELECT`
+
+Ela não espia: ela **consome**. Com `requeue = Yes` a mensagem é entregue ao
+cliente e devolvida ao fim; com `requeue = No` ela é ackada e **some para sempre**.
+
+Três comportamentos medidos nesta stack (RabbitMQ 3.13.7, filas clássicas),
+porque a diferença entre eles separa diagnóstico de perda de dado.
+
+**1. `requeue = No` remove a cabeça da fila, não "a sua" mensagem.**
+
+Este é o erro caro, e o procedimento anterior deste runbook induzia a ele. O
+cenário: você republicou a `mensagem-3` e quer removê-la da DLQ, então usa "Get
+messages" com `count = 1` e `requeue = No`. Resultado medido:
+
+```
+fila antes:                         [msg-1, msg-2, msg-3, msg-4, msg-5]
+get(count=1, requeue=No) devolveu:   msg-1
+fila depois:                        [msg-2, msg-3, msg-4, msg-5]
+```
+
+A `msg-1` — que ninguém tratou — foi descartada sem registro, e a `msg-3`
+continua lá. **Não existe forma de remover uma mensagem específica pelo painel.**
+Precisando remover só uma, consuma a fila por um script que decide item a item,
+ou espere o catálogo da Entrega 5.
+
+**2. `requeue = Yes` preservou a ordem nesta versão — mas não construa
+procedimento sobre isso.**
+
+Medimos porque a garantia é citada nos dois sentidos: pegar as duas primeiras de
+cinco e devolvê-las manteve `[1, 2, 3, 4, 5]` em três repetições. Ainda assim, a
+ordem após um requeue é detalhe de implementação do tipo de fila e da versão —
+trate como "provavelmente preservada", nunca como invariante.
+
+**3. "Get messages" só enxerga mensagem `ready`.**
+
+Mensagem já entregue a um consumidor (estado `unacked`) é **invisível** para o
+painel. No teste, com um consumidor segurando quatro mensagens sem ackar, o "Get
+messages" devolveu **nada** — enquanto os contadores ainda exibiam `ready = 4`,
+porque as estatísticas do Management têm atraso.
+
+É por isso que "sei que a mensagem falhou, mas não a vejo na fila" é comum e não
+significa que ela sumiu. Pare o consumidor daquela fila antes de inspecionar, ou
+confie no `correlationId` no Loki em vez do painel.
+
+### "Purge" não é procedimento de recuperação
+
+`Purge` descarta a fila inteira **sem registro nenhum**: sem log do que havia, sem
+cópia, sem forma de saber depois quantas mensagens foram perdidas nem de quem
+eram. Numa DLQ, cada mensagem descartada é um lançamento que o cliente mandou e
+que nunca vai aparecer.
+
+Use `Purge` apenas quando as duas condições valerem juntas:
+
+- a fila é de ambiente descartável (a sua máquina, nunca produção); **e**
+- você já sabe o que há nela e decidiu conscientemente perder.
+
+Em produção o caminho é sempre republicar o que deve voltar e **registrar** o que
+foi descartado — hoje anotando fora do broker; a partir da Entrega 5, marcando a
+linha como `discarded` em `ops_failed_messages`, com operador e justificativa.
+
+### Acesso ao Management
+
+Credencial própria, de privilégio mínimo. O painel não deve ser acessado com o
+usuário da aplicação:
+
+```bash
+docker exec financial-vellun-rabbitmq rabbitmqctl add_user vellun_monitor 'SENHA'
+docker exec financial-vellun-rabbitmq rabbitmqctl set_user_tags vellun_monitor monitoring
+# Sem permissão em vhost: monitoramento não publica, não consome, não apaga fila.
+```
+
+A tag `monitoring` dá leitura do painel e das métricas sem poder mexer nas filas —
+o que também torna as duas armadilhas acima inacessíveis por acidente. Republicar
+exige um usuário com escrita no vhost, e isso é decisão consciente, não o padrão.
 
 ---
 

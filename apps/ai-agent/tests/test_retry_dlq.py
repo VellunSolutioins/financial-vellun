@@ -169,6 +169,38 @@ def test_envelope_da_dlq_tem_o_necessario_para_diagnostico():
     assert envelope.failed_at is not None
 
 
+def test_envelope_preserva_quando_a_falha_comecou():
+    """Regressao: `firstFailedAt` saia sempre nulo do envelope.
+
+    O dado existe — vem do header `x-first-failed-at`, propagado a cada retry —
+    mas `build_dlq_envelope` nao o copiava. Sem ele o operador so ve `failedAt`,
+    que e a ULTIMA tentativa, e nao consegue distinguir "falhou agora" de "vem
+    falhando ha duas horas".
+    """
+    msg = BrokerMessage(
+        body=b'{"phone": "+5541999999999"}',
+        routing_key="processing",
+        attempt=4,
+        first_failed_at="2026-09-05T17:59:12+00:00",
+    )
+
+    envelope = build_dlq_envelope(msg, ConnectionError("API fora"), False, "q")
+
+    assert envelope.first_failed_at is not None
+    assert envelope.first_failed_at.isoformat() == "2026-09-05T17:59:12+00:00"
+    # `failedAt` continua sendo o instante desta ultima falha, e e outro campo.
+    assert envelope.failed_at > envelope.first_failed_at
+
+
+def test_envelope_sem_historico_de_falha_deixa_o_campo_nulo():
+    """Primeira falha permanente nunca passou por retry: nao ha o que preservar."""
+    msg = BrokerMessage(body=b"{}", routing_key="inbound")
+
+    envelope = build_dlq_envelope(msg, ValueError("contrato invalido"), True, "q")
+
+    assert envelope.first_failed_at is None
+
+
 def test_envelope_aceita_payload_nao_json():
     envelope = build_dlq_envelope(
         BrokerMessage(body=b"\xff nao json", routing_key="inbound"),

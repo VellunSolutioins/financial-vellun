@@ -188,6 +188,52 @@ async def test_tentativas_esgotadas_chegam_na_dlq(topology):
         await consumer.stop(drain_timeout=2.0)
 
 
+async def test_envelope_da_dlq_preserva_quando_a_falha_comecou(topology):
+    """`firstFailedAt` sobrevive a viagem pela fila de retry ate a DLQ.
+
+    O caminho real e o que importa aqui: a informacao viaja no header
+    `x-first-failed-at`, escrito no primeiro retry e relido a cada reentrega. O
+    teste com `max_retries=1` acima esgota na primeira tentativa e nunca passa
+    pela fila de retry, entao nao exercita esse trecho.
+
+    Sem isso o operador so enxerga `failedAt` — a ULTIMA tentativa — e nao
+    distingue uma falha nova de uma que vem se arrastando.
+    """
+    import json
+
+    connection = topology
+
+    async def handler(_broker_message):
+        raise TimeoutError("sempre falha")
+
+    # 2 tentativas: a primeira agenda o retry (escreve o header), a segunda esgota.
+    consumer = build_consumer(connection, max_retries=2)
+    await consumer.start(handler)
+    try:
+        await publish(connection, InboundMessageV1(phone="+5541999999999", text="oi"))
+
+        channel = await connection.publish_channel()
+        dlq = await channel.get_queue(dlq_queue(QUEUE), ensure=False)
+
+        bruto = None
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 30.0
+        while loop.time() < deadline and bruto is None:
+            bruto = await dlq.get(no_ack=True, fail=False)
+            if bruto is None:
+                await asyncio.sleep(0.2)
+
+        assert bruto is not None, "a mensagem nao chegou a DLQ"
+        envelope = json.loads(bruto.body)
+
+        assert envelope["attempts"] == 2
+        assert envelope["firstFailedAt"] is not None, "firstFailedAt veio nulo"
+        # Sao campos distintos: o primeiro tropeco e a desistencia final.
+        assert envelope["firstFailedAt"] <= envelope["failedAt"]
+    finally:
+        await consumer.stop(drain_timeout=2.0)
+
+
 async def test_filas_de_retry_existem_com_ttl(topology):
     connection = topology
     channel = await connection.publish_channel()

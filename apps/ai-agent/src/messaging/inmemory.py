@@ -56,6 +56,11 @@ def build_dlq_envelope(
         error_type=type(exc).__name__,
         error_message=sanitize_error(exc),
         permanent=permanent,
+        # Vem do header `x-first-failed-at`, propagado a cada retry. Sem copiar
+        # aqui, o envelope saia sempre com `firstFailedAt` nulo e o operador
+        # perdia a unica informacao que distingue "falhou agora" de "vem
+        # falhando ha duas horas" — `failedAt` e sempre a ultima tentativa.
+        first_failed_at=message.first_failed_at,
         correlation_id=message.correlation_id,
     )
 
