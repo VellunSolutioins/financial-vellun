@@ -23,7 +23,10 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "infra:up": "docker compose -f infra/docker/docker-compose.yml up -d",
-    "infra:down": "docker compose -f infra/docker/docker-compose.yml down"
+    "infra:down": "docker compose -f infra/docker/docker-compose.yml down",
+    "obs:check": "node infra/observability/check.mjs",
+    "obs:up": "docker compose -f infra/docker/docker-compose.yml -f infra/observability/docker-compose.observability.yml up -d",
+    "obs:down": "docker compose -f infra/docker/docker-compose.yml -f infra/observability/docker-compose.observability.yml down"
   },
   "engines": {
     "node": ">=20",

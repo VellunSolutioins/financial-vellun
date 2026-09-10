@@ -1,0 +1,211 @@
+# Alertas do pipeline WhatsApp (RabbitMQ + agente de IA).
+#
+# Formato de regra do Prometheus, carregado no ruler do Grafana Cloud Metrics com
+# `mimirtool rules load`. **Não** é o formato de provisionamento de arquivo do
+# Grafana: o Grafana Cloud não suporta file provisioning ("Provisioning with
+# configuration files is not available in Grafana Cloud"), então este é o caminho
+# que de fato mantém a regra versionada em vez de clicada na UI.
+#
+# A escolha tem um segundo benefício, maior que o primeiro: regra em formato
+# Prometheus é **testável** com `promtool test rules`, com séries sintéticas e
+# asserção de que o alerta dispara. Verificar "Pending → Firing" na UI prova uma
+# vez, num navegador; o teste prova a cada execução.
+#
+#   mimirtool rules check infra/observability/alerts/*.yaml
+#   promtool test rules infra/observability/alerts/tests/*.yaml
+#   mimirtool rules load infra/observability/alerts/*.yaml \
+#     --address="$GRAFANA_CLOUD_PROM_URL_BASE" --id="$GRAFANA_CLOUD_PROM_USER" \
+#     --key="$GRAFANA_CLOUD_TOKEN"
+#
+# Convenções de toda regra deste diretório:
+#
+# - `severity`: `critical` acorda alguém, `warning` espera o horário comercial;
+# - `service` e `env`: quem e onde, para o roteamento de notificação;
+# - `summary`: o que aconteceu, em uma linha, sem jargão de métrica;
+# - `description`: o número concreto, para não precisar abrir o dashboard;
+# - `dashboard` e `runbook`: onde olhar e o que fazer. Um alerta sem procedimento
+#   é um alerta que vai ser silenciado.
+#
+# `DASHBOARD_BASE` e `RUNBOOK_BASE` são substituídos no carregamento (ver o
+# README deste diretório): a URL da organização no Grafana só existe depois de a
+# stack ser criada, e fixá-la aqui deixaria o arquivo errado no repositório.
+
+groups:
+  # ── Filas ────────────────────────────────────────────────────────────────
+  - name: whatsapp-filas
+    interval: 30s
+    rules:
+      - alert: FilaComMensagemESemConsumidor
+        # A condição mais importante do conjunto: mensagem esperando e ninguém
+        # para consumir. Sem isso, um worker que morreu passa despercebido até
+        # alguém reclamar de lançamento que não apareceu — e nesse ponto já são
+        # horas de mensagens paradas.
+        #
+        # As filas de retry e DLQ ficam de fora de propósito: retry não tem
+        # consumidor por construção (o TTL devolve a mensagem), e a DLQ tem o
+        # alerta próprio abaixo.
+        expr: |
+          rabbitmq_detailed_queue_messages_ready{queue=~"whatsapp\\.(inbound|processing)\\.v1"} > 0
+            and on(queue)
+          rabbitmq_detailed_queue_consumers{queue=~"whatsapp\\.(inbound|processing)\\.v1"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: ai-agent-worker
+        annotations:
+          summary: 'Fila {{ $labels.queue }} tem mensagem e nenhum consumidor'
+          description: >-
+            {{ $value }} mensagem(ns) pronta(s) em {{ $labels.queue }} sem nenhum
+            consumidor conectado há mais de 2 minutos. Nada está sendo processado.
+          dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
+          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#backlog-crescendo'
+
+      - alert: BacklogCrescendoDeFormaSustentada
+        # Consumidores existem, mas não dão conta. Olhamos a **derivada**, não o
+        # valor absoluto: um pico de 500 mensagens drenado em 30s é saúde, e um
+        # crescimento de 20/min por 15 minutos é problema — o limiar absoluto
+        # confundiria os dois.
+        expr: |
+          deriv(rabbitmq_detailed_queue_messages_ready{queue=~"whatsapp\\.(inbound|processing)\\.v1"}[10m]) > 0.3
+            and
+          rabbitmq_detailed_queue_messages_ready{queue=~"whatsapp\\.(inbound|processing)\\.v1"} > 100
+        for: 15m
+        labels:
+          severity: warning
+          service: ai-agent-worker
+        annotations:
+          summary: 'Backlog de {{ $labels.queue }} crescendo há 15 minutos'
+          description: >-
+            {{ $labels.queue }} acumula mensagens de forma sustentada (mais de 100
+            pendentes e crescendo). Os consumidores não estão dando conta da taxa
+            de entrada.
+          dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
+          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#backlog-crescendo'
+
+  # ── Falha definitiva ─────────────────────────────────────────────────────
+  - name: whatsapp-dlq
+    interval: 30s
+    rules:
+      - alert: NovaEntradaEmDLQ
+        # Qualquer entrada nova é digna de atenção: chegar à DLQ significa que o
+        # retry com backoff já se esgotou, ou que o contrato era inválido. Não há
+        # `for` — esperar 5 minutos para contar uma mensagem que já falhou
+        # definitivamente não muda nada e só atrasa a investigação.
+        expr: increase(rabbitmq_detailed_queue_messages_ready{queue=~"whatsapp\\..*\\.dlq"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          service: ai-agent-worker
+        annotations:
+          summary: 'Nova mensagem em {{ $labels.queue }}'
+          description: >-
+            {{ $value }} mensagem(ns) entrou(entraram) em {{ $labels.queue }} nos
+            últimos 5 minutos. Investigue a causa ANTES de reprocessar.
+          dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
+          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#mensagens-na-dlq'
+
+      - alert: DlqAcumulandoSemTratamento
+        # Complementa o alerta acima: uma mensagem na DLQ é um incidente, dez
+        # paradas por uma hora é um incidente **ignorado**.
+        expr: rabbitmq_detailed_queue_messages_ready{queue=~"whatsapp\\..*\\.dlq"} > 0
+        for: 1h
+        labels:
+          severity: warning
+          service: ai-agent-worker
+        annotations:
+          summary: '{{ $labels.queue }} com mensagem parada há mais de 1 hora'
+          description: >-
+            {{ $value }} mensagem(ns) em {{ $labels.queue }} sem tratamento há mais
+            de uma hora.
+          dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
+          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#mensagens-na-dlq'
+
+      - alert: CatalogoDeFalhasDivergindoDaDLQ
+        # A profundidade da fila e a contagem do catálogo formam um par: se o
+        # consumer do catálogo cair, as mensagens se acumulam na DLQ (nada se
+        # perde) e esta divergência é o sinal. Sem ela, a tela de falhas mostraria
+        # menos do que existe — e mostrar menos é pior que não mostrar.
+        #
+        # Depende da Entrega 5; enquanto `vellun_ops_failed_messages` não existir,
+        # `absent()` mantém a regra inerte em vez de disparar em falso.
+        expr: |
+          (
+            sum(rabbitmq_detailed_queue_messages_ready{queue=~"whatsapp\\..*\\.dlq"})
+              -
+            sum(vellun_ops_failed_messages_captured_total)
+          ) > 5
+          unless absent(vellun_ops_failed_messages_captured_total)
+        for: 10m
+        labels:
+          severity: warning
+          service: ai-agent-worker
+        annotations:
+          summary: 'Catálogo de falhas atrás da DLQ'
+          description: >-
+            A DLQ tem {{ $value }} mensagem(ns) além do que o catálogo registrou.
+            O consumer do catálogo pode estar parado — o painel de operações está
+            mostrando menos falhas do que existem.
+          dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
+          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#mensagens-na-dlq'
+
+  # ── Processamento ────────────────────────────────────────────────────────
+  - name: whatsapp-processamento
+    interval: 30s
+    rules:
+      - alert: WebhookRecusandoPublicacao
+        # O webhook devolve 503 quando não consegue publicar, e a Meta reenvia —
+        # mas com limite. Perder a publicação é perder o lançamento do cliente.
+        expr: increase(vellun_agent_publish_failed_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          service: ai-agent
+        annotations:
+          summary: 'Webhook do WhatsApp não está conseguindo publicar'
+          description: >-
+            {{ $value }} falha(s) de publicação nos últimos 5 minutos. O webhook
+            está devolvendo 503 e a Meta vai reenviar — com limite de tentativas.
+          dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
+          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#webhook-devolvendo-503'
+
+      - alert: TaxaDeErroDeProcessamentoAlta
+        # Proporção, não contagem: 10 erros em 10 mensagens é um incidente, 10 em
+        # 10.000 é ruído. O denominador com `> 0` evita divisão por zero durante a
+        # madrugada, quando não há tráfego.
+        expr: |
+          (
+            sum(rate(vellun_agent_processing_error_total[10m]))
+              /
+            sum(rate(vellun_agent_jobs_processed_total[10m])) > 0
+          ) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          service: ai-agent-worker
+        annotations:
+          summary: 'Mais de 10% dos jobs falhando no processamento'
+          description: >-
+            {{ $value | humanizePercentage }} dos jobs processados nos últimos 10
+            minutos terminaram em erro.
+          dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
+          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#mensagens-na-dlq'
+
+      - alert: LatenciaDeProcessamentoSubindo
+        # p95 acima de 30s: o usuário mandou uma mensagem e não teve resposta em
+        # meio minuto. O debounce de 5s já está incluído nesta medida.
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(vellun_agent_processing_duration_seconds_bucket[10m]))
+          ) > 30
+        for: 15m
+        labels:
+          severity: warning
+          service: ai-agent-worker
+        annotations:
+          summary: 'p95 do processamento acima de 30s'
+          description: >-
+            O percentil 95 do processamento está em {{ $value | humanizeDuration }}.
+            Normalmente dominado pela latência do LLM.
+          dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
+          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#backlog-crescendo'

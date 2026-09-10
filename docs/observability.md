@@ -36,6 +36,18 @@ Scrape a cada 30 s nas aplicações e 60 s na infraestrutura, com
 sem o token — a exposição não é inócua: nomes de rota revelam a superfície da API
 e contadores revelam volume de negócio.
 
+**O RabbitMQ tem dois scrapes, e a razão não é cosmética.** A porta 15692 devolve,
+por padrão, métricas **agregadas**: `rabbitmq_queue_messages_ready` vem sem o
+label `queue`, somando todas as filas. Com isso os dois alertas centrais do
+pipeline — "fila com mensagem e zero consumidores" e "nova entrada em DLQ" —
+seriam inexprimíveis, porque não haveria como distinguir `whatsapp.processing.dlq`
+de `whatsapp.inbound.v1`.
+
+O label vem de `/metrics/detailed`, com o prefixo `rabbitmq_detailed_`. Pedimos
+**apenas duas famílias** (`queue_coarse_metrics` e `queue_consumer_count`): o
+endpoint inteiro traz milhares de séries, e este par custa 77. Pedir `family=`
+explicitamente é o que separa "por fila" de "estoura o free tier".
+
 ### Logs: as aplicações empurram
 
 **O Railway não tem log drain.** O plano original previa receber um "log drain
@@ -103,7 +115,14 @@ Em `prometheus.relabel "corta_ruido"` (`infra/observability/alloy/config.alloy`)
 | `erlang_vm_(allocators\|msacc_.*\|dist_.*\|statistics_garbage_collection)` | ~2.370 | Diagnostica a VM Erlang, não o nosso pipeline. O painel do RabbitMQ mostra ao vivo se precisar. |
 | `redis_(latency_percentiles\|commands_latencies)_.*` | ~320 | Usamos Redis para agrupamento e lock; interessa `redis_up`, memória e conexões — não a distribuição por comando. |
 | `pg_statio_user_.*` | ~150 | Mantemos `pg_stat_user_tables_*`, que responde "falta índice aqui?". |
-| `pg_settings_.*` | ~250 | Configuração do servidor como métrica: constante entre scrapes, e `SHOW ALL` responde melhor. |
+
+> **Uma regra que existiu e foi removida.** Havia um descarte de `pg_settings_.*`
+> (255 séries de configuração do servidor, constantes entre scrapes). Ele saiu
+> porque o alerta `ConexoesDoPostgresProximasDoLimite` precisa de
+> `pg_settings_max_connections`, e a regex do Prometheus é RE2 — sem lookahead,
+> "descarte `pg_settings_` exceto `max_connections`" só sairia como uma alternância
+> longa que quebraria calada na próxima versão do exporter. 255 séries (2,5% do
+> teto) é preço justo por um alerta que funciona.
 
 > **Cuidado com o formato do nome.** `erlang_vm_allocators` é **um** nome de
 > métrica com 1.744 combinações de label, sem sufixo. Uma versão anterior da
@@ -309,6 +328,38 @@ PY
 
 ---
 
+## Alertas e dashboards
+
+Os arquivos estão em [`infra/observability/`](../infra/observability/README.md),
+que documenta o formato de cada um e como carregar. Dois pontos que mudam a forma
+de trabalhar:
+
+**O Grafana Cloud não suporta provisionamento por arquivo** — não existe diretório
+de provisioning numa instância gerenciada. Então: regras de alerta vão para o
+ruler com `mimirtool rules load`, dashboards pela API/Terraform, e canais de
+notificação por Terraform ou pela API de alerting. Os arquivos ficam versionados
+para a configuração ser revisável em PR em vez de existir só como cliques.
+
+**Os alertas são testados, não conferidos na UI.** Regra em formato Prometheus é
+testável: `promtool test rules` monta séries sintéticas e afirma que o alerta
+dispara — e que **não** dispara quando não deveria. Um comando roda tudo:
+
+```bash
+pnpm obs:check
+```
+
+São 33 casos, cobrindo os dois critérios de aceite ("derrubar o consumidor dispara
+fila sem consumidor", "forçar uma mensagem para a DLQ dispara nova entrada em
+DLQ") e, principalmente, os casos de **não** disparo, que são a metade esquecida:
+fila vazia de madrugada, fila de retry (que não tem consumidor por construção),
+divisão por zero sem tráfego, deploy de um minuto, e métrica de entrega futura
+ainda ausente. Um alerta que dispara sempre é indistinguível de um alerta quebrado.
+
+Nenhuma notificação sai para fora: os canais em
+`infra/observability/notifications/contact-points.yaml` estão declarados **sem
+destino real**, porque preencher endereços antes de calibrar o ruído faria o
+primeiro `apply` disparar a bateria inteira para pessoas de verdade.
+
 ## O que ainda depende de conta e painel
 
 Estas etapas não estão no repositório porque o Railway e o Grafana Cloud são
@@ -319,7 +370,10 @@ operados pelo painel — a maior fragilidade do conjunto, registrada em
 - criar o serviço do Alloy no Railway, montando `config.alloy` e definindo as
   variáveis;
 - criar os dois serviços de exporter;
-- **não** expor publicamente as portas 3100 (Alloy) e 15692 (RabbitMQ).
+- **não** expor publicamente as portas 3100 (Alloy) e 15692 (RabbitMQ);
+- carregar as regras (`mimirtool rules load`) e importar os dashboards;
+- preencher o destino dos canais de notificação, **depois** de os alertas rodarem
+  alguns dias e o ruído ser calibrado.
 
 Verificado nesta máquina: os seis alvos de scrape `up`, o token de métricas
 recusando scrape sem Bearer (401), o envio de log chegando ao `loki.source.api` e

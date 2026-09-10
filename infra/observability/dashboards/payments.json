@@ -1,0 +1,165 @@
+{
+  "uid": "vellun-payments",
+  "title": "Vellun — Pagamentos",
+  "description": "Webhooks do PSP: recebimento, retry e falha definitiva. Os painéis dependem das métricas da Entrega 8 (durabilidade do retry) e ficam vazios até ela existir — 'sem dado' aqui é estado esperado, não incidente.",
+  "tags": ["vellun", "operacoes", "pagamentos"],
+  "timezone": "America/Sao_Paulo",
+  "editable": true,
+  "schemaVersion": 39,
+  "refresh": "1m",
+  "time": { "from": "now-24h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "ds",
+        "label": "Métricas",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "env",
+        "label": "Ambiente",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${ds}" },
+        "query": "label_values(up, env)",
+        "refresh": 1,
+        "current": {},
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Eventos esgotados (24h)",
+      "description": "Falha DEFINITIVA: alguém pagou e o acesso pode não ter sido concedido. Qualquer valor acima de zero exige ação — a recuperação pelo painel de operações só atua sobre eventos neste estado.",
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(vellun_api_payment_webhook_exhausted_total{env=\"$env\"}[24h]))",
+          "instant": true
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "sem dado (Entrega 8)",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Aguardando retry",
+      "description": "Estado TRANSITÓRIO: o cron de varredura vai retomar. Distinto de esgotado — e a distinção é o que impede o operador de reprocessar por cima de um retry em andamento.",
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(vellun_api_payment_webhook_pending_retry{env=\"$env\"})",
+          "instant": true
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "sem dado (Entrega 8)",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 20 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Eventos recebidos e processados",
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "gridPos": { "h": 5, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(vellun_api_payment_webhook_received_total{env=\"$env\"}[10m]))",
+          "legendFormat": "recebidos/s"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(vellun_api_payment_webhook_processed_total{env=\"$env\"}[10m]))",
+          "legendFormat": "processados/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "noValue": "sem dado (Entrega 8)",
+          "custom": { "lineWidth": 2 }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Falha transitória vs. definitiva",
+      "description": "As duas linhas separadas são o ponto da Entrega 8: `failed` grava a cada tentativa e significa 'vai ser retentado sozinho'; `exhausted` significa 'acabou'. Antes dessa separação, o painel não conseguia distinguir os dois — e o operador reprocessaria por cima de um retry em andamento.",
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 5 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(vellun_api_payment_webhook_failed_total{env=\"$env\"}[10m]))",
+          "legendFormat": "falha transitória (10m)"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(increase(vellun_api_payment_webhook_exhausted_total{env=\"$env\"}[10m]))",
+          "legendFormat": "esgotado (10m)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "noValue": "sem dado (Entrega 8)", "custom": { "lineWidth": 2 } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "esgotado (10m)" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+          }
+        ]
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Latência de processamento do webhook (p95)",
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 5 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{env=\"$env\", job=\"api\", route=~\"/billing/webhook.*\"}[10m])))",
+          "legendFormat": "p95"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "lineWidth": 2 } }, "overrides": [] }
+    }
+  ]
+}

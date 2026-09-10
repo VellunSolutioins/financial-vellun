@@ -165,6 +165,50 @@ prometheus.scrape "infraestrutura" {
   scrape_timeout  = "15s"
 }
 
+// Métricas de fila **por fila**, do RabbitMQ.
+//
+// Necessário porque a porta 15692 devolve, por padrão, métricas **agregadas**:
+// `rabbitmq_queue_messages_ready` vem sem o label `queue`, somando todas. Com
+// isso, os dois alertas centrais do plano — "fila com mensagem e zero
+// consumidores" e "nova entrada em DLQ" — seriam inexprimíveis: não há como
+// distinguir `whatsapp.processing.dlq` de `whatsapp.inbound.v1`.
+//
+// `/metrics/detailed` traz o label, com o prefixo `rabbitmq_detailed_`. Pedimos
+// **apenas duas famílias**: o endpoint inteiro traz milhares de séries, e este
+// par custa 77 (14 filas × algumas métricas). Pedir `family=` explicitamente é o
+// que separa "por fila" de "explode o free tier".
+prometheus.scrape "rabbitmq_por_fila" {
+  targets = [
+    {
+      __address__     = "rabbitmq.railway.internal:15692",
+      __metrics_path__ = "/metrics/detailed",
+      __param_family  = "queue_coarse_metrics",
+      job             = "rabbitmq",
+    },
+  ]
+
+  // O `__param_family` acima cobre uma família; a segunda vai na query string do
+  // próprio path, porque o parâmetro é repetido e não uma lista.
+  forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+  scrape_interval = "30s"
+  scrape_timeout  = "15s"
+}
+
+prometheus.scrape "rabbitmq_consumidores" {
+  targets = [
+    {
+      __address__      = "rabbitmq.railway.internal:15692",
+      __metrics_path__ = "/metrics/detailed",
+      __param_family   = "queue_consumer_count",
+      job              = "rabbitmq",
+    },
+  ]
+
+  forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+  scrape_interval = "30s"
+  scrape_timeout  = "15s"
+}
+
 // Descarte de famílias de métrica que não usamos.
 //
 // **Isto é necessário, não zelo excessivo.** O free tier do Grafana Cloud dá
@@ -214,13 +258,13 @@ prometheus.relabel "corta_ruido" {
     action        = "drop"
   }
 
-  // `pg_settings_*` é a configuração do servidor exposta como métrica: constante
-  // entre scrapes, e um `SHOW ALL` responde melhor quando a pergunta aparece.
-  rule {
-    source_labels = ["__name__"]
-    regex         = "pg_settings_.*"
-    action        = "drop"
-  }
+  // NOTA: houve aqui uma regra descartando `pg_settings_.*` (255 séries de
+  // configuração do servidor, constantes entre scrapes). Ela foi **removida** de
+  // propósito: o alerta `ConexoesDoPostgresProximasDoLimite` precisa de
+  // `pg_settings_max_connections`, e a regex do Prometheus é RE2 — sem lookahead,
+  // "descarte `pg_settings_` exceto `max_connections`" só sairia como uma
+  // alternância longa e frágil, que quebraria calada na próxima versão do
+  // exporter. 255 séries (2,5% do teto) é preço justo por um alerta que funciona.
 }
 
 // ── Auto-observação ─────────────────────────────────────────────────────────

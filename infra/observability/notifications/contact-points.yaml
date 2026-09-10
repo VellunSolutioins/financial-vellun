@@ -1,0 +1,78 @@
+# Canais de notificação e roteamento — DECLARADOS, SEM DESTINO CONFIGURADO.
+#
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │ NADA É ENVIADO PARA FORA.                                               │
+# │                                                                         │
+# │ Os endereços são propositalmente placeholders. Preenchê-los aqui faria  │
+# │ o primeiro `apply` disparar toda a bateria de alertas de teste para     │
+# │ pessoas reais — e a maneira mais rápida de um sistema de alerta ser     │
+# │ ignorado é começar com uma enxurrada de falso-positivo.                 │
+# │                                                                         │
+# │ O destino real é preenchido no painel, DEPOIS de os alertas rodarem     │
+# │ alguns dias e o ruído ser calibrado.                                    │
+# └─────────────────────────────────────────────────────────────────────────┘
+#
+# COMO ISTO É APLICADO: o Grafana Cloud **não suporta provisionamento por
+# arquivo** ("Provisioning with configuration files is not available in Grafana
+# Cloud"). Este arquivo é o formato de export/import do Grafana, e o caminho é
+# o Terraform (`grafana_contact_point`, `grafana_notification_policy`) ou a API
+# de provisionamento de alerting. Ele fica versionado para que a configuração
+# seja revisável em PR, em vez de existir só como cliques no painel.
+#
+# ATENÇÃO ao aplicar a política: a árvore de roteamento é um recurso ÚNICO —
+# provisioná-la **sobrescreve todas** as políticas existentes.
+
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: ops-critico
+    receivers:
+      - uid: ops-critico-email
+        type: email
+        # SEM DESTINO: preencher no painel quando o roteamento for ativado.
+        settings:
+          addresses: 'PREENCHER@EXEMPLO.INVALIDO'
+          singleEmail: false
+        disableResolveMessage: false
+
+  - orgId: 1
+    name: ops-aviso
+    receivers:
+      - uid: ops-aviso-email
+        type: email
+        settings:
+          addresses: 'PREENCHER@EXEMPLO.INVALIDO'
+          singleEmail: true
+        # Aviso não precisa de mensagem de resolução: dobra o volume de
+        # notificação sem acrescentar decisão.
+        disableResolveMessage: true
+
+policies:
+  - orgId: 1
+    receiver: ops-aviso
+    # Agrupa por alerta, serviço e ambiente. Sem `env` no agrupamento, um
+    # problema em staging e o mesmo problema em produção viriam na mesma
+    # notificação — e a pergunta "isso é produção?" é a primeira que se faz.
+    group_by: ['alertname', 'service', 'env']
+    # Espera 30s antes da primeira notificação de um grupo novo: alertas
+    # relacionados (fila cheia + latência alta) chegam juntos em vez de em três
+    # mensagens.
+    group_wait: 30s
+    group_interval: 5m
+    # 4h para não transformar um incidente longo em spam. Um incidente em
+    # andamento é acompanhado no dashboard, não pela repetição do alerta.
+    repeat_interval: 4h
+
+    routes:
+      - receiver: ops-critico
+        object_matchers:
+          - ['severity', '=', 'critical']
+        group_by: ['alertname', 'service', 'env']
+        group_wait: 10s
+        group_interval: 5m
+        # Repete mais para o crítico: é o que acorda alguém, e um crítico
+        # esquecido por 4h é pior que uma notificação repetida.
+        repeat_interval: 1h
+        # `continue: false` (padrão): crítico não cai também no canal de aviso.
+        continue: false

@@ -111,6 +111,39 @@ prometheus.scrape "infraestrutura" {
   scrape_timeout  = "15s"
 }
 
+// Métricas de fila **por fila** — a 15692 agrega por padrão, e sem o label
+// `queue` os alertas de DLQ e de fila sem consumidor são inexprimíveis. Ver a
+// nota completa no config de produção.
+prometheus.scrape "rabbitmq_por_fila" {
+  targets = [
+    {
+      __address__      = "rabbitmq:15692",
+      __metrics_path__ = "/metrics/detailed",
+      __param_family   = "queue_coarse_metrics",
+      job              = "rabbitmq",
+    },
+  ]
+
+  forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+  scrape_interval = "15s"
+  scrape_timeout  = "15s"
+}
+
+prometheus.scrape "rabbitmq_consumidores" {
+  targets = [
+    {
+      __address__      = "rabbitmq:15692",
+      __metrics_path__ = "/metrics/detailed",
+      __param_family   = "queue_consumer_count",
+      job              = "rabbitmq",
+    },
+  ]
+
+  forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+  scrape_interval = "15s"
+  scrape_timeout  = "15s"
+}
+
 // Mesmas regras de descarte do config de produção — ver a justificativa lá.
 prometheus.relabel "corta_ruido" {
   forward_to = [prometheus.remote_write.grafana_cloud.receiver]
@@ -142,13 +175,8 @@ prometheus.relabel "corta_ruido" {
     action        = "drop"
   }
 
-  // `pg_settings_*` é a configuração do servidor exposta como métrica: constante
-  // entre scrapes, e um `SHOW ALL` responde melhor quando a pergunta aparece.
-  rule {
-    source_labels = ["__name__"]
-    regex         = "pg_settings_.*"
-    action        = "drop"
-  }
+  // Sem regra para `pg_settings_.*`: o alerta de conexões precisa de
+  // `pg_settings_max_connections`. Ver a nota no config de produção.
 }
 
 // ── Auto-observação ─────────────────────────────────────────────────────────
