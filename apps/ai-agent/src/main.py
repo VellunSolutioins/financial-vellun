@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from .bootstrap import pipeline
 from .config import settings
 from .observability.logging import configure_logging
+from .observability.middleware import CorrelationIdMiddleware
 from .routers import health, internal, metrics, webhook
 
 configure_logging()
@@ -47,6 +48,10 @@ app = FastAPI(
     version="0.0.1",
     lifespan=lifespan,
 )
+
+# Primeiro middleware da cadeia: nenhum log de requisicao deve sair sem
+# `correlationId`, inclusive o de um erro em outro middleware.
+app.add_middleware(CorrelationIdMiddleware)
 
 app.include_router(health.router)
 app.include_router(metrics.router)

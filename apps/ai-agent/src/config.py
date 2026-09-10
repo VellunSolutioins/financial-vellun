@@ -92,6 +92,17 @@ class Settings(BaseSettings):
     processing_lock_ttl_seconds: int = 120
     job_dedupe_ttl_seconds: int = 86400
 
+    # ── Observabilidade ────────────────────────────────────────────────────
+    # Token exigido em `GET /metrics` (`Authorization: Bearer ...`). Precisa ser
+    # o mesmo da API — o Alloy usa um só para os dois. Vazio libera o endpoint,
+    # o que é aceitável em desenvolvimento (localhost) e recusado em produção:
+    # ver `require_metrics_token` no router de métricas.
+    metrics_token: str = ""
+    # Porta do servidor mínimo de observabilidade do worker (`python -m
+    # src.worker`), que não tem HTTP próprio. Sem ele as réplicas de consumo —
+    # justamente onde o trabalho acontece — ficam invisíveis para o scrape.
+    worker_metrics_port: int = 8011
+
     # Contexto conversacional fornecido ao LLM
     conversation_context_message_limit: int = 15
     conversation_context_max_chars: int = 4000

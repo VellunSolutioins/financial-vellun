@@ -11,9 +11,14 @@ As colunas ``/s`` são a variação desde a linha anterior, então dá para ver 
 taxa de entrada (``in/s``) e a de consumo (``cons/s``) divergirem quando o
 backlog cresce.
 
-Contadores vêm de ``GET /metrics``, que é **por processo**: com
+Contadores vêm de ``GET /metrics.json``, que é **por processo**: com
 ``RUN_CONSUMERS_IN_API=false``, as colunas de consumo ficam zeradas aqui e o que
-vale é a profundidade das filas.
+vale é a profundidade das filas — ou aponte ``--metrics`` para a porta do worker
+(``WORKER_METRICS_PORT``, 8011 por padrão), que é quem consome.
+
+``/metrics`` passou a devolver **texto Prometheus**; o shape ``{counters,
+timings}`` que este script lê vive em ``/metrics.json``. Com ``METRICS_TOKEN``
+configurado, passe ``--token`` (ou defina ``METRICS_TOKEN`` no ambiente).
 """
 
 from __future__ import annotations
@@ -29,9 +34,14 @@ import httpx
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-DEFAULT_METRICS = "http://localhost:8010/metrics"
+DEFAULT_METRICS = "http://localhost:8010/metrics.json"
 DEFAULT_READY = "http://localhost:8010/health/ready"
 DEFAULT_RABBIT_API = "http://localhost:15672/api/queues/%2F"
+
+
+def metrics_headers(token: str | None) -> dict:
+    """Cabeçalho de autorização do scrape, quando há token."""
+    return {"Authorization": f"Bearer {token}"} if token else {}
 
 COLUNAS = (
     f"{'hora':<8} {'recv':>7} {'in/s':>7} {'conf':>7} {'falha':>6} "
@@ -44,7 +54,9 @@ async def coletar(client: httpx.AsyncClient, args: argparse.Namespace) -> dict:
     estado: dict = {"counters": {}, "timings": {}, "filas": {}, "ready": "?"}
 
     try:
-        resposta = await client.get(args.metrics, timeout=5.0)
+        resposta = await client.get(
+            args.metrics, timeout=5.0, headers=metrics_headers(args.token)
+        )
         if resposta.status_code == 200:
             dados = resposta.json()
             estado["counters"] = dados.get("counters", {})
@@ -113,6 +125,11 @@ def parse_args() -> argparse.Namespace:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--metrics", default=DEFAULT_METRICS)
+    parser.add_argument(
+        "--token",
+        default=os.getenv("METRICS_TOKEN", ""),
+        help="Bearer de /metrics.json (padrão: METRICS_TOKEN do ambiente)",
+    )
     parser.add_argument("--ready", default=DEFAULT_READY)
     parser.add_argument("--rabbit-api", default=DEFAULT_RABBIT_API)
     parser.add_argument("--rabbit-user", default=os.getenv("RABBITMQ_USER", "guest"))

@@ -41,14 +41,19 @@ financial-vellun/
 ## Estrutura interna dos apps
 
 ```
-apps/api/src/        accounts/ auth/ categories/ contacts/ dashboard/
-                     internal/ transactions/ users/ prisma/ (cada módulo: *.module/*.controller/*.service + dto/)
+apps/api/src/        accounts/ auth/ billing/ categories/ contacts/ dashboard/
+                     internal/ notifications/ observability/ ops/ transactions/ users/
+                     prisma/ (cada módulo: *.module/*.controller/*.service + dto/)
+                     observability/ (métricas, health, correlação, log estruturado)
+                     ops/ (auth GitHub OAuth, audit append-only, operators)
 apps/web/src/        app/ components/ contexts/ hooks/ lib/ middleware.ts
                      app/(auth)/{login,cadastro}  app/app/{pessoal,empresa,conta}
+                     app/ops/ (área de operações — sessão e cliente HTTP próprios)
 apps/ai-agent/src/   main.py worker.py bootstrap.py config.py
                      routers/ schemas/ services/
                      messaging/ (contracts, base, rabbitmq/, inmemory)
-                     consumers/ (inbound, processing)  grouping/  observability/
+                     consumers/ (inbound, processing)  grouping/
+                     observability/ (logging, middleware de correlação, worker_server)
 ```
 
 ## Commands
@@ -72,16 +77,25 @@ pnpm --filter @financial-vellun/api exec prisma migrate reset    # resetar (dev)
 pnpm --filter @financial-vellun/api db:seed                      # categorias padrão + usuário demo
 ```
 
-| Serviço   | URL                                  |
-| --------- | ------------------------------------ |
-| Web       | http://localhost:3000                |
-| API       | http://localhost:3001                |
-| Swagger   | http://localhost:3001/api/docs       |
-| AI Agent  | http://localhost:8010                |
-| Liveness  | http://localhost:8010/health/live    |
-| Readiness | http://localhost:8010/health/ready   |
-| Métricas  | http://localhost:8010/metrics        |
-| RabbitMQ  | http://localhost:15672 (guest/guest) |
+| Serviço              | URL                                        |
+| -------------------- | ------------------------------------------ |
+| Web                  | http://localhost:3000                      |
+| Operações (painel)   | http://localhost:3000/ops                  |
+| API                  | http://localhost:3001                      |
+| Swagger              | http://localhost:3001/api/docs             |
+| AI Agent             | http://localhost:8010                      |
+| RabbitMQ             | http://localhost:15672 (guest/guest)       |
+
+**Observabilidade** — os três serviços expõem o mesmo trio. `/metrics` é texto
+Prometheus e exige `Authorization: Bearer ${METRICS_TOKEN}`; `/metrics.json` (só
+no agente) preserva o shape antigo `{counters, timings}` usado por
+`scripts/monitor.py` e `scripts/loadtest.py`.
+
+| Serviço              | Liveness / Readiness                    | Métricas                        |
+| -------------------- | --------------------------------------- | ------------------------------- |
+| API                  | :3001/health/live · :3001/health/ready  | :3001/metrics                   |
+| AI Agent             | :8010/health/live · :8010/health/ready  | :8010/metrics · /metrics.json   |
+| AI Agent (worker)    | :8011/health/live · :8011/health/ready  | :8011/metrics · /metrics.json   |
 
 ### Agente de IA (Python)
 

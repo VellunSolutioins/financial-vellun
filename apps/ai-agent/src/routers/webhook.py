@@ -26,7 +26,7 @@ from ..bootstrap import pipeline
 from ..config import settings
 from ..messaging.base import ROUTE_INBOUND, PublishError
 from ..messaging.contracts import InboundMessageV1, new_id
-from ..observability.logging import log_context, safe_phone
+from ..observability.logging import current_context, log_context, safe_phone
 from ..services.metrics import metrics
 from ..services.phone import normalize_phone
 from ..services.whatsapp_inbound import InboundMessage, parse_inbound
@@ -146,7 +146,10 @@ async def receive_whatsapp(
         metrics.observe_ms("webhook_latency_ms", (time.monotonic() - started) * 1000)
         return {"status": "accepted"}
 
-    correlation_id = new_id()
+    # Reaproveita a correlação aberta pelo middleware — que respeita o
+    # `x-correlation-id` recebido. Gerar um id aqui faria o mesmo fluxo aparecer
+    # no Loki com dois ids: o do chamador e o nosso.
+    correlation_id = current_context().correlation_id or new_id()
     messages: list[InboundMessageV1] = []
     for item in inbound:
         if item.kind == "text" and len(item.message) > settings.message_max_chars:

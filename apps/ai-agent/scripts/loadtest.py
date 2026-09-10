@@ -41,7 +41,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 DEFAULT_URL = "http://localhost:8010/webhook/whatsapp"
-DEFAULT_METRICS = "http://localhost:8010/metrics"
+DEFAULT_METRICS = "http://localhost:8010/metrics.json"
 DEFAULT_RABBIT_API = "http://localhost:15672/api/queues/%2F"
 
 
@@ -121,9 +121,16 @@ def sign(body: bytes, secret: str) -> dict[str, str]:
 
 
 # ── Coleta de estado ─────────────────────────────────────────────────────────
-async def fetch_metrics(client: httpx.AsyncClient, url: str) -> dict:
+async def fetch_metrics(client: httpx.AsyncClient, url: str, token: str = "") -> dict:
+    """Snapshot no shape ``{counters, timings}``, servido por ``/metrics.json``.
+
+    ``/metrics`` passou a devolver texto Prometheus; este script continua no JSON
+    porque compara contadores antes/depois, e parsear texto de exposição só para
+    isso seria trabalho sem retorno.
+    """
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
     try:
-        response = await client.get(url, timeout=5.0)
+        response = await client.get(url, timeout=5.0, headers=headers)
         return response.json() if response.status_code == 200 else {}
     except Exception:  # noqa: BLE001 - observabilidade nao pode derrubar o teste
         return {}
@@ -341,7 +348,7 @@ async def wait_drain(args: argparse.Namespace, segundos: float) -> tuple[dict, i
                 for nome in principais
             )
             grupos = await fetch_pending_groups(args.redis_url)
-            metrics = await fetch_metrics(client, args.metrics)
+            metrics = await fetch_metrics(client, args.metrics, args.token)
             contadores = metrics.get("counters", {})
             publicados = contadores.get("jobs_published", 0)
             processados = contadores.get("jobs_processed", 0)
@@ -435,6 +442,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--url", default=DEFAULT_URL)
     parser.add_argument("--metrics", default=DEFAULT_METRICS)
+    parser.add_argument(
+        "--token",
+        default=os.getenv("METRICS_TOKEN", ""),
+        help="Bearer de /metrics.json (padrão: METRICS_TOKEN do ambiente)",
+    )
     parser.add_argument("--total", type=int, default=200, help="número de requests")
     parser.add_argument("--concurrency", type=int, default=25, help="requests simultâneos")
     parser.add_argument("--phones", type=int, default=50, help="telefones distintos (1 = contenção)")
@@ -462,11 +474,11 @@ async def main() -> int:
     args = parse_args()
 
     async with httpx.AsyncClient() as client:
-        antes = await fetch_metrics(client, args.metrics)
+        antes = await fetch_metrics(client, args.metrics, args.token)
         filas_antes = await fetch_queues(client, args.rabbit_api, args.rabbit_user, args.rabbit_pass)
 
     if not antes:
-        print(f"AVISO: /metrics indisponível em {args.metrics}; o agente está no ar?")
+        print(f"AVISO: métricas indisponíveis em {args.metrics}; o agente está no ar?")
     if filas_antes:
         print("Filas antes:")
         print_queues(filas_antes)
@@ -481,7 +493,7 @@ async def main() -> int:
         filas, grupos = await wait_drain(args, args.wait_drain)
 
     async with httpx.AsyncClient() as client:
-        depois = await fetch_metrics(client, args.metrics)
+        depois = await fetch_metrics(client, args.metrics, args.token)
         if not filas:
             filas = await fetch_queues(client, args.rabbit_api, args.rabbit_user, args.rabbit_pass)
 

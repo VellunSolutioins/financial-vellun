@@ -13,12 +13,22 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, replace
 
 from ..config import settings
 from ..services.phone import hash_phone, mask_phone
+
+#: Header de correlacao. A API principal usa exatamente este nome.
+CORRELATION_HEADER = "x-correlation-id"
+
+#: Limite e alfabeto do id aceito de fora. Sem validacao, um header com quebra de
+#: linha injetaria uma linha falsa num log estruturado.
+_MAX_CORRELATION_LENGTH = 128
+_SAFE_CORRELATION = re.compile(r"^[A-Za-z0-9._:-]+$")
 
 
 @dataclass(frozen=True)
@@ -68,6 +78,39 @@ def log_context(
 def safe_phone(phone: str | None) -> str:
     """Representacao do telefone segura para log, conforme o ambiente."""
     return hash_phone(phone) if settings.is_production else mask_phone(phone)
+
+
+def new_correlation_id() -> str:
+    return str(uuid.uuid4())
+
+
+def sanitize_correlation_id(value: str | None) -> str:
+    """Aceita o id vindo de fora quando e seguro; senao gera um.
+
+    Aceitar o id do chamador e o que permite seguir um fluxo entre a API e o
+    agente; deixar de valida-lo e o que permitiria injetar quebra de linha no log.
+    """
+    if not value:
+        return new_correlation_id()
+
+    candidate = value.strip()
+    if (
+        not candidate
+        or len(candidate) > _MAX_CORRELATION_LENGTH
+        or not _SAFE_CORRELATION.match(candidate)
+    ):
+        return new_correlation_id()
+    return candidate
+
+
+def correlation_headers() -> dict:
+    """Headers para propagar a correlacao numa chamada de saida.
+
+    Fora de um contexto devolve vazio, e nao um id novo: um id que existe so na
+    chamada de saida nao correlaciona com nada e daria falsa impressao de rastro.
+    """
+    correlation_id = current_context().correlation_id
+    return {CORRELATION_HEADER: correlation_id} if correlation_id else {}
 
 
 class ContextFilter(logging.Filter):

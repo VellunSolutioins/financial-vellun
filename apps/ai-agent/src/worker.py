@@ -1,9 +1,14 @@
-"""Entrypoint do worker: consome as filas sem servir HTTP.
+"""Entrypoint do worker: consome as filas.
 
 Use quando ``RUN_CONSUMERS_IN_API=false`` para escalar o processamento
 independentemente da camada que recebe os webhooks:
 
     python -m src.worker
+
+Serve um HTTP **mínimo** (``/metrics`` e ``/health/*``, porta
+``WORKER_METRICS_PORT``) e nada mais. Sem ele as réplicas de consumo ficariam
+invisíveis para o scrape e para o orquestrador — e é aqui que o trabalho
+acontece. Ver ``observability/worker_server.py``.
 
 Encerra de forma graciosa em SIGINT/SIGTERM, devolvendo a fila o que nao
 terminou.
@@ -17,6 +22,7 @@ import signal
 
 from .bootstrap import pipeline
 from .observability.logging import configure_logging
+from .observability.worker_server import WorkerObservabilityServer
 
 logger = logging.getLogger(__name__)
 
@@ -35,13 +41,20 @@ async def run() -> None:
             # Windows nao suporta add_signal_handler; o KeyboardInterrupt cobre.
             signal.signal(sig, lambda *_: stop_event.set())
 
-    await pipeline.start_consumers()
-    logger.info("Worker pronto; aguardando mensagens")
+    # A observabilidade sobe **antes** dos consumers: se a conexão com o broker
+    # falhar, o readiness precisa estar respondendo 503 para dizer isso, em vez
+    # de o processo simplesmente não abrir porta nenhuma.
+    observability = WorkerObservabilityServer()
+    await observability.start()
+
     try:
+        await pipeline.start_consumers()
+        logger.info("Worker pronto; aguardando mensagens")
         await stop_event.wait()
     finally:
         logger.info("Encerrando worker...")
         await pipeline.stop()
+        await observability.stop()
 
 
 def main() -> None:

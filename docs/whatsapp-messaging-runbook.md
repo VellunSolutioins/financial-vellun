@@ -37,13 +37,35 @@ Chaves no Redis:
 ```bash
 curl http://localhost:8010/health/live    # o processo está de pé
 curl http://localhost:8010/health/ready   # consegue publicar e consumir
-curl http://localhost:8010/metrics
+
+# Métricas: exigem Bearer quando METRICS_TOKEN está definido
+curl -H "Authorization: Bearer $METRICS_TOKEN" http://localhost:8010/metrics       # Prometheus
+curl -H "Authorization: Bearer $METRICS_TOKEN" http://localhost:8010/metrics.json  # {counters, timings}
+
+# O worker (`python -m src.worker`) expõe o mesmo em WORKER_METRICS_PORT
+curl -H "Authorization: Bearer $METRICS_TOKEN" http://localhost:8011/metrics
+curl http://localhost:8011/health/ready
+
+# A API principal também
+curl -H "Authorization: Bearer $METRICS_TOKEN" http://localhost:3001/metrics
+curl http://localhost:3001/health/live && curl http://localhost:3001/health/ready
 ```
 
 `/health/ready` responde `503` quando o broker ou o Redis estão fora. É o
 endpoint que o orquestrador deve usar para tirar a instância do balanceador —
 uma instância que não pode publicar não deve receber webhooks. Use
 `/health/live` para a decisão de reiniciar.
+
+Na API principal a distinção é a mesma: `/health/ready` responde `503` com o
+Postgres fora, enquanto `/health/live` segue `200`. Reiniciar a API não conserta
+um banco caído, então liveness não pode depender dele. `GET /` continua
+respondendo `{"status":"ok"}` por compatibilidade — **não use para readiness**:
+ele responde `ok` com o banco fora, que é exatamente o que motivou os endpoints
+novos.
+
+> **O worker precisa ter porta.** Ele não servia HTTP, então as réplicas de
+> consumo eram invisíveis para o scrape — justamente onde o trabalho acontece. É
+> o par que o alerta "fila com mensagem e zero consumidores" compara.
 
 Resposta saudável:
 
@@ -57,6 +79,41 @@ instância só publica).
 ---
 
 ## Métricas e o que elas indicam
+
+### Formato: `/metrics` mudou, `/metrics.json` preserva o antigo
+
+`GET /metrics` devolve **texto Prometheus**; o shape antigo (`{counters,
+timings}`) vive em `GET /metrics.json`. A separação existe porque o formato
+antigo tem consumidores reais — `scripts/monitor.py` e `scripts/loadtest.py` —, e
+trocar o formato sem deixar o antigo em algum lugar quebraria as duas ferramentas
+usadas justamente para validar carga.
+
+Os nomes seguem a convenção do Prometheus, então a tabela abaixo (que usa os
+nomes internos) mapeia assim:
+
+- contador `messages_consumed` → `vellun_agent_messages_consumed_total`;
+- latência `llm_latency_ms` → histograma `vellun_agent_llm_latency_seconds`
+  (**em segundos**, não em milissegundos — o `/metrics.json` continua reportando
+  a média em ms).
+
+Os contadores são **declarados na inicialização**, e não criados na primeira
+ocorrência. Isso importa para alerta: uma série que só nasce quando o evento
+acontece faz `rate(...)` e `absent(...)` responderem "sem dado" em vez de "zero",
+e é impossível alertar sobre algo que nunca apareceu. Com a declaração, "nenhuma
+mensagem na DLQ hoje" é um zero legítimo.
+
+**Regra de cardinalidade:** `correlationId`, `jobId`, telefone, e-mail e conteúdo
+de mensagem nunca viram label — vão para o log, e o log é a ponte. Um label livre
+cria uma série por valor distinto e estoura o limite de séries ativas do free
+tier, e aí a conta passa a cobrar ou a descartar dado em silêncio. O que varia
+por categoria (tipo de mídia, por exemplo) vira **nome** de métrica.
+
+Na API principal, `route` é sempre o padrão da rota (`/transactions/:id`), nunca
+o path concreto, e requisição que não casa com rota nenhuma é agrupada em
+`route="unmatched"` — sem isso, uma varredura de vulnerabilidade criaria uma
+série por URL tentada.
+
+### O que cada uma indica
 
 | Métrica                                                | Leitura                                                                                                           |
 | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
@@ -77,6 +134,28 @@ instância só publica).
 Todo log relacionado ao mesmo evento carrega `correlationId`,
 `providerMessageId`, `jobId` (quando aplicável) e o telefone **hasheado** em
 produção (mascarado em desenvolvimento). Nunca o número completo.
+
+### Seguindo um evento pelos dois serviços
+
+O `correlationId` atravessa API e agente. Quem manda o header `x-correlation-id`
+tem o id respeitado (validado antes: quebra de linha e caractere fora de
+`[A-Za-z0-9._:-]` são recusados, para não injetar linha falsa num log
+estruturado); quem não manda recebe um gerado. O id volta na resposta, nos dois
+serviços, então dá para copiar da resposta e consultar direto:
+
+```bash
+# Um fluxo inteiro sob o mesmo id
+curl -X POST http://localhost:8010/webhook/whatsapp \
+  -H 'Content-Type: application/json' \
+  -H 'x-correlation-id: investigacao-1' \
+  -d '{"phone":"+5541999999999","message":"gastei 10","message_id":"wamid.x"}'
+```
+
+No Loki, `{service="api"} |= "investigacao-1"` e `{service="ai-agent"} |=
+"investigacao-1"` trazem as duas metades do mesmo fluxo. Em produção o log da API
+é uma linha JSON por evento (`timestamp`, `level`, `service`, `env`, `event`,
+`correlationId`, `errorType`); em desenvolvimento é texto legível, porque JSON num
+terminal ninguém depura.
 
 ---
 
@@ -105,6 +184,12 @@ cd apps/ai-agent
 
 # em outro terminal, ao vivo
 .venv/Scripts/python.exe scripts/monitor.py --interval 1
+
+# com METRICS_TOKEN definido, os scripts precisam do token (ou leem do ambiente)
+.venv/Scripts/python.exe scripts/monitor.py --token "$METRICS_TOKEN"
+
+# com RUN_CONSUMERS_IN_API=false, aponte para a porta do worker: é quem consome
+.venv/Scripts/python.exe scripts/monitor.py --metrics http://localhost:8011/metrics.json
 ```
 
 O veredito confere o que importa: todos os requests aceitos com `202`, nenhum
