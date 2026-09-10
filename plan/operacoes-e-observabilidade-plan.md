@@ -28,95 +28,117 @@ autorização primeiro, instrumentação depois, coleta e alertas em seguida, e 
 
 ### Decisões confirmadas
 
-| Decisão                          | Escolha                                                                                 |
-| -------------------------------- | --------------------------------------------------------------------------------------- |
-| Hospedagem de API e agente       | **Railway** (PaaS gerenciado)                                                             |
-| Identidade dos operadores        | **GitHub OAuth + pertencer à org `VellunSolutioins`**, 2FA imposto pela política da org   |
-| Stack de observabilidade         | **Grafana Cloud** (free tier) — sem infra nova para manter                                |
-| Retry de webhook de pagamento    | **Corrigir a durabilidade antes** de construir a recuperação                              |
+| Decisão                       | Escolha                                                                                 |
+| ----------------------------- | --------------------------------------------------------------------------------------- |
+| Hospedagem de API e agente    | **Railway** (PaaS gerenciado)                                                           |
+| Identidade dos operadores     | **GitHub OAuth + pertencer à org `VellunSolutioins`**, 2FA imposto pela política da org |
+| Stack de observabilidade      | **Grafana Cloud** (free tier) — sem infra nova para manter                              |
+| Retry de webhook de pagamento | **Corrigir a durabilidade antes** de construir a recuperação                            |
 
 ---
 
-## Estado da implementação (2026-09-09)
+## Estado da implementação (2026-09-10)
 
-Implementado até a **Entrega 3**, na branch `feat/whatsapp-durable-messaging`, um
+Implementado até a **Entrega 5**, na branch `feat/whatsapp-durable-messaging`, um
 commit por entrega.
 
-| Entrega | Status | Commit |
-| ------- | ------ | ------ |
-| Achado 1 — dedup do inbound engolindo mensagem | ✅ Feito | `corrigir perda de mensagem quando o agrupamento falha depois de persistir` |
-| **0 — Identidade e autorização** (inclui Achado 2, CSRF) | ✅ Feito | `adicionar identidade e autorizacao da area de operacoes` |
-| **1 — Instrumentação** | ✅ Feito | `instrumentar API e agente com metricas, health e log estruturado` |
-| **2 — Coleta (Alloy)** | ✅ Feito | `adicionar coleta de metricas e logs com Alloy e exporters` |
-| **3 — Dashboards e alertas** | ✅ Feito | `adicionar dashboards e alertas versionados e testados` |
-| **4 — RabbitMQ Management como ponte** | 🔜 Próxima | documental, estende o runbook |
-| **5 — Catálogo de falhas** | 🔜 Pendente | |
-| **6 — Painel de operações** | 🔜 Pendente | |
-| **7 — Reprocessamento e auditoria** | 🔜 Pendente | |
-| **8 — Webhooks de pagamento** (inclui Achado 4) | 🔜 Pendente | |
-| 9 — Rastreamento distribuído | ⏸️ Fora desta leva | por decisão, ver escopo acordado |
+| Entrega                                                  | Status             | Commit                                                                      |
+| -------------------------------------------------------- | ------------------ | --------------------------------------------------------------------------- |
+| Achado 1 — dedup do inbound engolindo mensagem           | ✅                 | `corrigir perda de mensagem quando o agrupamento falha depois de persistir` |
+| **0 — Identidade e autorização** (inclui Achado 2, CSRF) | ✅                 | `adicionar identidade e autorizacao da area de operacoes`                   |
+| **1 — Instrumentação**                                   | ✅                 | `instrumentar API e agente com metricas, health e log estruturado`          |
+| **2 — Coleta (Alloy)**                                   | ✅                 | `adicionar coleta de metricas e logs com Alloy e exporters`                 |
+| **3 — Dashboards e alertas**                             | ✅                 | `adicionar dashboards e alertas versionados e testados`                     |
+| **4 — RabbitMQ Management como ponte**                   | ✅                 | `documentar o uso do RabbitMQ Management como ponte para a DLQ`             |
+| **5 — Catálogo de falhas**                               | ✅                 | `adicionar catalogo de falhas em Postgres`                                  |
+| **6 — Painel de operações**                              | 🔜 Próxima         | depende das 0 e 5, ambas prontas                                            |
+| **7 — Reprocessamento e auditoria**                      | 🔜 Pendente        |                                                                             |
+| **8 — Webhooks de pagamento** (inclui Achado 4)          | 🔜 Pendente        |                                                                             |
+| 9 — Rastreamento distribuído                             | ⏸️ Fora desta leva | por decisão, ver escopo acordado                                            |
 
-Achado 3 (`/internal/*` sem identidade de chamador) segue registrado como dívida,
-como o próprio plano previa.
+Achado 3 (`/internal/*` sem identidade de chamador) segue como dívida, conforme o
+próprio plano previa.
+
+Suítes ao final da Entrega 5: **279 na API**, **186 no agente**, **10 de
+integração**, mais `pnpm obs:check` (20 regras de alerta, 33 casos de teste).
 
 ### Premissas do plano que se mostraram erradas
 
-Todas verificadas contra documentação oficial ou contra o sistema no ar, e todas
-corrigidas na implementação:
+Verificadas contra documentação oficial ou contra o sistema no ar, e corrigidas:
 
-1. **O Railway não tem log drain** (Entrega 2). A documentação é explícita:
-   *"Railway does not have a log drain setting"*. O fluxo foi invertido — as
-   aplicações empurram para o `loki.source.api` do Alloy pela rede privada, com
-   transporte que nunca interrompe a aplicação, nunca bloqueia e nunca cresce sem
-   limite (backoff até 60s, descarte da linha mais antiga, contado). Ver
-   `docs/observability.md`.
-2. **O Grafana Cloud não suporta provisionamento por arquivo** (Entrega 3). Não
-   existe diretório de provisioning numa instância gerenciada. Regras de alerta
-   ficam em formato **Prometheus** e vão para o ruler com `mimirtool rules load`;
-   dashboards pela API/Terraform. Ganho colateral: a regra passou a ser
-   **testável** com `promtool test rules` (33 casos), o que substitui a conferência
-   manual de Pending → Firing na UI.
-3. **A porta 15692 do RabbitMQ agrega por padrão** (Entrega 3).
-   `rabbitmq_queue_messages_ready` vem sem o label `queue`, o que tornaria
-   inexprimíveis os dois alertas centrais do plano. Resolvido com dois scrapes de
-   `/metrics/detailed`, pedindo só as famílias `queue_coarse_metrics` e
-   `queue_consumer_count` (77 séries, contra milhares do endpoint inteiro).
-4. **O consumidor dominante de cardinalidade não era a API, era o RabbitMQ**
-   (Entrega 2). Medição, não estimativa: 5.455 séries no total, 2.682 do RabbitMQ,
-   das quais 2.464 são internos da VM Erlang. Com as regras de descarte: **2.274
-   séries (23% do teto de 10.000)**, projetando ~4.400 com as 55 rotas da API
-   ativas. A tabela completa está em `docs/observability.md`.
+1. **O Railway não tem log drain** (Entrega 2). As aplicações passaram a empurrar
+   para o `loki.source.api` do Alloy, com transporte que nunca interrompe a
+   aplicação, nunca bloqueia e nunca cresce sem limite. Ver `docs/observability.md`.
+2. **O Grafana Cloud não suporta provisionamento por arquivo** (Entrega 3). Regras
+   em formato Prometheus, carregadas com `mimirtool rules load`. Ganho colateral:
+   viraram testáveis com `promtool test rules`.
+3. **A porta 15692 do RabbitMQ agrega por padrão** (Entrega 3). Sem o label
+   `queue`, os dois alertas centrais seriam inexprimíveis. Resolvido com dois
+   scrapes de `/metrics/detailed`, pedindo só duas famílias (77 séries).
+4. **O dominante de cardinalidade era o RabbitMQ, não a API** (Entrega 2). Medido:
+   5.455 séries, 2.682 do RabbitMQ (2.464 só de `erlang_vm_*`). Com os descartes:
+   **2.274 séries, 23% do teto de 10.000**.
+5. **`requeue = Yes` não alterou a ordem** (Entrega 4). O plano afirmava que
+   alteraria; medido no RabbitMQ 3.13.7, a ordem se manteve em três repetições.
+   Documentado como "provavelmente preservada", nunca como invariante.
 
-### Dois bugs corrigidos no caminho
+### Bugs encontrados e corrigidos no caminho
 
-- **O interceptor de métricas contava erro como sucesso.** Lia
-  `response.statusCode` no caminho de erro, mas o filtro de exceção só roda
-  depois — os `503` do readiness apareciam como `200`, o oposto de útil. O status
-  passou a vir da própria exceção.
-- **Guard e pipe rodam antes dos interceptores**, então `401` de chave interna e
-  `403` de assinatura não apareciam em métrica nenhuma. O filtro de exceção passou
-  a contabilizar o que o interceptor não vê, com a duração real.
+- **O interceptor de métricas contava erro como sucesso** (Entrega 1): lia
+  `response.statusCode` antes do filtro de exceção, então os `503` do readiness
+  apareciam como `200`.
+- **Guard e pipe rodam antes dos interceptores** (Entrega 1), então `401` e `403`
+  não apareciam em métrica nenhuma. O filtro passou a contabilizá-los.
+- **O runbook induzia perda de dado** (Entrega 4): mandava remover da DLQ com
+  `Get messages` + `requeue = No`, o que remove a **cabeça da fila**, não a
+  mensagem republicada. Medido e reescrito.
+- **`build_dlq_envelope` nunca copiava `first_failed_at`** (Entrega 4), então o
+  envelope saía com `firstFailedAt` nulo — o único campo que distingue "falhou
+  agora" de "vem falhando há horas".
+- **A Entrega 5 cegava um alerta**: `NovaEntradaEmDLQ` olhava a profundidade da
+  fila, e o catálogo a drena em segundos. Passou a olhar o contador do catálogo.
+  `CatalogoDeFalhasDivergindoDaDLQ` foi removido — subtraía contador cumulativo de
+  um gauge, e o resultado não significava nada.
 
-### Onde retomar
+### Onde retomar: Entrega 6 (painel de operações)
 
-A Entrega 4 é documental e estende `docs/whatsapp-messaging-runbook.md` (a seção
-"Mensagens na DLQ" já existe e é o ponto de enxerto). A Entrega 5 depende só da
-Entrega 0, que está pronta.
+O backend de falhas **já existe** (feito na Entrega 5, porque os critérios de
+aceite dela exigiam a leitura):
 
-Notas de ambiente para quem retomar:
+- `GET /ops/failures` — listagem paginada com filtros de status, origem, fila,
+  tipo de erro, `correlationId` e período. 10 por página, mais recentes primeiro;
+- `GET /ops/failures/summary` — contagem por status;
+- `GET /ops/failures/:id` — detalhe, **mascarado por padrão**; em claro só para
+  `canViewSensitive`, com linha de auditoria por visualização.
+
+Falta da Entrega 6:
+
+- backend de `overview`, `payments` e `audit` (o de `failures` está pronto);
+- **frontend** em `apps/web/src/app/ops/`: resumo com links para o Grafana, lista
+  e detalhe de falhas, filtros, diagnóstico sanitizado, histórico de ações;
+- extrair `components/ui/table.tsx` e `components/ui/pagination.tsx` do padrão
+  duplicado em quatro arquivos, como o plano aponta;
+- usar **apenas tokens de cor**, para não aprofundar a dívida do dark mode.
+
+### Notas de ambiente
 
 - `pnpm obs:check` valida configs do Alloy e regras de alerta (só precisa de Docker);
 - `pnpm obs:up` sobe infra + Alloy + exporters localmente;
-- foram adicionadas a `apps/api/.env` e `apps/ai-agent/.env` (não versionados)
+- em `apps/api/.env` e `apps/ai-agent/.env` (não versionados) foram adicionados
   `METRICS_TOKEN=local-dev-metrics-token` e `OPS_JWT_SECRET`; os `.env.example`
   documentam todas as variáveis novas;
-- a migration `20260909230953_add_ops_identity_and_audit` já foi aplicada no banco
-  local, e instala triggers que tornam `ops_audit_log` append-only de verdade;
-- métricas do agente ganharam a dependência `prometheus-client` (já instalada na
-  `.venv`); a API ganhou `@prometheus-io/client` e `@nestjs/terminus@^10`.
-
-Suítes ao final da Entrega 3: **238 testes na API**, **175 no agente** e **9 de
-integração**, todos passando.
+- migrations aplicadas no banco local: `20260909230953_add_ops_identity_and_audit`
+  (instala triggers que tornam `ops_audit_log` append-only de verdade — ele recusa
+  `DELETE` inclusive para quem está limpando dado de teste) e
+  `20260910202356_add_ops_failed_messages`;
+- dependências novas: `prometheus-client` (agente), `@prometheus-io/client` e
+  `@nestjs/terminus@^10` (API);
+- no banco local há **2 operadores de teste desativados** (`github_user_id` 900001
+  e 900002) e 1 linha em `ops_audit_log` que o trigger não deixou remover;
+- **pnpm**: o `node_modules` foi instalado com 10.17.1 enquanto o `packageManager`
+  diz 9.0.0. Para instalar dependência, use
+  `node <caminho>/pnpm@10.17.1/.../pnpm.cjs --config.manage-package-manager-versions=false add ...`,
+  senão o pnpm 9 recusa por store incompatível.
 
 ---
 
@@ -146,13 +168,13 @@ integração**, todos passando.
 
 **Fonte de verdade por estado** — isto é o contrato central e precisa ficar explícito:
 
-| Estado                                  | Fonte de verdade                    | Observação                                              |
-| --------------------------------------- | ----------------------------------- | ------------------------------------------------------- |
-| Mensagem em processamento normal        | RabbitMQ                            | filas `whatsapp.*.v1`                                    |
-| **Mensagem que falhou definitivamente** | **Postgres (`ops_failed_messages`)** | a DLQ vira transporte, não armazém — ver Entrega 5      |
-| Evento de webhook de pagamento          | Postgres (`payment_webhook_events`) | já é assim                                               |
-| Métricas e logs                         | Grafana Cloud                       | retenção do free tier                                    |
-| Trilha de ações do operador             | Postgres (`ops_audit_log`)          | append-only                                              |
+| Estado                                  | Fonte de verdade                     | Observação                                         |
+| --------------------------------------- | ------------------------------------ | -------------------------------------------------- |
+| Mensagem em processamento normal        | RabbitMQ                             | filas `whatsapp.*.v1`                              |
+| **Mensagem que falhou definitivamente** | **Postgres (`ops_failed_messages`)** | a DLQ vira transporte, não armazém — ver Entrega 5 |
+| Evento de webhook de pagamento          | Postgres (`payment_webhook_events`)  | já é assim                                         |
+| Métricas e logs                         | Grafana Cloud                        | retenção do free tier                              |
+| Trilha de ações do operador             | Postgres (`ops_audit_log`)           | append-only                                        |
 
 ---
 
@@ -283,7 +305,7 @@ Firing_ do Grafana, sem envio externo.
 
 ---
 
-### Entrega 4 — RabbitMQ Management como ponte 🔜
+### Entrega 4 — RabbitMQ Management como ponte ✅
 
 Documental, sem código. Estende `docs/whatsapp-messaging-runbook.md` com: verificar filas e
 consumidores, identificar mensagens na DLQ, interpretar o envelope (`DlqEnvelopeV1` —
@@ -296,7 +318,7 @@ entrega a mensagem ao cliente e a devolve ao fim, podendo alterar ordem e afetar
 
 ---
 
-### Entrega 5 — Catálogo de falhas (a decisão arquitetural) 🔜
+### Entrega 5 — Catálogo de falhas (a decisão arquitetural) ✅
 
 Depende da Entrega 0.
 
