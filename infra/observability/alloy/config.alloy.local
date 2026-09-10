@@ -1,0 +1,178 @@
+// Variante LOCAL de config.alloy, para verificação nesta máquina.
+//
+// A única diferença que importa são os **alvos**: no Railway os serviços têm
+// nomes internos (`api.railway.internal`), aqui a API e o agente rodam no host
+// enquanto o Alloy roda em container — logo `host.docker.internal`.
+//
+// Mantida como arquivo separado, e não com um `if` no config de produção, por
+// uma razão prática: a config que vai para produção deve ser lida sem precisar
+// decidir qual metade se aplica. Ao mexer em uma, confira a outra.
+//
+// Validar:
+//   docker run --rm -v "$PWD/infra/observability/alloy:/cfg" \
+//     grafana/alloy:v1.19.2 validate /cfg/config.alloy.local
+
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+// ── Destinos ────────────────────────────────────────────────────────────────
+//
+// Sem GRAFANA_CLOUD_* definidos, estes componentes sobem e falham o envio. Isso
+// é suficiente para validar scrape, alvos e recebimento de log: a UI em
+// http://localhost:12345 mostra cada componente e o último erro de cada um.
+
+prometheus.remote_write "grafana_cloud" {
+  endpoint {
+    url = sys.env("GRAFANA_CLOUD_PROM_URL")
+
+    basic_auth {
+      username = sys.env("GRAFANA_CLOUD_PROM_USER")
+      password = sys.env("GRAFANA_CLOUD_TOKEN")
+    }
+  }
+
+  external_labels = {
+    env     = sys.env("ENVIRONMENT"),
+    cluster = "local",
+  }
+}
+
+loki.write "grafana_cloud" {
+  endpoint {
+    url = sys.env("GRAFANA_CLOUD_LOKI_URL")
+
+    basic_auth {
+      username = sys.env("GRAFANA_CLOUD_LOKI_USER")
+      password = sys.env("GRAFANA_CLOUD_TOKEN")
+    }
+  }
+
+  external_labels = {
+    env     = sys.env("ENVIRONMENT"),
+    cluster = "local",
+  }
+}
+
+// ── Recebimento dos logs das aplicações ─────────────────────────────────────
+
+loki.source.api "aplicacoes" {
+  http {
+    listen_address = "0.0.0.0"
+    listen_port    = 3100
+  }
+
+  forward_to             = [loki.process.sanitiza.receiver]
+  use_incoming_timestamp = true
+}
+
+loki.process "sanitiza" {
+  forward_to = [loki.write.grafana_cloud.receiver]
+
+  stage.drop {
+    expression          = "(?i)(BEGIN (RSA |EC )?PRIVATE KEY|aws_secret_access_key|xoxb-[0-9A-Za-z-]{10,})"
+    drop_counter_reason = "possivel_segredo_no_log"
+  }
+}
+
+// ── Métricas dos serviços da aplicação ──────────────────────────────────────
+//
+// `host.docker.internal` porque API e agente rodam no host (`pnpm dev`), não em
+// container. O worker só aparece com `RUN_CONSUMERS_IN_API=false` e
+// `pnpm agent:worker` rodando — sem isso o alvo fica `down`, o que é o correto.
+
+prometheus.scrape "aplicacoes" {
+  targets = [
+    { __address__ = "host.docker.internal:3001", job = "api" },
+    { __address__ = "host.docker.internal:8010", job = "ai-agent" },
+    { __address__ = "host.docker.internal:8011", job = "ai-agent-worker" },
+  ]
+
+  forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+  scrape_interval = "15s"
+  scrape_timeout  = "10s"
+  bearer_token    = sys.env("METRICS_TOKEN")
+}
+
+// ── Métricas da infraestrutura ──────────────────────────────────────────────
+//
+// Nomes de serviço do compose: o Alloy está na mesma rede que eles.
+
+prometheus.scrape "infraestrutura" {
+  targets = [
+    { __address__ = "rabbitmq:15692",          job = "rabbitmq" },
+    { __address__ = "postgres-exporter:9187",  job = "postgres" },
+    { __address__ = "redis-exporter:9121",     job = "redis" },
+  ]
+
+  forward_to      = [prometheus.relabel.corta_ruido.receiver]
+  scrape_interval = "30s"
+  scrape_timeout  = "15s"
+}
+
+// Mesmas regras de descarte do config de produção — ver a justificativa lá.
+prometheus.relabel "corta_ruido" {
+  forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+
+  // Internos da VM Erlang por escalonador e por alocador de memória. Diagnostica
+  // o broker em si, não o nosso pipeline. `erlang_vm_allocators` é **um** nome de
+  // métrica com 1.744 combinações de label, sem sufixo — daí aparecer sozinho na
+  // alternância, sem `_.*`.
+  rule {
+    source_labels = ["__name__"]
+    regex         = "erlang_vm_(allocators|msacc_.*|dist_.*|statistics_garbage_collection)"
+    action        = "drop"
+  }
+
+  // Percentis de latência por comando do Redis. Usamos o Redis para agrupamento
+  // e lock; o que interessa é `redis_up`, memória e conexões — não a distribuição
+  // de latência de cada um dos ~26 comandos.
+  rule {
+    source_labels = ["__name__"]
+    regex         = "redis_(latency_percentiles|commands_latencies)_.*"
+    action        = "drop"
+  }
+
+  // I/O por tabela do Postgres. Mantemos `pg_stat_user_tables_*` (linhas lidas,
+  // sequencial vs índice), que é o que responde "falta índice aqui?".
+  rule {
+    source_labels = ["__name__"]
+    regex         = "pg_statio_user_.*"
+    action        = "drop"
+  }
+
+  // `pg_settings_*` é a configuração do servidor exposta como métrica: constante
+  // entre scrapes, e um `SHOW ALL` responde melhor quando a pergunta aparece.
+  rule {
+    source_labels = ["__name__"]
+    regex         = "pg_settings_.*"
+    action        = "drop"
+  }
+}
+
+// ── Auto-observação ─────────────────────────────────────────────────────────
+
+prometheus.exporter.self "alloy" {}
+
+prometheus.scrape "alloy" {
+  targets         = prometheus.exporter.self.alloy.targets
+  forward_to      = [prometheus.relabel.corta_ruido_alloy.receiver]
+  scrape_interval = "30s"
+}
+
+prometheus.relabel "corta_ruido_alloy" {
+  forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+
+  rule {
+    source_labels = ["__name__"]
+    regex         = "go_(memstats|sched|gc)_.*"
+    action        = "drop"
+  }
+
+  rule {
+    source_labels = ["__name__"]
+    regex         = "promhttp_.*"
+    action        = "drop"
+  }
+}

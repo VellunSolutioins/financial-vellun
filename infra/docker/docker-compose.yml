@@ -21,6 +21,11 @@ services:
 
   # Broker durável do pipeline WhatsApp (whatsapp.inbound.v1 / whatsapp.processing.v1).
   # Painel de administração em http://localhost:15672 (guest/guest).
+  #
+  # `rabbitmq_prometheus` é habilitado via `enabled_plugins` montado abaixo, e
+  # expõe /metrics na 15692. Preferimos o plugin nativo a um exporter externo:
+  # ele lê o estado interno do broker sem passar pela API de gerenciamento, que
+  # é a mesma usada pelo painel e degrada sob carga.
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
     container_name: financial-vellun-rabbitmq
@@ -31,8 +36,10 @@ services:
     ports:
       - '5672:5672'
       - '15672:15672'
+      - '15692:15692'
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+      - ../observability/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
     healthcheck:
       test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
       interval: 15s

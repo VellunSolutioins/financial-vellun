@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import uuid
 from contextlib import contextmanager
@@ -146,11 +147,16 @@ class TextFormatter(logging.Formatter):
         return f"{base} {context}" if context else base
 
 
-def configure_logging() -> None:
+def configure_logging(service: str = "ai-agent") -> None:
     """Configura o logger raiz.
 
     O uvicorn so configura os proprios loggers (``uvicorn*``), deixando o raiz
     sem handler — o que faria o Python descartar todo log INFO da aplicacao.
+
+    ``service`` distingue a API do agente (``ai-agent``) do worker
+    (``ai-agent-worker``) no Loki. Sao processos diferentes fazendo trabalhos
+    diferentes, e misturar os dois num label so tornaria impossivel perguntar
+    "o consumo esta com problema?".
     """
     level = getattr(logging, settings.log_level.upper(), logging.INFO)
     handler = logging.StreamHandler()
@@ -166,3 +172,34 @@ def configure_logging() -> None:
     root.handlers.clear()
     root.addHandler(handler)
     root.setLevel(level)
+
+    _attach_loki_handler(root, service)
+
+
+def _attach_loki_handler(root: logging.Logger, service: str) -> None:
+    """Adiciona o envio ao Loki quando ``LOKI_PUSH_URL`` esta definido.
+
+    Sem a variavel o handler nao existe — em desenvolvimento nao ha Alloy, e um
+    handler tentando conectar em nada geraria ruido sem beneficio. O envio e
+    **sempre em JSON**, mesmo em desenvolvimento: o formato de texto existe para
+    o terminal humano, nao para o agregador.
+    """
+    url = (os.getenv("LOKI_PUSH_URL") or "").strip()
+    if not url:
+        return
+
+    from .loki_handler import LokiHandler
+
+    # Poucos labels e todos de conjunto fechado: no Loki, label e indice, e
+    # `correlationId` como label criaria um stream por mensagem. Ele vai no
+    # **corpo** da linha, onde um filtro o encontra sem custo de cardinalidade.
+    loki = LokiHandler(
+        url,
+        labels={
+            "service": service,
+            "env": "production" if settings.is_production else "development",
+        },
+    )
+    loki.addFilter(ContextFilter())
+    loki.setFormatter(JsonFormatter())
+    root.addHandler(loki)

@@ -28,7 +28,10 @@ logger = logging.getLogger(__name__)
 
 
 async def run() -> None:
-    configure_logging()
+    # `ai-agent-worker` como serviço: no Loki, separar o consumo da camada HTTP é
+    # o que permite perguntar "o consumo está com problema?" sem que as duas
+    # metades se misturem numa consulta só.
+    configure_logging(service="ai-agent-worker")
     stop_event = asyncio.Event()
 
     loop = asyncio.get_running_loop()

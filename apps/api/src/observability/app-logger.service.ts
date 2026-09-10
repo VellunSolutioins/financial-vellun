@@ -1,6 +1,7 @@
-import { ConsoleLogger, Injectable, LogLevel, Scope } from '@nestjs/common';
+import { ConsoleLogger, Injectable, LogLevel, OnApplicationShutdown, Scope } from '@nestjs/common';
 
 import { currentCorrelationId } from './correlation';
+import { LokiTransport } from './loki-transport';
 import { sanitizeForLog } from './sanitize';
 
 const SERVICE = 'api';
@@ -30,9 +31,37 @@ interface LogLine {
  * nome da classe). A mensagem varia; o `event` não — é por ele que se agrupa.
  */
 @Injectable({ scope: Scope.DEFAULT })
-export class AppLoggerService extends ConsoleLogger {
+export class AppLoggerService extends ConsoleLogger implements OnApplicationShutdown {
   private readonly env = process.env.NODE_ENV ?? 'development';
   private readonly structured = process.env.NODE_ENV === 'production';
+
+  /**
+   * Envio ao Loki, ativo só quando `LOKI_PUSH_URL` está definido.
+   *
+   * Sem a variável o transporte não existe — e é assim de propósito: em
+   * desenvolvimento não há Alloy, e um transporte tentando conectar em nada
+   * geraria ruído sem benefício.
+   */
+  private readonly loki = this.createTransport();
+
+  private createTransport(): LokiTransport | null {
+    const url = process.env.LOKI_PUSH_URL?.trim();
+    if (!url) return null;
+
+    return new LokiTransport({
+      url,
+      // Poucos labels e todos de conjunto fechado: no Loki, label é índice, e
+      // `correlationId` como label criaria um stream por requisição. Ele fica no
+      // **corpo** da linha, onde um filtro o encontra sem custo de cardinalidade.
+      labels: { service: SERVICE, env: this.env },
+    });
+  }
+
+  async onApplicationShutdown(): Promise<void> {
+    // Descarrega o buffer no encerramento; do contrário o log que explica um
+    // shutdown problemático é exatamente o que se perde.
+    await this.loki?.stop();
+  }
 
   log(message: unknown, ...rest: unknown[]): void {
     this.emit('log', message, rest);
@@ -91,9 +120,13 @@ export class AppLoggerService extends ConsoleLogger {
     if (payload.errorType) line.errorType = payload.errorType;
     if (extras.length > 0) line.context = sanitizeForLog(extras);
 
-    // `process.stdout` direto: o Railway lê stdout e o repassa ao log drain, e
-    // `console.log` acrescentaria formatação em objeto grande.
-    process.stdout.write(`${JSON.stringify({ ...line, message: payload.message })}\n`);
+    const serialized = JSON.stringify({ ...line, message: payload.message });
+
+    // `process.stdout` direto: `console.log` acrescentaria formatação em objeto
+    // grande. O stdout continua recebendo tudo — o envio ao Loki é adicional, não
+    // substituto, então uma falha lá deixa o log no Railway de qualquer forma.
+    process.stdout.write(`${serialized}\n`);
+    this.loki?.push(serialized);
   }
 }
 
