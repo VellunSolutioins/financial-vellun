@@ -123,6 +123,25 @@ enum OpsAuditResult {
   denied
 }
 
+/// De qual DLQ a mensagem veio.
+enum OpsFailureSource {
+  whatsapp_inbound
+  whatsapp_processing
+}
+
+/// Ciclo de vida de uma falha no catálogo.
+///
+/// `reprocessing` é um estado real, não um detalhe: publicar e marcar não são
+/// atômicos, então uma falha entre os dois deixa a linha aqui, e um cron a
+/// reconcilia. Sem esse estado, o operador não distinguiria "estou tratando"
+/// de "ninguém tocou" e dois operadores reprocessariam o mesmo item.
+enum OpsFailureStatus {
+  pending
+  reprocessing
+  reprocessed
+  discarded
+}
+
 // ── Core ──────────────────────────────────────────────────────────────────────
 
 model User {
@@ -524,4 +543,76 @@ model OpsAuditLog {
   @@index([operationId])
   @@index([targetType, targetId])
   @@map("ops_audit_log")
+}
+
+/// Catálogo de falhas definitivas do pipeline WhatsApp.
+///
+/// **A DLQ é transporte; esta tabela é a fonte de verdade do que falhou.** O
+/// RabbitMQ não oferece navegação arbitrária, paginação nem filtro: montar a tela
+/// lendo a DLQ transformaria cada abertura de página em consumo e republicação da
+/// fila. Um consumer dedicado drena as duas DLQs, grava aqui e só então acka.
+///
+/// Se esse consumer cair, as mensagens **se acumulam na DLQ** — nada se perde — e
+/// a profundidade da fila dispara o alerta.
+model OpsFailedMessage {
+  id String @id @default(uuid())
+
+  /// Identidade da falha, derivada do conteúdo do envelope (ver
+  /// `OpsFailedMessagesService.buildDedupeKey`). Existe porque o consumer pode
+  /// reentregar a mesma mensagem — um `nack` após uma gravação que expirou por
+  /// timeout, por exemplo — e sem ela a mesma falha viraria duas linhas no painel.
+  /// Uma falha **nova** da mesma mensagem gera chave diferente, porque `failedAt`
+  /// entra na composição.
+  dedupeKey String @unique @map("dedupe_key")
+
+  source      OpsFailureSource
+  sourceQueue String           @map("source_queue")
+  routingKey  String           @map("routing_key")
+
+  correlationId     String? @map("correlation_id")
+  providerMessageId String? @map("provider_message_id")
+  jobId             String? @map("job_id")
+
+  /// Telefone **apenas como hash**, para agrupar falhas do mesmo número sem
+  /// expô-lo. O número em claro continua dentro de `payload`, que precisa ficar
+  /// íntegro para o reprocessamento funcionar — a proteção está na leitura, que
+  /// mascara por padrão e só devolve em claro a operador com `canViewSensitive`,
+  /// gerando linha de auditoria.
+  phoneHash String? @map("phone_hash")
+
+  errorType    String  @map("error_type")
+  errorMessage String  @map("error_message")
+  attempts     Int
+  permanent    Boolean @default(false)
+
+  /// Envelope original, íntegro. Sem ele não há o que republicar.
+  payload Json
+
+  status OpsFailureStatus @default(pending)
+
+  /// Quando a mensagem tropeçou pela primeira vez (nulo se falhou permanente já
+  /// na primeira tentativa). `capturedAt` é quando o catálogo a registrou — a
+  /// distância entre os dois expõe atraso do consumer do catálogo.
+  firstFailedAt DateTime? @map("first_failed_at")
+  failedAt      DateTime  @map("failed_at")
+  capturedAt    DateTime  @default(now()) @map("captured_at")
+
+  /// Expurgo por cron. Itens já `reprocessed` saem antes dos `pending`: o que foi
+  /// resolvido não precisa ocupar espaço tanto quanto o que ainda espera ação.
+  retentionUntil DateTime @map("retention_until")
+
+  /// Preenchidos pelo reprocessamento (Entrega 7).
+  reprocessedAt  DateTime? @map("reprocessed_at")
+  lastOperationId String?  @map("last_operation_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status, capturedAt])
+  @@index([capturedAt])
+  @@index([correlationId])
+  @@index([errorType])
+  @@index([phoneHash])
+  @@index([retentionUntil])
+  @@map("ops_failed_messages")
 }

@@ -92,6 +92,12 @@ class Settings(BaseSettings):
     processing_lock_ttl_seconds: int = 120
     job_dedupe_ttl_seconds: int = 86400
 
+    # Consumer que drena as DLQs para o catalogo de falhas no Postgres
+    # (`ops_failed_messages`). Desligado, as mensagens ficam na DLQ e o painel de
+    # operacoes nao enxerga nada — util so para depurar o proprio pipeline.
+    run_dlq_catalog_consumer: bool = True
+    dlq_catalog_prefetch: int = 5
+
     # ── Observabilidade ────────────────────────────────────────────────────
     # Token exigido em `GET /metrics` (`Authorization: Bearer ...`). Precisa ser
     # o mesmo da API — o Alloy usa um só para os dois. Vazio libera o endpoint,

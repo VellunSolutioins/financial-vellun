@@ -89,62 +89,48 @@ groups:
       - alert: NovaEntradaEmDLQ
         # Qualquer entrada nova é digna de atenção: chegar à DLQ significa que o
         # retry com backoff já se esgotou, ou que o contrato era inválido. Não há
-        # `for` — esperar 5 minutos para contar uma mensagem que já falhou
-        # definitivamente não muda nada e só atrasa a investigação.
-        expr: increase(rabbitmq_detailed_queue_messages_ready{queue=~"whatsapp\\..*\\.dlq"}[5m]) > 0
+        # `for` — esperar para contar uma mensagem que já falhou definitivamente
+        # não muda nada e só atrasa a investigação.
+        #
+        # A fonte é o **catálogo**, não a profundidade da fila, e a diferença é
+        # decisiva desde a Entrega 5: o consumer do catálogo drena a DLQ em
+        # segundos, então `messages_ready` volta a zero entre dois scrapes e a
+        # entrada passaria despercebida. O contador do catálogo é monotônico e não
+        # tem esse buraco.
+        expr: increase(vellun_agent_dlq_catalog_captured_total[5m]) > 0
         for: 0m
         labels:
           severity: warning
           service: ai-agent-worker
         annotations:
-          summary: 'Nova mensagem em {{ $labels.queue }}'
+          summary: 'Nova falha definitiva catalogada'
           description: >-
-            {{ $value }} mensagem(ns) entrou(entraram) em {{ $labels.queue }} nos
+            {{ $value }} mensagem(ns) entrou(entraram) no catálogo de falhas nos
             últimos 5 minutos. Investigue a causa ANTES de reprocessar.
           dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
           runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#mensagens-na-dlq'
 
-      - alert: DlqAcumulandoSemTratamento
-        # Complementa o alerta acima: uma mensagem na DLQ é um incidente, dez
-        # paradas por uma hora é um incidente **ignorado**.
-        expr: rabbitmq_detailed_queue_messages_ready{queue=~"whatsapp\\..*\\.dlq"} > 0
-        for: 1h
-        labels:
-          severity: warning
-          service: ai-agent-worker
-        annotations:
-          summary: '{{ $labels.queue }} com mensagem parada há mais de 1 hora'
-          description: >-
-            {{ $value }} mensagem(ns) em {{ $labels.queue }} sem tratamento há mais
-            de uma hora.
-          dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
-          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#mensagens-na-dlq'
-
-      - alert: CatalogoDeFalhasDivergindoDaDLQ
-        # A profundidade da fila e a contagem do catálogo formam um par: se o
-        # consumer do catálogo cair, as mensagens se acumulam na DLQ (nada se
-        # perde) e esta divergência é o sinal. Sem ela, a tela de falhas mostraria
-        # menos do que existe — e mostrar menos é pior que não mostrar.
+      - alert: DlqNaoEstaSendoDrenada
+        # Desde a Entrega 5 a DLQ deve ficar praticamente vazia: o consumer do
+        # catálogo a drena em segundos. Profundidade persistente significa que
+        # esse consumer parou — a API fora, ou ele mesmo caído.
         #
-        # Depende da Entrega 5; enquanto `vellun_ops_failed_messages` não existir,
-        # `absent()` mantém a regra inerte em vez de disparar em falso.
-        expr: |
-          (
-            sum(rabbitmq_detailed_queue_messages_ready{queue=~"whatsapp\\..*\\.dlq"})
-              -
-            sum(vellun_ops_failed_messages_captured_total)
-          ) > 5
-          unless absent(vellun_ops_failed_messages_captured_total)
-        for: 10m
+        # **Nada se perde nesse estado**, e por isso é `warning` e não `critical`:
+        # as mensagens se acumulam na fila esperando. O que se perde é a
+        # visibilidade — o painel mostra menos falhas do que existem, que é
+        # exatamente a situação em que alguém conclui "está tudo bem" olhando para
+        # um dado incompleto.
+        expr: rabbitmq_detailed_queue_messages_ready{queue=~"whatsapp\\..*\\.dlq"} > 0
+        for: 5m
         labels:
           severity: warning
           service: ai-agent-worker
         annotations:
-          summary: 'Catálogo de falhas atrás da DLQ'
+          summary: '{{ $labels.queue }} não está sendo drenada para o catálogo'
           description: >-
-            A DLQ tem {{ $value }} mensagem(ns) além do que o catálogo registrou.
-            O consumer do catálogo pode estar parado — o painel de operações está
-            mostrando menos falhas do que existem.
+            {{ $value }} mensagem(ns) parada(s) em {{ $labels.queue }} há mais de 5
+            minutos. O consumer do catálogo deveria tê-las registrado em segundos.
+            Nada se perdeu, mas o painel de operações está incompleto.
           dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
           runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#mensagens-na-dlq'
 

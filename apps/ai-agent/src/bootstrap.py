@@ -31,6 +31,7 @@ class Pipeline:
         self.publisher: MessagePublisher | None = None
         self.flusher: GroupFlusherWorker | None = None
         self._broker_consumers: list[MessageConsumer] = []
+        self._dlq_consumers: list[MessageConsumer] = []
         self._consumers_running = False
 
     # ── Inicialização ───────────────────────────────────────────────────────
@@ -68,8 +69,48 @@ class Pipeline:
         self.flusher = GroupFlusherWorker(get_group_store(), self.publisher)
         self.flusher.start()
 
+        await self._start_dlq_catalog()
+
         self._consumers_running = True
         logger.info("Consumers do pipeline WhatsApp iniciados")
+
+    async def _start_dlq_catalog(self) -> None:
+        """Sobe os consumers que drenam as DLQs para o catálogo de falhas.
+
+        Só no driver RabbitMQ: o dublê em memória não tem filas de DLQ
+        consumíveis, e nos testes o catálogo é exercitado direto pelo handler.
+
+        Falha aqui **não** derruba o pipeline. Ficar sem catálogo é ruim — o
+        painel de operações fica cego — mas é muito melhor que parar de processar
+        mensagem de cliente por causa da camada de observação. A DLQ acumula e o
+        alerta de profundidade avisa.
+        """
+        if not settings.run_dlq_catalog_consumer:
+            logger.info("Consumer do catálogo de falhas desabilitado por configuração")
+            return
+        from .consumers import DlqCatalogMessageConsumer
+        from .messaging.factory import create_dlq_consumer
+        from .messaging.names import dlq_queue, dlq_routing_key
+
+        filas = (
+            (settings.rabbitmq_inbound_queue, ROUTE_INBOUND),
+            (settings.rabbitmq_processing_queue, ROUTE_PROCESSING),
+        )
+
+        try:
+            for fila, routing_key in filas:
+                nome = dlq_queue(fila)
+                dlq_rk = dlq_routing_key(routing_key)
+                consumer = create_dlq_consumer(nome, dlq_rk)
+                if consumer is None:
+                    return
+
+                handler = DlqCatalogMessageConsumer(nome, dlq_rk)
+                await consumer.start(handler.handle)
+                self._dlq_consumers.append(consumer)
+            logger.info("Catálogo de falhas drenando %d DLQ(s)", len(self._dlq_consumers))
+        except Exception:  # noqa: BLE001 - observabilidade não derruba o pipeline
+            logger.exception("Não foi possível iniciar o catálogo de falhas; DLQs vão acumular")
 
     # ── Encerramento ────────────────────────────────────────────────────────
     async def stop(self) -> None:
@@ -80,6 +121,10 @@ class Pipeline:
         for consumer in self._broker_consumers:
             await consumer.stop(drain_timeout=settings.shutdown_drain_seconds)
         self._broker_consumers = []
+
+        for consumer in self._dlq_consumers:
+            await consumer.stop(drain_timeout=settings.shutdown_drain_seconds)
+        self._dlq_consumers = []
         self._consumers_running = False
 
         if self.publisher is not None:

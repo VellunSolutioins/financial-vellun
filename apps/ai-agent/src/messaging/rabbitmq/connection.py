@@ -65,6 +65,23 @@ class RabbitConnection:
             await self._consume_channel.set_qos(prefetch_count=self._prefetch)
         return self._consume_channel
 
+    async def dedicated_consume_channel(self, prefetch: int) -> AbstractRobustChannel:
+        """Canal de consumo **proprio**, com prefetch independente.
+
+        O `consume_channel()` acima e compartilhado, e o prefetch e por canal.
+        Um consumer que segura entregas — o do catalogo espera antes de devolver
+        a mensagem a fila quando a API esta fora — consumiria o orcamento de
+        prefetch dos consumers principais, atrasando o pipeline justamente
+        durante um incidente. Canal separado isola isso.
+
+        Nao e memorizado: quem pede e dono do canal e o fecha no proprio stop.
+        """
+        await self.connect()
+        assert self._connection is not None
+        channel = await self._connection.channel()
+        await channel.set_qos(prefetch_count=prefetch)
+        return channel
+
     def is_connected(self) -> bool:
         return self._connection is not None and not self._connection.is_closed
 

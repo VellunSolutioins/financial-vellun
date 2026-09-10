@@ -87,21 +87,66 @@ tests:
         alertname: FilaComMensagemESemConsumidor
         exp_alerts: []
 
-  # ── Nova entrada em DLQ ──────────────────────────────────────────────────
+  # ── Nova entrada em DLQ, vista pelo catálogo ─────────────────────────────
   - interval: 30s
-    name: mensagem forçada para a DLQ dispara o alerta
+    name: falha catalogada dispara o alerta de nova entrada
     input_series:
-      # Zero por dois minutos, e então uma mensagem entra.
-      - series: 'rabbitmq_detailed_queue_messages_ready{queue="whatsapp.processing.dlq",vhost="/"}'
+      # O contador do catálogo é a fonte desde a Entrega 5. A profundidade da
+      # fila não serve mais: o consumer drena a DLQ em segundos e o valor volta a
+      # zero entre dois scrapes.
+      - series: 'vellun_agent_dlq_catalog_captured_total{job="ai-agent-worker"}'
         values: '0x4 1x20'
     alert_rule_test:
       - eval_time: 1m
         alertname: NovaEntradaEmDLQ
         exp_alerts: []
-      # Sem `for`: esperar para contar uma mensagem que já falhou definitivamente
-      # só atrasaria a investigação.
       - eval_time: 4m
         alertname: NovaEntradaEmDLQ
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: ai-agent-worker
+              job: ai-agent-worker
+            exp_annotations:
+              summary: 'Nova falha definitiva catalogada'
+              description: >-
+                1 mensagem(ns) entrou(entraram) no catálogo de falhas nos últimos 5 minutos. Investigue a causa ANTES de reprocessar.
+              dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
+              runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#mensagens-na-dlq'
+
+  - interval: 30s
+    name: catalogo parado no zero não alerta
+    input_series:
+      - series: 'vellun_agent_dlq_catalog_captured_total{job="ai-agent-worker"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: NovaEntradaEmDLQ
+        exp_alerts: []
+
+  - interval: 30s
+    name: DLQ drenada em segundos não dispara alerta de acumulo
+    input_series:
+      # O comportamento normal com o catálogo ligado: entra uma mensagem, o
+      # consumer a registra, a fila volta a zero.
+      - series: 'rabbitmq_detailed_queue_messages_ready{queue="whatsapp.processing.dlq",vhost="/"}'
+        values: '0x4 1 0x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: DlqNaoEstaSendoDrenada
+        exp_alerts: []
+
+  - interval: 30s
+    name: DLQ parada por 5 minutos indica catalogo fora
+    input_series:
+      - series: 'rabbitmq_detailed_queue_messages_ready{queue="whatsapp.processing.dlq",vhost="/"}'
+        values: '7x40'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: DlqNaoEstaSendoDrenada
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: DlqNaoEstaSendoDrenada
         exp_alerts:
           - exp_labels:
               severity: warning
@@ -109,47 +154,9 @@ tests:
               queue: whatsapp.processing.dlq
               vhost: /
             exp_annotations:
-              summary: 'Nova mensagem em whatsapp.processing.dlq'
+              summary: 'whatsapp.processing.dlq não está sendo drenada para o catálogo'
               description: >-
-                1 mensagem(ns) entrou(entraram) em whatsapp.processing.dlq nos últimos 5 minutos. Investigue a causa ANTES de reprocessar.
-              dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
-              runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#mensagens-na-dlq'
-
-  - interval: 30s
-    name: DLQ vazia e estável não alerta
-    input_series:
-      - series: 'rabbitmq_detailed_queue_messages_ready{queue="whatsapp.inbound.dlq",vhost="/"}'
-        values: '0x40'
-    alert_rule_test:
-      - eval_time: 10m
-        alertname: NovaEntradaEmDLQ
-        exp_alerts: []
-      - eval_time: 10m
-        alertname: DlqAcumulandoSemTratamento
-        exp_alerts: []
-
-  - interval: 1m
-    name: DLQ com mensagem parada há mais de uma hora alerta
-    input_series:
-      - series: 'rabbitmq_detailed_queue_messages_ready{queue="whatsapp.inbound.dlq",vhost="/"}'
-        values: '2x90'
-    alert_rule_test:
-      # Uma mensagem na DLQ é incidente; parada por uma hora é incidente ignorado.
-      - eval_time: 30m
-        alertname: DlqAcumulandoSemTratamento
-        exp_alerts: []
-      - eval_time: 70m
-        alertname: DlqAcumulandoSemTratamento
-        exp_alerts:
-          - exp_labels:
-              severity: warning
-              service: ai-agent-worker
-              queue: whatsapp.inbound.dlq
-              vhost: /
-            exp_annotations:
-              summary: 'whatsapp.inbound.dlq com mensagem parada há mais de 1 hora'
-              description: >-
-                2 mensagem(ns) em whatsapp.inbound.dlq sem tratamento há mais de uma hora.
+                7 mensagem(ns) parada(s) em whatsapp.processing.dlq há mais de 5 minutos. O consumer do catálogo deveria tê-las registrado em segundos. Nada se perdeu, mas o painel de operações está incompleto.
               dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
               runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#mensagens-na-dlq'
 
@@ -222,51 +229,4 @@ tests:
     alert_rule_test:
       - eval_time: 15m
         alertname: TaxaDeErroDeProcessamentoAlta
-        exp_alerts: []
-
-  # ── Catálogo de falhas (Entrega 5) ───────────────────────────────────────
-  - interval: 30s
-    name: catalogo ausente mantem a regra inerte
-    input_series:
-      # Antes da Entrega 5 a métrica do catálogo não existe. Sem o `unless
-      # absent(...)` a subtração viraria "DLQ menos nada" e alertaria em falso.
-      - series: 'rabbitmq_detailed_queue_messages_ready{queue="whatsapp.processing.dlq",vhost="/"}'
-        values: '20x40'
-    alert_rule_test:
-      - eval_time: 15m
-        alertname: CatalogoDeFalhasDivergindoDaDLQ
-        exp_alerts: []
-
-  - interval: 30s
-    name: catalogo atras da DLQ alerta
-    input_series:
-      - series: 'rabbitmq_detailed_queue_messages_ready{queue="whatsapp.processing.dlq",vhost="/"}'
-        values: '20x40'
-      # O consumer do catálogo parou: registrou 2 das 20.
-      - series: 'vellun_ops_failed_messages_captured_total'
-        values: '2x40'
-    alert_rule_test:
-      - eval_time: 15m
-        alertname: CatalogoDeFalhasDivergindoDaDLQ
-        exp_alerts:
-          - exp_labels:
-              severity: warning
-              service: ai-agent-worker
-            exp_annotations:
-              summary: 'Catálogo de falhas atrás da DLQ'
-              description: >-
-                A DLQ tem 18 mensagem(ns) além do que o catálogo registrou. O consumer do catálogo pode estar parado — o painel de operações está mostrando menos falhas do que existem.
-              dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
-              runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#mensagens-na-dlq'
-
-  - interval: 30s
-    name: catalogo acompanhando a DLQ não alerta
-    input_series:
-      - series: 'rabbitmq_detailed_queue_messages_ready{queue="whatsapp.processing.dlq",vhost="/"}'
-        values: '20x40'
-      - series: 'vellun_ops_failed_messages_captured_total'
-        values: '20x40'
-    alert_rule_test:
-      - eval_time: 15m
-        alertname: CatalogoDeFalhasDivergindoDaDLQ
         exp_alerts: []

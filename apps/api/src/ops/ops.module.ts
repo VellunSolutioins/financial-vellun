@@ -8,6 +8,11 @@ import { OpsAuthService } from './auth/ops-auth.service';
 import { OpsSessionService } from './auth/ops-session.service';
 import { OpsAuthGuard } from './auth/guards/ops-auth.guard';
 import { OpsRolesGuard } from './auth/guards/ops-roles.guard';
+import { FailureRetentionService } from './failures/failure-retention.service';
+import { OpsFailuresController } from './failures/ops-failures.controller';
+import { OpsFailuresInternalController } from './failures/ops-failures-internal.controller';
+import { OpsFailedMessagesService } from './failures/ops-failed-messages.service';
+import { OpsFailuresQueryService } from './failures/ops-failures-query.service';
 import { OpsOperatorsController } from './operators/ops-operators.controller';
 import { OpsOperatorsService } from './operators/ops-operators.service';
 
@@ -22,7 +27,12 @@ import { OpsOperatorsService } from './operators/ops-operators.service';
  */
 @Module({
   imports: [JwtModule.register({})],
-  controllers: [OpsAuthController, OpsOperatorsController],
+  controllers: [
+    OpsAuthController,
+    OpsOperatorsController,
+    OpsFailuresController,
+    OpsFailuresInternalController,
+  ],
   providers: [
     OpsAuthService,
     OpsSessionService,
@@ -31,7 +41,17 @@ import { OpsOperatorsService } from './operators/ops-operators.service';
     OpsAuthGuard,
     OpsRolesGuard,
     OpsOperatorsService,
+    OpsFailedMessagesService,
+    OpsFailuresQueryService,
+    FailureRetentionService,
   ],
-  exports: [OpsAuditService, OpsAuthGuard, OpsRolesGuard, OpsSessionService],
+  exports: [
+    OpsAuditService,
+    OpsAuthGuard,
+    OpsRolesGuard,
+    OpsSessionService,
+    OpsFailedMessagesService,
+    OpsFailuresQueryService,
+  ],
 })
 export class OpsModule {}

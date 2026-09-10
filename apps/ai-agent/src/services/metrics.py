@@ -97,6 +97,13 @@ KNOWN_COUNTERS = (
     "whatsapp_send_failed",
     # Falha definitiva
     "dlq",
+    # Catalogo de falhas (Entrega 5): a DLQ e transporte, o Postgres e a fonte
+    # de verdade. `captured` e o par que o dashboard compara com a profundidade
+    # da DLQ para expor divergencia.
+    "dlq_catalog_captured",
+    "dlq_catalog_duplicated",
+    "dlq_catalog_failed",
+    "dlq_catalog_invalid_envelope",
 )
 
 #: Histogramas declarados na inicialização. A chave é o nome usado em

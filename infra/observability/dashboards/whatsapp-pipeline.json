@@ -7,7 +7,10 @@
   "editable": true,
   "schemaVersion": 39,
   "refresh": "30s",
-  "time": { "from": "now-3h", "to": "now" },
+  "time": {
+    "from": "now-3h",
+    "to": "now"
+  },
   "templating": {
     "list": [
       {
@@ -22,7 +25,10 @@
         "name": "env",
         "label": "Ambiente",
         "type": "query",
-        "datasource": { "type": "prometheus", "uid": "${ds}" },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${ds}"
+        },
         "query": "label_values(up, env)",
         "refresh": 1,
         "current": {},
@@ -35,7 +41,12 @@
       "id": 1,
       "type": "row",
       "title": "Funil",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
       "collapsed": false
     },
     {
@@ -43,8 +54,16 @@
       "type": "timeseries",
       "title": "Entrada e publicação",
       "description": "Divergência entre recebido e publicado indica mensagem descartada antes de publicar (longa demais, ou payload sem mensagem). `publish_failed` significa 503 no webhook — a Meta vai reenviar, com limite.",
-      "datasource": { "type": "prometheus", "uid": "${ds}" },
-      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 1 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 1
+      },
       "targets": [
         {
           "refId": "A",
@@ -68,11 +87,28 @@
         }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "reqps", "custom": { "lineWidth": 2, "fillOpacity": 5 } },
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5
+          }
+        },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "falha de publicação/s" },
-            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+            "matcher": {
+              "id": "byName",
+              "options": "falha de publicação/s"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
           }
         ]
       }
@@ -82,8 +118,16 @@
       "type": "timeseries",
       "title": "Consumo e processamento",
       "description": "`duplicadas` altas são normais após um reenvio da Meta; sustentadas indicam ack lento. `deferred` alto significa muita mensagem simultânea do mesmo número (lock de telefone).",
-      "datasource": { "type": "prometheus", "uid": "${ds}" },
-      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 1 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 1
+      },
       "targets": [
         {
           "refId": "A",
@@ -112,11 +156,28 @@
         }
       ],
       "fieldConfig": {
-        "defaults": { "unit": "reqps", "custom": { "lineWidth": 2, "fillOpacity": 5 } },
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5
+          }
+        },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "erro de processamento/s" },
-            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+            "matcher": {
+              "id": "byName",
+              "options": "erro de processamento/s"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
           }
         ]
       }
@@ -125,15 +186,28 @@
       "id": 10,
       "type": "row",
       "title": "Filas",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 8 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
       "collapsed": false
     },
     {
       "id": 11,
       "type": "timeseries",
       "title": "Profundidade por fila",
-      "datasource": { "type": "prometheus", "uid": "${ds}" },
-      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 9 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
       "targets": [
         {
           "refId": "A",
@@ -142,7 +216,12 @@
         }
       ],
       "fieldConfig": {
-        "defaults": { "custom": { "lineWidth": 2, "fillOpacity": 10 } },
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          }
+        },
         "overrides": []
       }
     },
@@ -151,8 +230,16 @@
       "type": "timeseries",
       "title": "Consumidores por fila",
       "description": "As filas de retry têm zero consumidor por construção: o TTL devolve a mensagem à fila principal. Zero nas filas `.v1` com mensagem pendente é incidente.",
-      "datasource": { "type": "prometheus", "uid": "${ds}" },
-      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 9 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
       "targets": [
         {
           "refId": "A",
@@ -161,7 +248,13 @@
         }
       ],
       "fieldConfig": {
-        "defaults": { "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 10 } },
+        "defaults": {
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          }
+        },
         "overrides": []
       }
     },
@@ -169,39 +262,85 @@
       "id": 20,
       "type": "row",
       "title": "Falha definitiva",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
       "collapsed": false
     },
     {
       "id": 21,
       "type": "timeseries",
       "title": "DLQ: profundidade da fila vs. catálogo",
-      "description": "O par que expõe divergência. A DLQ é transporte; o Postgres (`ops_failed_messages`) é a fonte de verdade do que falhou. Se o consumer do catálogo cair, as mensagens se acumulam na DLQ (nada se perde) e as duas linhas se separam — e o painel de operações passa a mostrar MENOS falhas do que existem.",
-      "datasource": { "type": "prometheus", "uid": "${ds}" },
-      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 17 },
+      "description": "O par que expõe divergência. A DLQ é transporte; o Postgres (`ops_failed_messages`) é a fonte de verdade do que falhou. Com o catálogo saudável a linha da fila fica rente a zero — o consumer drena em segundos — enquanto o contador do catálogo sobe. Fila acima de zero de forma sustentada significa que o consumer parou: nada se perde, mas o painel de operações passa a mostrar MENOS falhas do que existem.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 17
+      },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rabbitmq_detailed_queue_messages_ready{env=\"$env\", queue=~\"whatsapp\\\\..*\\\\.dlq\"})",
-          "legendFormat": "na DLQ"
+          "expr": "sum(rabbitmq_detailed_queue_messages_ready{env=\"$env\", queue=~\"whatsapp\\..*\\.dlq\"})",
+          "legendFormat": "parado na DLQ"
         },
         {
           "refId": "B",
-          "expr": "sum(vellun_ops_failed_messages_captured_total{env=\"$env\"})",
-          "legendFormat": "no catálogo (Entrega 5)"
+          "expr": "sum(increase(vellun_agent_dlq_catalog_captured_total{env=\"$env\"}[5m]))",
+          "legendFormat": "catalogado (5m)"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(increase(vellun_agent_dlq_catalog_failed_total{env=\"$env\"}[5m]))",
+          "legendFormat": "falha ao catalogar (5m)"
         }
       ],
       "fieldConfig": {
-        "defaults": { "custom": { "lineWidth": 2 } },
-        "overrides": []
+        "defaults": {
+          "custom": {
+            "lineWidth": 2
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "falha ao catalogar (5m)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
       }
     },
     {
       "id": 22,
       "type": "timeseries",
       "title": "Entradas em DLQ",
-      "datasource": { "type": "prometheus", "uid": "${ds}" },
-      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 17 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 17
+      },
       "targets": [
         {
           "refId": "A",
@@ -211,8 +350,15 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "custom": { "lineWidth": 2, "fillOpacity": 25, "drawStyle": "bars" },
-          "color": { "mode": "fixed", "fixedColor": "red" }
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 25,
+            "drawStyle": "bars"
+          },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "red"
+          }
         },
         "overrides": []
       }
@@ -221,7 +367,12 @@
       "id": 30,
       "type": "row",
       "title": "Latência",
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 24 },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
       "collapsed": false
     },
     {
@@ -229,8 +380,16 @@
       "type": "timeseries",
       "title": "Latência do webhook (p50 / p95 / p99)",
       "description": "Inclui o publisher confirm do RabbitMQ, que é justamente a garantia que o 202 representa. Subida sustentada = broker sob pressão.",
-      "datasource": { "type": "prometheus", "uid": "${ds}" },
-      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 25 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 25
+      },
       "targets": [
         {
           "refId": "A",
@@ -248,15 +407,31 @@
           "legendFormat": "p99"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "s", "custom": { "lineWidth": 2 } }, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 32,
       "type": "timeseries",
       "title": "Recebimento até processamento (p95)",
       "description": "Inclui o debounce de 5s do agrupamento, então o piso é ~5s por construção.",
-      "datasource": { "type": "prometheus", "uid": "${ds}" },
-      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 25 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 25
+      },
       "targets": [
         {
           "refId": "A",
@@ -264,15 +439,31 @@
           "legendFormat": "p95"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "s", "custom": { "lineWidth": 2 } }, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      }
     },
     {
       "id": 33,
       "type": "timeseries",
       "title": "Processamento e LLM (p95)",
       "description": "O processamento é dominado pela latência do LLM; as duas linhas juntas mostram quanto do tempo é nosso.",
-      "datasource": { "type": "prometheus", "uid": "${ds}" },
-      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 25 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 25
+      },
       "targets": [
         {
           "refId": "A",
@@ -285,7 +476,15 @@
           "legendFormat": "LLM p95"
         }
       ],
-      "fieldConfig": { "defaults": { "unit": "s", "custom": { "lineWidth": 2 } }, "overrides": [] }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      }
     }
   ]
 }

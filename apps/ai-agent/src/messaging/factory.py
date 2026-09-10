@@ -72,6 +72,28 @@ def create_consumer(queue_name: str, routing_key: str) -> MessageConsumer:
     )
 
 
+def create_dlq_consumer(queue_name: str, routing_key: str) -> MessageConsumer | None:
+    """Consumer de uma DLQ para o catalogo de falhas.
+
+    Devolve ``None`` no driver em memoria: o dublê nao tem filas de DLQ
+    consumiveis, e nos testes o catalogo e exercitado direto pelo handler.
+
+    Fica aqui, e nao no ``bootstrap``, pela mesma regra que vale para o resto do
+    pipeline: o dominio nao importa ``aio_pika`` nem as classes do driver.
+    """
+    if _driver() == "inmemory":
+        return None
+
+    from .rabbitmq.dlq_consumer import DlqCatalogConsumer
+
+    return DlqCatalogConsumer(
+        _rabbit_connection(),
+        queue_name=queue_name,
+        routing_key=routing_key,
+        prefetch=settings.dlq_catalog_prefetch,
+    )
+
+
 _rabbit_conn = None
 
 

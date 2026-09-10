@@ -249,6 +249,21 @@ A DLQ é o fim da linha do pipeline: chegar aqui significa que o retry com backo
 já se esgotou, ou que o contrato era inválido desde o começo. Nada se perde — mas
 nada anda sozinho a partir daqui.
 
+> **A DLQ é transporte; o Postgres é a fonte de verdade.** Desde a Entrega 5, um
+> consumer dedicado drena as duas DLQs para `ops_failed_messages` e só então acka.
+> Na prática isso muda por onde você investiga:
+>
+> - a **DLQ deve estar praticamente vazia** o tempo todo. Profundidade
+>   persistente significa que o consumer do catálogo parou — nada se perdeu, as
+>   mensagens estão esperando na fila, mas o painel está incompleto;
+> - o histórico completo do que falhou está **no catálogo**, com filtro,
+>   paginação e ordenação — coisas que a fila não oferece;
+> - consultar o catálogo **não consome nada da fila**. Abrir a listagem cem vezes
+>   não move uma mensagem.
+>
+> Os passos abaixo continuam válidos para inspeção direta da fila, que é o que
+> resta quando o próprio catálogo está fora.
+
 > **Leia [O painel do RabbitMQ não é um banco de dados](#o-painel-do-rabbitmq-não-é-um-banco-de-dados)
 > antes de clicar em qualquer coisa no Management.** Duas operações que parecem
 > leitura — "Get messages" e "Purge" — descartam mensagem sem registro.
