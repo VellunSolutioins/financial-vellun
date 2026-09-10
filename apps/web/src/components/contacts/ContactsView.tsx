@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog } from '@/components/ui/dialog';
+import { DataTable, type DataTableColumn } from '@/components/ui/table';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
@@ -130,6 +131,48 @@ export function ContactsView({ type, title, singular }: Props) {
     }
   };
 
+  const columns: DataTableColumn<Contact>[] = [
+    { key: 'name', header: 'Nome', cellClassName: 'font-medium', cell: (c) => c.name },
+    {
+      key: 'document',
+      header: 'Documento',
+      cellClassName: 'text-muted-foreground',
+      cell: (c) => c.document ?? '—',
+    },
+    {
+      key: 'email',
+      header: 'E-mail',
+      cellClassName: 'text-muted-foreground',
+      cell: (c) => c.email ?? '—',
+    },
+    {
+      key: 'phone',
+      header: 'Telefone',
+      cellClassName: 'text-muted-foreground',
+      cell: (c) => c.phone ?? '—',
+    },
+    {
+      key: 'acoes',
+      align: 'right',
+      cellClassName: 'whitespace-nowrap',
+      cell: (c) => (
+        <>
+          <Button size="sm" variant="ghost" onClick={() => openEdit(c)}>
+            Editar
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-destructive"
+            onClick={() => void remove(c.id)}
+          >
+            Excluir
+          </Button>
+        </>
+      ),
+    },
+  ];
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -144,48 +187,14 @@ export function ContactsView({ type, title, singular }: Props) {
         className="max-w-sm"
       />
 
-      <div className="bg-white rounded-lg border overflow-x-auto">
-        {loading ? (
-          <div className="p-8 text-center text-muted-foreground">Carregando...</div>
-        ) : contacts.length === 0 ? (
-          <div className="p-8 text-center text-muted-foreground">Nenhum {singular} cadastrado.</div>
-        ) : (
-          <table className="w-full min-w-[640px] text-sm">
-            <thead className="bg-gray-50 border-b">
-              <tr>
-                <th className="text-left p-3 font-medium text-muted-foreground">Nome</th>
-                <th className="text-left p-3 font-medium text-muted-foreground">Documento</th>
-                <th className="text-left p-3 font-medium text-muted-foreground">E-mail</th>
-                <th className="text-left p-3 font-medium text-muted-foreground">Telefone</th>
-                <th className="p-3"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {contacts.map((c) => (
-                <tr key={c.id} className="border-b last:border-0 hover:bg-gray-50">
-                  <td className="p-3 font-medium">{c.name}</td>
-                  <td className="p-3 text-muted-foreground">{c.document ?? '—'}</td>
-                  <td className="p-3 text-muted-foreground">{c.email ?? '—'}</td>
-                  <td className="p-3 text-muted-foreground">{c.phone ?? '—'}</td>
-                  <td className="p-3 text-right whitespace-nowrap">
-                    <Button size="sm" variant="ghost" onClick={() => openEdit(c)}>
-                      Editar
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="text-destructive"
-                      onClick={() => void remove(c.id)}
-                    >
-                      Excluir
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+      <DataTable
+        columns={columns}
+        rows={contacts}
+        rowKey={(c) => c.id}
+        loading={loading}
+        minWidth={640}
+        empty={`Nenhum ${singular} cadastrado.`}
+      />
 
       <Dialog
         open={modalOpen}

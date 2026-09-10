@@ -67,8 +67,9 @@ function setup(encontrada: unknown = linha) {
   } as any;
 
   const audit = { recordBestEffort: jest.fn().mockResolvedValue(undefined) } as any;
+  const grafana = { logsUrl: jest.fn().mockReturnValue(null) } as any;
 
-  return { service: new OpsFailuresQueryService(prisma, audit), prisma, audit };
+  return { service: new OpsFailuresQueryService(prisma, audit, grafana), prisma, audit, grafana };
 }
 
 describe('OpsFailuresQueryService.detail', () => {

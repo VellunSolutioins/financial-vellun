@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 
+import { OpsAuditController } from './audit/ops-audit.controller';
+import { OpsAuditQueryService } from './audit/ops-audit-query.service';
 import { OpsAuditService } from './audit/ops-audit.service';
 import { GithubOAuthClient } from './auth/github-oauth.client';
 import { OpsAuthController } from './auth/ops-auth.controller';
@@ -13,8 +15,13 @@ import { OpsFailuresController } from './failures/ops-failures.controller';
 import { OpsFailuresInternalController } from './failures/ops-failures-internal.controller';
 import { OpsFailedMessagesService } from './failures/ops-failed-messages.service';
 import { OpsFailuresQueryService } from './failures/ops-failures-query.service';
+import { OpsGrafanaService } from './grafana/ops-grafana.service';
 import { OpsOperatorsController } from './operators/ops-operators.controller';
 import { OpsOperatorsService } from './operators/ops-operators.service';
+import { OpsOverviewController } from './overview/ops-overview.controller';
+import { OpsOverviewService } from './overview/ops-overview.service';
+import { OpsPaymentsController } from './payments/ops-payments.controller';
+import { OpsPaymentsQueryService } from './payments/ops-payments-query.service';
 
 /**
  * Área de operações: identidade própria (GitHub OAuth + organização), papéis e
@@ -32,6 +39,9 @@ import { OpsOperatorsService } from './operators/ops-operators.service';
     OpsOperatorsController,
     OpsFailuresController,
     OpsFailuresInternalController,
+    OpsOverviewController,
+    OpsPaymentsController,
+    OpsAuditController,
   ],
   providers: [
     OpsAuthService,
@@ -44,6 +54,10 @@ import { OpsOperatorsService } from './operators/ops-operators.service';
     OpsFailedMessagesService,
     OpsFailuresQueryService,
     FailureRetentionService,
+    OpsOverviewService,
+    OpsGrafanaService,
+    OpsPaymentsQueryService,
+    OpsAuditQueryService,
   ],
   exports: [
     OpsAuditService,

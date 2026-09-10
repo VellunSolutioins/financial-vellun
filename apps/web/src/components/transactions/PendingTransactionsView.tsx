@@ -5,7 +5,8 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ui/toast';
-import { useTransactions } from '@/hooks/useTransactions';
+import { DataTable, type DataTableColumn } from '@/components/ui/table';
+import { useTransactions, type Transaction } from '@/hooks/useTransactions';
 import { formatDateBR } from '@/lib/utils';
 
 function formatCurrency(v: number) {
@@ -73,6 +74,49 @@ export function PendingTransactionsView({ type, title, actionLabel }: Props) {
     }
   };
 
+  const columns: DataTableColumn<Transaction>[] = [
+    {
+      key: 'transactionDate',
+      header: 'Vencimento',
+      cellClassName: 'text-muted-foreground',
+      cell: (tx) => formatDateBR(tx.transactionDate),
+    },
+    {
+      key: 'description',
+      header: 'Descrição',
+      cellClassName: 'font-medium',
+      cell: (tx) => tx.description,
+    },
+    {
+      key: 'category',
+      header: 'Categoria',
+      cellClassName: 'text-muted-foreground',
+      cell: (tx) => tx.category?.name ?? '—',
+    },
+    {
+      key: 'account',
+      header: 'Conta',
+      cellClassName: 'text-muted-foreground',
+      cell: (tx) => tx.account?.name ?? '—',
+    },
+    {
+      key: 'amount',
+      header: 'Valor',
+      align: 'right',
+      cellClassName: `font-semibold ${type === 'income' ? 'text-green-600' : 'text-red-600'}`,
+      cell: (tx) => formatCurrency(Number(tx.amount)),
+    },
+    {
+      key: 'acoes',
+      align: 'right',
+      cell: (tx) => (
+        <Button size="sm" disabled={updatingId === tx.id} onClick={() => markConfirmed(tx.id)}>
+          {updatingId === tx.id ? '...' : actionLabel}
+        </Button>
+      ),
+    },
+  ];
+
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold">{title}</h1>
@@ -80,7 +124,9 @@ export function PendingTransactionsView({ type, title, actionLabel }: Props) {
       {/* Total em destaque */}
       <div className="bg-white rounded-lg border p-6">
         <p className="text-sm text-muted-foreground">Total pendente</p>
-        <p className={`text-3xl font-bold ${type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
+        <p
+          className={`text-3xl font-bold ${type === 'income' ? 'text-green-600' : 'text-red-600'}`}
+        >
           {formatCurrency(total)}
         </p>
       </div>
@@ -108,52 +154,14 @@ export function PendingTransactionsView({ type, title, actionLabel }: Props) {
       </div>
 
       {/* Tabela */}
-      <div className="bg-white rounded-lg border overflow-x-auto">
-        {loading ? (
-          <div className="p-8 text-center text-muted-foreground">Carregando...</div>
-        ) : data.length === 0 ? (
-          <div className="p-8 text-center text-muted-foreground">Nada pendente.</div>
-        ) : (
-          <table className="w-full min-w-[640px] text-sm">
-            <thead className="bg-gray-50 border-b">
-              <tr>
-                <th className="text-left p-3 font-medium text-muted-foreground">Vencimento</th>
-                <th className="text-left p-3 font-medium text-muted-foreground">Descrição</th>
-                <th className="text-left p-3 font-medium text-muted-foreground">Categoria</th>
-                <th className="text-left p-3 font-medium text-muted-foreground">Conta</th>
-                <th className="text-right p-3 font-medium text-muted-foreground">Valor</th>
-                <th className="p-3"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((tx) => (
-                <tr key={tx.id} className="border-b last:border-0 hover:bg-gray-50">
-                  <td className="p-3 text-muted-foreground">
-                    {formatDateBR(tx.transactionDate)}
-                  </td>
-                  <td className="p-3 font-medium">{tx.description}</td>
-                  <td className="p-3 text-muted-foreground">{tx.category?.name ?? '—'}</td>
-                  <td className="p-3 text-muted-foreground">{tx.account?.name ?? '—'}</td>
-                  <td
-                    className={`p-3 text-right font-semibold ${type === 'income' ? 'text-green-600' : 'text-red-600'}`}
-                  >
-                    {formatCurrency(Number(tx.amount))}
-                  </td>
-                  <td className="p-3 text-right">
-                    <Button
-                      size="sm"
-                      disabled={updatingId === tx.id}
-                      onClick={() => markConfirmed(tx.id)}
-                    >
-                      {updatingId === tx.id ? '...' : actionLabel}
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+      <DataTable
+        columns={columns}
+        rows={data}
+        rowKey={(tx) => tx.id}
+        loading={loading}
+        minWidth={640}
+        empty="Nada pendente."
+      />
     </div>
   );
 }

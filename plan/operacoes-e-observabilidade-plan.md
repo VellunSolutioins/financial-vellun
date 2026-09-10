@@ -39,7 +39,7 @@ autorização primeiro, instrumentação depois, coleta e alertas em seguida, e 
 
 ## Estado da implementação (2026-09-10)
 
-Implementado até a **Entrega 5**, na branch `feat/whatsapp-durable-messaging`, um
+Implementado até a **Entrega 6**, na branch `feat/whatsapp-durable-messaging`, um
 commit por entrega.
 
 | Entrega                                                  | Status             | Commit                                                                      |
@@ -51,15 +51,15 @@ commit por entrega.
 | **3 — Dashboards e alertas**                             | ✅                 | `adicionar dashboards e alertas versionados e testados`                     |
 | **4 — RabbitMQ Management como ponte**                   | ✅                 | `documentar o uso do RabbitMQ Management como ponte para a DLQ`             |
 | **5 — Catálogo de falhas**                               | ✅                 | `adicionar catalogo de falhas em Postgres`                                  |
-| **6 — Painel de operações**                              | 🔜 Próxima         | depende das 0 e 5, ambas prontas                                            |
-| **7 — Reprocessamento e auditoria**                      | 🔜 Pendente        |                                                                             |
+| **6 — Painel de operações**                              | ✅                 | `adicionar painel de operacoes`                                             |
+| **7 — Reprocessamento e auditoria**                      | 🔜 Próxima         | depende da 6, pronta                                                        |
 | **8 — Webhooks de pagamento** (inclui Achado 4)          | 🔜 Pendente        |                                                                             |
 | 9 — Rastreamento distribuído                             | ⏸️ Fora desta leva | por decisão, ver escopo acordado                                            |
 
 Achado 3 (`/internal/*` sem identidade de chamador) segue como dívida, conforme o
 próprio plano previa.
 
-Suítes ao final da Entrega 5: **279 na API**, **186 no agente**, **10 de
+Suítes ao final da Entrega 6: **315 na API**, **186 no agente**, **10 de
 integração**, mais `pnpm obs:check` (20 regras de alerta, 33 casos de teste).
 
 ### Premissas do plano que se mostraram erradas
@@ -100,25 +100,45 @@ Verificadas contra documentação oficial ou contra o sistema no ar, e corrigida
   `CatalogoDeFalhasDivergindoDaDLQ` foi removido — subtraía contador cumulativo de
   um gauge, e o resultado não significava nada.
 
-### Onde retomar: Entrega 6 (painel de operações)
+### Onde retomar: Entrega 7 (reprocessamento e auditoria)
 
-O backend de falhas **já existe** (feito na Entrega 5, porque os critérios de
-aceite dela exigiam a leitura):
+A Entrega 6 fechou toda a leitura. O que existe agora:
 
-- `GET /ops/failures` — listagem paginada com filtros de status, origem, fila,
-  tipo de erro, `correlationId` e período. 10 por página, mais recentes primeiro;
-- `GET /ops/failures/summary` — contagem por status;
-- `GET /ops/failures/:id` — detalhe, **mascarado por padrão**; em claro só para
-  `canViewSensitive`, com linha de auditoria por visualização.
+- **Backend** — `GET /ops/overview` (contagens de falha e de webhook, tipo de erro
+  mais frequente entre as pendentes, idade da mais antiga, links do Grafana);
+  `GET /ops/payments` + `/summary` + `/:id`; `GET /ops/audit` + `/vocabulary` +
+  `/:id` (este último só `ops_admin`, porque devolve estado anterior e posterior).
+  `GET /ops/failures/:id` passou a devolver `logsUrl`.
+- **Frontend** — `/ops` (resumo), `/ops/falhas` e `/ops/falhas/[id]`,
+  `/ops/pagamentos` e `/ops/pagamentos/[id]`, `/ops/auditoria`. Filtros vivem na
+  URL, então um recorte é compartilhável; texto e data só vão para a URL no
+  submit, para não empilhar histórico a cada tecla.
+- **Dívida paga** — `components/ui/table.tsx` (`DataTable`) e
+  `components/ui/pagination.tsx`, extraídos do padrão duplicado e adotados nas
+  quatro telas antigas (lançamentos, contatos, categorias, pendências).
 
-Falta da Entrega 6:
+Falta da Entrega 7: publicar de volta com allowlist no servidor, marcar
+`reprocessing` → `reprocessed`, o cron de reconciliação de linhas presas, lotes
+com resultado por item, e as ações correspondentes na tela — hoje o detalhe da
+falha diz explicitamente que reprocessar e descartar ainda não existem, em vez
+de mostrar botão morto.
 
-- backend de `overview`, `payments` e `audit` (o de `failures` está pronto);
-- **frontend** em `apps/web/src/app/ops/`: resumo com links para o Grafana, lista
-  e detalhe de falhas, filtros, diagnóstico sanitizado, histórico de ações;
-- extrair `components/ui/table.tsx` e `components/ui/pagination.tsx` do padrão
-  duplicado em quatro arquivos, como o plano aponta;
-- usar **apenas tokens de cor**, para não aprofundar a dívida do dark mode.
+### O que a Entrega 6 mudou de rumo
+
+- **O payload de webhook de pagamento não estava tão sanitizado quanto o nome
+  sugeria.** `sanitizePayload` no ingest tira cartão e segredo, mas nome,
+  e-mail, CPF/CNPJ e telefone do cliente continuavam íntegros. A leitura ganhou
+  `maskPaymentPayload`, com a mesma regra das falhas: mascarado por padrão, em
+  claro só para `canViewSensitive`, e cada visualização dessas gera linha de
+  auditoria.
+- **A trilha de auditoria é legível por qualquer operador ativo, de propósito.**
+  Restringi-la a `ops_admin` faria com que só quem administra permissões pudesse
+  conferir quem viu dado sensível. O que ficou com `ops_admin` é o detalhe com
+  `beforeState`/`afterState`, que carrega o retrato do alvo.
+- **O vocabulário dos filtros de auditoria vem das constantes, não de um
+  `SELECT DISTINCT`.** Derivá-lo do banco faria uma ação sumir do filtro
+  justamente enquanto ela nunca tivesse acontecido — que é quando procurá-la
+  importa.
 
 ### Notas de ambiente
 
@@ -139,6 +159,15 @@ Falta da Entrega 6:
   diz 9.0.0. Para instalar dependência, use
   `node <caminho>/pnpm@10.17.1/.../pnpm.cjs --config.manage-package-manager-versions=false add ...`,
   senão o pnpm 9 recusa por store incompatível.
+- **O `node_modules` do web estava incompleto** (Entrega 6): o pacote `next` não
+  existia na store, e nada de frontend compilava. Restaurado com
+  `node <pnpm 10>/pnpm.cjs --config.manage-package-manager-versions=false install --frozen-lockfile --filter @financial-vellun/web...`
+  — o lockfile já tinha `next@14.2.35`, então nada nele mudou.
+- **Não rode `pnpm format` no repositório inteiro.** O código em `main` nunca foi
+  formatado com a config atual: um `pnpm format` reescreve ~82 arquivos que não
+  têm relação nenhuma com a mudança em curso. Formate só o que você tocou
+  (`pnpm exec prettier --write <arquivos>`) até alguém decidir formatar tudo num
+  commit próprio.
 
 ---
 
@@ -355,7 +384,7 @@ telefone aparece mascarado para `operator` sem a permissão.
 
 ---
 
-### Entrega 6 — Painel de operações 🔜
+### Entrega 6 — Painel de operações ✅
 
 Depende das Entregas 0 e 5.
 
@@ -377,7 +406,7 @@ hard-coded. O painel novo não deve aprofundar essa dívida.
 
 ---
 
-### Entrega 7 — Reprocessamento e auditoria 🔜
+### Entrega 7 — Reprocessamento e auditoria 🔜 próxima
 
 Depende da Entrega 6. **Antes de implementar, há um furo de deduplicação a corrigir** (ver Achados).
 

@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Dialog } from '@/components/ui/dialog';
+import { Pagination } from '@/components/ui/pagination';
+import { DataTable, type DataTableColumn } from '@/components/ui/table';
 import { TransactionForm } from '@/components/transactions/TransactionForm';
 import { useTransactions, type Transaction } from '@/hooks/useTransactions';
 import { apiClient } from '@/lib/api-client';
@@ -118,6 +120,100 @@ function TransacoesContent() {
     }
   };
 
+  const columns: DataTableColumn<Transaction>[] = [
+    {
+      key: 'transactionDate',
+      header: 'Data',
+      cellClassName: 'text-muted-foreground',
+      cell: (tx) => formatDateBR(tx.transactionDate),
+    },
+    {
+      key: 'description',
+      header: 'Descrição',
+      cellClassName: 'font-medium',
+      cell: (tx) => tx.description,
+    },
+    {
+      key: 'category',
+      header: 'Categoria',
+      cellClassName: 'text-muted-foreground',
+      cell: (tx) => tx.category?.name ?? '—',
+    },
+    {
+      key: 'account',
+      header: 'Conta',
+      cellClassName: 'text-muted-foreground',
+      cell: (tx) => tx.account?.name ?? '—',
+    },
+    {
+      key: 'source',
+      header: 'Origem',
+      // Manual não ganha selo: é o caso comum, e um selo em toda linha vira ruído.
+      cell: (tx) =>
+        tx.source === 'manual' ? null : (
+          <Badge variant={tx.source === 'ai' ? 'secondary' : 'outline'}>
+            {sourceLabels[tx.source]}
+          </Badge>
+        ),
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      cell: (tx) => (
+        <Badge
+          variant={
+            tx.status === 'confirmed'
+              ? 'success'
+              : tx.status === 'pending'
+                ? 'warning'
+                : 'destructive'
+          }
+        >
+          {statusLabels[tx.status]}
+        </Badge>
+      ),
+    },
+    {
+      key: 'amount',
+      header: 'Valor',
+      align: 'right',
+      cellClassName: (tx) =>
+        `font-semibold ${
+          tx.type === 'income'
+            ? 'text-green-600'
+            : tx.type === 'expense'
+              ? 'text-red-600'
+              : 'text-gray-700'
+        }`,
+      cell: (tx) => (
+        <>
+          {tx.type === 'income' ? '+' : tx.type === 'expense' ? '-' : ''}
+          {formatCurrency(Number(tx.amount))}
+        </>
+      ),
+    },
+    {
+      key: 'acoes',
+      align: 'right',
+      cellClassName: 'whitespace-nowrap',
+      cell: (tx) => (
+        <>
+          <Button size="sm" variant="ghost" onClick={() => openEdit(tx)}>
+            Editar
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-destructive"
+            onClick={() => void handleDelete(tx)}
+          >
+            Excluir
+          </Button>
+        </>
+      ),
+    },
+  ];
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -167,116 +263,25 @@ function TransacoesContent() {
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-lg border overflow-x-auto">
-        {loading ? (
-          <div className="p-8 text-center text-muted-foreground">Carregando...</div>
-        ) : data.length === 0 ? (
-          <div className="p-8 text-center text-muted-foreground">Nenhum lançamento encontrado.</div>
-        ) : (
-          <table className="w-full min-w-[720px] text-sm">
-            <thead className="bg-gray-50 border-b">
-              <tr>
-                <th className="text-left p-3 font-medium text-muted-foreground">Data</th>
-                <th className="text-left p-3 font-medium text-muted-foreground">Descrição</th>
-                <th className="text-left p-3 font-medium text-muted-foreground">Categoria</th>
-                <th className="text-left p-3 font-medium text-muted-foreground">Conta</th>
-                <th className="text-left p-3 font-medium text-muted-foreground">Origem</th>
-                <th className="text-left p-3 font-medium text-muted-foreground">Status</th>
-                <th className="text-right p-3 font-medium text-muted-foreground">Valor</th>
-                <th className="p-3"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((tx) => (
-                <tr key={tx.id} className="border-b last:border-0 hover:bg-gray-50">
-                  <td className="p-3 text-muted-foreground">
-                    {formatDateBR(tx.transactionDate)}
-                  </td>
-                  <td className="p-3 font-medium">{tx.description}</td>
-                  <td className="p-3 text-muted-foreground">{tx.category?.name ?? '—'}</td>
-                  <td className="p-3 text-muted-foreground">{tx.account?.name ?? '—'}</td>
-                  <td className="p-3">
-                    {tx.source !== 'manual' && (
-                      <Badge variant={tx.source === 'ai' ? 'secondary' : 'outline'}>
-                        {sourceLabels[tx.source]}
-                      </Badge>
-                    )}
-                  </td>
-                  <td className="p-3">
-                    <Badge
-                      variant={
-                        tx.status === 'confirmed'
-                          ? 'success'
-                          : tx.status === 'pending'
-                            ? 'warning'
-                            : 'destructive'
-                      }
-                    >
-                      {statusLabels[tx.status]}
-                    </Badge>
-                  </td>
-                  <td
-                    className={`p-3 text-right font-semibold ${
-                      tx.type === 'income'
-                        ? 'text-green-600'
-                        : tx.type === 'expense'
-                          ? 'text-red-600'
-                          : 'text-gray-700'
-                    }`}
-                  >
-                    {tx.type === 'income' ? '+' : tx.type === 'expense' ? '-' : ''}
-                    {formatCurrency(Number(tx.amount))}
-                  </td>
-                  <td className="p-3 text-right whitespace-nowrap">
-                    <Button size="sm" variant="ghost" onClick={() => openEdit(tx)}>
-                      Editar
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="text-destructive"
-                      onClick={() => void handleDelete(tx)}
-                    >
-                      Excluir
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+      <DataTable
+        columns={columns}
+        rows={data}
+        rowKey={(tx) => tx.id}
+        loading={loading}
+        minWidth={720}
+        empty="Nenhum lançamento encontrado."
+      />
 
-      {meta.total > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-muted-foreground">
-            {meta.total} lançamento{meta.total === 1 ? '' : 's'} em {monthLabel(selectedMonth)}
-          </p>
-          {meta.total_pages > 1 && (
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={meta.page <= 1}
-                onClick={() => setParam('page', String(meta.page - 1))}
-              >
-                Anterior
-              </Button>
-              <span className="flex items-center px-3 text-sm text-muted-foreground">
-                {meta.page}/{meta.total_pages}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={meta.page >= meta.total_pages}
-                onClick={() => setParam('page', String(meta.page + 1))}
-              >
-                Próxima
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
+      <Pagination
+        page={meta.page}
+        totalPages={meta.total_pages}
+        onPageChange={(nova) => setParam('page', String(nova))}
+        summary={
+          meta.total > 0
+            ? `${meta.total} lançamento${meta.total === 1 ? '' : 's'} em ${monthLabel(selectedMonth)}`
+            : undefined
+        }
+      />
 
       {/* Modal */}
       <Dialog

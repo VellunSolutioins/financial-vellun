@@ -188,6 +188,17 @@ Nas variáveis do Railway, nunca no repositório.
 | `LOKI_PUSH_URL` | `http://alloy.railway.internal:3100`. Sem ela, sem envio de log. |
 | `WORKER_METRICS_PORT` | porta do HTTP mínimo do worker (padrão 8011) |
 
+### Painel de operações (só na API)
+
+O painel **não consulta** o Grafana: ele leva até lá. Por isso basta a URL
+pública da organização, sem token de leitura no backend. Ausentes, os atalhos
+somem da tela em vez de virarem link quebrado.
+
+| Variável | Para quê |
+| --- | --- |
+| `OPS_GRAFANA_URL` | base da organização, ex.: `https://SEU-ORG.grafana.net`. Monta os links dos quatro dashboards. |
+| `OPS_GRAFANA_LOKI_DATASOURCE_UID` | UID da fonte Loki (Connections → Data sources → a URL termina em `/datasources/edit/<uid>`). Sem ela não há Explore filtrado por `correlationId` no detalhe da falha. |
+
 ### Contas de monitoramento com privilégio mínimo
 
 **Postgres** — `infra/observability/alloy/postgres-monitoring-user.sql` cria

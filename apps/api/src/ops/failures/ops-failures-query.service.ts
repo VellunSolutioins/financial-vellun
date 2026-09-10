@@ -4,6 +4,7 @@ import { OpsAuditResult, OpsFailureSource, OpsFailureStatus, Prisma } from '@pri
 import { PrismaService } from '../../prisma/prisma.service';
 import { OpsAuditService } from '../audit/ops-audit.service';
 import { CurrentOpsOperator } from '../auth/decorators/current-operator.decorator';
+import { OpsGrafanaService } from '../grafana/ops-grafana.service';
 import { OPS_AUDIT_ACTIONS, OPS_AUDIT_TARGETS } from '../ops.constants';
 import { ListFailuresDto } from './dto/list-failures.dto';
 import { maskFailurePayload } from './failure-masking';
@@ -33,6 +34,13 @@ export interface FailureDetail extends FailureListItem {
   sensitiveRevealed: boolean;
   reprocessedAt: Date | null;
   retentionUntil: Date;
+  /**
+   * Explore do Grafana já filtrado por `correlationId` — a ponte da falha para
+   * as linhas de log que a produziram. `null` quando o Grafana não está
+   * configurado ou a falha não tem correlação: melhor ausência de link do que
+   * link que não leva a nada.
+   */
+  logsUrl: string | null;
 }
 
 export interface Paginated<T> {
@@ -63,6 +71,7 @@ export class OpsFailuresQueryService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: OpsAuditService,
+    private readonly grafana: OpsGrafanaService,
   ) {}
 
   /**
@@ -134,6 +143,7 @@ export class OpsFailuresQueryService {
       sensitiveRevealed: revelar,
       reprocessedAt: row.reprocessedAt,
       retentionUntil: row.retentionUntil,
+      logsUrl: this.grafana.logsUrl(row.correlationId),
     };
   }
 
