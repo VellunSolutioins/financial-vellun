@@ -1,0 +1,101 @@
+import { HealthCheckError } from '@nestjs/terminus';
+
+import { HealthController } from './health.controller';
+import { PrismaHealthIndicator } from './prisma.health-indicator';
+
+/**
+ * Critério de aceite do plano: *readiness refletindo dependência caída, sem
+ * derrubar liveness*.
+ *
+ * A distinção é a razão de os dois endpoints existirem. Liveness responde "este
+ * processo precisa ser reiniciado?"; se ele caísse junto com o Postgres, o
+ * orquestrador reiniciaria a API em loop enquanto o problema está no banco — e
+ * o restart não conserta nada. Readiness responde "posso receber tráfego?", e aí
+ * depender do banco é o certo.
+ */
+describe('liveness e readiness', () => {
+  describe('PrismaHealthIndicator', () => {
+    it('faz uma consulta de verdade, não checa se o cliente existe', async () => {
+      const prisma = { $queryRaw: jest.fn().mockResolvedValue([{ '?column?': 1 }]) } as any;
+
+      const resultado = await new PrismaHealthIndicator(prisma).check();
+
+      // O `GET /` anterior respondia `ok` com o banco fora — o pior desfecho
+      // possível, porque mantinha no balanceador uma instância inútil.
+      expect(prisma.$queryRaw).toHaveBeenCalled();
+      expect(resultado).toEqual({ database: { status: 'up' } });
+    });
+
+    it('banco fora derruba o readiness', async () => {
+      const prisma = { $queryRaw: jest.fn().mockRejectedValue(new Error('ECONNREFUSED')) } as any;
+
+      await expect(new PrismaHealthIndicator(prisma).check()).rejects.toBeInstanceOf(
+        HealthCheckError,
+      );
+    });
+
+    it('não vaza a mensagem do driver, que pode carregar credencial', async () => {
+      // Montado em tempo de execução: uma string de conexão literal no código
+      // seria exatamente o que o próprio indicador existe para não vazar.
+      const credencial = ['usuario', 'senha-do-banco'].join(':');
+      const erro = new Error(`connect ECONNREFUSED para ${credencial}@host:5432`);
+      erro.name = 'PrismaClientInitializationError';
+      const prisma = { $queryRaw: jest.fn().mockRejectedValue(erro) } as any;
+
+      const capturado = await new PrismaHealthIndicator(prisma)
+        .check()
+        .catch((e: HealthCheckError) => e);
+
+      const serializado = JSON.stringify((capturado as HealthCheckError).causes);
+      // Só o tipo do erro sai; o resto fica no log, não na resposta pública.
+      expect(serializado).toContain('PrismaClientInitializationError');
+      expect(serializado).not.toContain('senha-do-banco');
+    });
+
+    it('banco que aceita e não responde não pendura o readiness', async () => {
+      jest.useFakeTimers();
+      // Um Postgres saturado não recusa conexão: ele aceita e fica calado. Sem
+      // teto, o readiness ficaria pendurado junto e o balanceador não tiraria a
+      // instância do ar.
+      const prisma = { $queryRaw: jest.fn().mockReturnValue(new Promise(() => {})) } as any;
+
+      const promessa = new PrismaHealthIndicator(prisma).check().catch((e) => e);
+      await jest.advanceTimersByTimeAsync(2_500);
+
+      expect(await promessa).toBeInstanceOf(HealthCheckError);
+      jest.useRealTimers();
+    });
+  });
+
+  describe('HealthController', () => {
+    it('liveness não depende de nada externo', () => {
+      const prisma = { check: jest.fn().mockRejectedValue(new Error('banco fora')) } as any;
+      const health = { check: jest.fn() } as any;
+
+      const controller = new HealthController(health, prisma);
+
+      // Com o banco fora, liveness continua 200: reiniciar o processo não
+      // consertaria o Postgres.
+      expect(controller.liveness()).toEqual({ status: 'ok' });
+      expect(prisma.check).not.toHaveBeenCalled();
+      expect(health.check).not.toHaveBeenCalled();
+    });
+
+    it('readiness consulta o Postgres, e só ele', async () => {
+      const prisma = { check: jest.fn().mockResolvedValue({ database: { status: 'up' } }) } as any;
+      const health = {
+        check: jest.fn(async (indicadores: (() => Promise<unknown>)[]) => {
+          for (const indicador of indicadores) await indicador();
+          return { status: 'ok' };
+        }),
+      } as any;
+
+      await new HealthController(health, prisma).readiness();
+
+      // A API não fala com RabbitMQ, e depender do agente seria errado: a API
+      // funciona sem ele.
+      expect(prisma.check).toHaveBeenCalledWith('database');
+      expect(health.check.mock.calls[0][0]).toHaveLength(1);
+    });
+  });
+});

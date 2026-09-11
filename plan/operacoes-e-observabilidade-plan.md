@@ -59,8 +59,9 @@ commit por entrega.
 Achado 3 (`/internal/*` sem identidade de chamador) segue como dívida, conforme o
 próprio plano previa.
 
-Suítes ao final da Entrega 8: **373 na API**, **194 no agente**, **10 de
-integração**, mais `pnpm obs:check` (19 regras de alerta, 33 casos de teste).
+Suítes ao final da Entrega 8: **379 na API** (mais 6 que exigem Postgres e
+ficam de fora por padrão), **194 no agente**, **10 de integração**, mais
+`pnpm obs:check` (19 regras de alerta, 33 casos de teste).
 
 **O escopo acordado está completo.** A Entrega 9 (rastreamento distribuído)
 segue fora desta leva, por decisão.
@@ -230,8 +231,11 @@ peso:
 - migration nova aplicada no banco local:
   `20260911220000_add_webhook_retry_durability` (acrescenta `exhausted` ao enum,
   `next_retry_at`, `attempted_at`, `subscription_id` e três índices);
-- no banco local, `ops_audit_log` tem **22 linhas** de verificação manual das
-  Entregas 5 a 8, que o trigger não deixa remover — é a garantia funcionando;
+- no banco local, `ops_audit_log` tem **24 linhas** de verificação das Entregas
+  5 a 8, que o trigger não deixa remover — é a garantia funcionando;
+- o teste do trigger append-only é o **único da API que exige Postgres**, e por
+  isso é pulado por padrão. Para rodá-lo:
+  `pnpm db:up && cd apps/api && OPS_DB_TESTS=1 pnpm exec jest ops-audit-append-only`;
 - **Não rode `pnpm format` no repositório inteiro.** O código em `main` nunca foi
   formatado com a config atual: um `pnpm format` reescreve ~82 arquivos que não
   têm relação nenhuma com a mudança em curso. Formate só o que você tocou
