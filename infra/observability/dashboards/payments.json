@@ -70,7 +70,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(vellun_api_payment_webhook_pending_retry{env=\"$env\"})",
+          "expr": "max(vellun_api_payment_webhook_pending_retry{env=\"$env\"})",
           "instant": true
         }
       ],

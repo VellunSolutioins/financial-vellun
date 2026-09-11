@@ -19,9 +19,15 @@ export interface PaymentEventListItem {
   receivedAt: Date;
   processedAt: Date | null;
   lastError: string | null;
+  /** Quando o cron vai tentar de novo. `null` em processado e em esgotado. */
+  nextRetryAt: Date | null;
 }
 
 export interface PaymentEventDetail extends PaymentEventListItem {
+  /** Quando a última tentativa começou. */
+  attemptedAt: Date | null;
+  /** Assinatura correlacionada pelo processamento, quando houve. */
+  subscriptionId: string | null;
   payload: unknown;
   /** `false` quando o payload veio mascarado. A tela precisa dizer isso. */
   sensitiveRevealed: boolean;
@@ -38,6 +44,7 @@ const LIST_SELECT = {
   receivedAt: true,
   processedAt: true,
   lastError: true,
+  nextRetryAt: true,
 } satisfies Prisma.PaymentWebhookEventSelect;
 
 /**
@@ -109,6 +116,9 @@ export class OpsPaymentsQueryService {
       receivedAt: row.receivedAt,
       processedAt: row.processedAt,
       lastError: row.lastError,
+      nextRetryAt: row.nextRetryAt,
+      attemptedAt: row.attemptedAt,
+      subscriptionId: row.subscriptionId,
       payload: revelar ? row.sanitizedPayload : maskPaymentPayload(row.sanitizedPayload),
       sensitiveRevealed: revelar,
       createdAt: row.createdAt,
@@ -128,6 +138,7 @@ export class OpsPaymentsQueryService {
       processing: 0,
       processed: 0,
       failed: 0,
+      exhausted: 0,
     };
 
     for (const linha of linhas) base[linha.status] = linha._count._all;

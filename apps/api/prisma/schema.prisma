@@ -98,11 +98,18 @@ enum PaymentMethodType {
   credit_card
 }
 
+/// Ciclo de vida de um evento de webhook do PSP.
+///
+/// `failed` e `exhausted` sao estados **diferentes** de proposito: antes, toda
+/// falha gravava `failed`, e o painel nao conseguia distinguir "vai ser
+/// retentado sozinho" de "acabou" — o operador reprocessaria por cima de um
+/// retry em andamento. So `exhausted` e recuperavel pelo painel.
 enum WebhookEventStatus {
   received
   processing
   processed
   failed
+  exhausted
 }
 
 // ── Operações ───────────────────────────────────────────────────────────────
@@ -416,8 +423,9 @@ model Subscription {
 
   user     User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   plan     Plan                @relation(fields: [planId], references: [id])
-  payments Payment[]
-  audits   SubscriptionAudit[]
+  payments      Payment[]
+  audits        SubscriptionAudit[]
+  webhookEvents PaymentWebhookEvent[]
 
   @@index([userId])
   @@index([status])
@@ -458,10 +466,33 @@ model PaymentWebhookEvent {
   processedAt      DateTime?          @map("processed_at")
   sanitizedPayload Json?              @map("sanitized_payload")
   lastError        String?            @map("last_error")
-  createdAt        DateTime           @default(now()) @map("created_at")
-  updatedAt        DateTime           @updatedAt @map("updated_at")
+
+  /// Quando a ultima tentativa comecou. Com `nextRetryAt`, responde "esta
+  /// parado ha quanto tempo?" sem depender de `updatedAt`, que muda por
+  /// qualquer escrita.
+  attemptedAt DateTime? @map("attempted_at")
+
+  /// Quando o cron deve tentar de novo. **E aqui que mora a durabilidade**: o
+  /// retry vivia em `setTimeout` no processo, e um deploy dentro da janela de
+  /// ~7,5s perdia o evento. Agendado no banco, ele sobrevive a reinicio.
+  nextRetryAt DateTime? @map("next_retry_at")
+
+  /// Assinatura correlacionada, preenchida quando o processamento a encontra.
+  /// Antes desta coluna a tabela era uma ilha: nao havia como perguntar "o que
+  /// aconteceu com esta assinatura" partindo dos eventos. Nula porque nem todo
+  /// evento correlaciona — e quando nao correlaciona, isso e a informacao.
+  subscriptionId String?       @map("subscription_id")
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([status])
+  /// A varredura do cron: eventos vencidos, por status.
+  @@index([status, nextRetryAt])
+  /// A listagem do painel ordena por data — sem isto, varredura completa.
+  @@index([receivedAt])
+  @@index([subscriptionId])
   @@map("payment_webhook_events")
 }
 

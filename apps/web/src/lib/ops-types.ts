@@ -15,7 +15,7 @@ export interface Paginated<T> {
 
 export type OpsFailureStatus = 'pending' | 'reprocessing' | 'reprocessed' | 'discarded';
 export type OpsFailureSource = 'whatsapp_inbound' | 'whatsapp_processing';
-export type WebhookEventStatus = 'received' | 'processing' | 'processed' | 'failed';
+export type WebhookEventStatus = 'received' | 'processing' | 'processed' | 'failed' | 'exhausted';
 export type OpsAuditResult = 'success' | 'failure' | 'denied';
 
 export interface FailureListItem {
@@ -98,9 +98,13 @@ export interface PaymentEventListItem {
   receivedAt: string;
   processedAt: string | null;
   lastError: string | null;
+  /** Quando o cron vai tentar de novo. `null` em processado e em esgotado. */
+  nextRetryAt: string | null;
 }
 
 export interface PaymentEventDetail extends PaymentEventListItem {
+  attemptedAt: string | null;
+  subscriptionId: string | null;
   payload: unknown;
   sensitiveRevealed: boolean;
   createdAt: string;
@@ -133,7 +137,7 @@ export interface OpsOverview {
   };
   payments: {
     byStatus: Record<WebhookEventStatus, number>;
-    last24hFailed: number;
+    last24hExhausted: number;
     oldestUnresolvedAt: string | null;
   };
   grafana: { dashboards: { key: string; label: string; url: string }[] };
@@ -157,11 +161,34 @@ export const failureSourceLabels: Record<OpsFailureSource, string> = {
   whatsapp_processing: 'Processamento',
 };
 
+/**
+ * `failed` e `exhausted` sao estados diferentes, e a tela precisa dizer isso:
+ * "Vai retentar" ainda caminha sozinho, "Esgotado" parou e espera alguem. Agir
+ * sobre o primeiro seria reprocessar por cima de um retry em andamento.
+ */
 export const paymentStatusLabels: Record<WebhookEventStatus, string> = {
   received: 'Recebido',
   processing: 'Processando',
   processed: 'Processado',
-  failed: 'Falhou',
+  failed: 'Vai retentar',
+  exhausted: 'Esgotado',
+};
+
+/** Desfecho de uma recuperacao de evento de pagamento. */
+export type RecoverOutcome = 'processed' | 'retry_scheduled' | 'exhausted' | 'skipped';
+
+export interface RecoverResult {
+  id: string;
+  outcome: RecoverOutcome;
+  status: WebhookEventStatus;
+  lastError: string | null;
+}
+
+export const recoverOutcomeLabels: Record<RecoverOutcome, string> = {
+  processed: 'Processado',
+  retry_scheduled: 'Falhou de novo, reagendado',
+  exhausted: 'Falhou de novo, esgotado',
+  skipped: 'Nada a fazer',
 };
 
 export const auditResultLabels: Record<OpsAuditResult, string> = {

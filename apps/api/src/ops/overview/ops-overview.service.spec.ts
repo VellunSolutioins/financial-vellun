@@ -56,6 +56,7 @@ describe('OpsOverviewService', () => {
       processing: 0,
       processed: 0,
       failed: 2,
+      exhausted: 0,
     });
   });
 
@@ -108,6 +109,8 @@ describe('OpsOverviewService', () => {
     await service.build();
 
     const [args] = prisma.paymentWebhookEvent.findFirst.mock.calls[0];
-    expect(args.where.status.in).toEqual(['received', 'processing', 'failed']);
+    // `failed` ainda caminha sozinho (tem retry agendado); `exhausted` parou e
+    // espera alguém. Os dois estão em aberto, por motivos diferentes.
+    expect(args.where.status.in).toEqual(['received', 'processing', 'failed', 'exhausted']);
   });
 });

@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 
+import { BillingModule } from '../billing/billing.module';
+
 import { OpsAuditController } from './audit/ops-audit.controller';
 import { OpsAuditQueryService } from './audit/ops-audit-query.service';
 import { OpsAuditService } from './audit/ops-audit.service';
@@ -23,6 +25,7 @@ import { OpsOperatorsController } from './operators/ops-operators.controller';
 import { OpsOperatorsService } from './operators/ops-operators.service';
 import { OpsOverviewController } from './overview/ops-overview.controller';
 import { OpsOverviewService } from './overview/ops-overview.service';
+import { OpsPaymentsActionsService } from './payments/ops-payments-actions.service';
 import { OpsPaymentsController } from './payments/ops-payments.controller';
 import { OpsPaymentsQueryService } from './payments/ops-payments-query.service';
 
@@ -36,7 +39,10 @@ import { OpsPaymentsQueryService } from './payments/ops-payments-query.service';
  * um bug de autorização.
  */
 @Module({
-  imports: [JwtModule.register({})],
+  // `BillingModule` entra pelo `WebhookProcessor`, nao por identidade — a
+  // separacao que o modulo protege e entre `users` e `ops_operators`, e ela
+  // continua de pe: nada aqui importa `AuthModule`.
+  imports: [JwtModule.register({}), BillingModule],
   controllers: [
     OpsAuthController,
     OpsOperatorsController,
@@ -63,6 +69,7 @@ import { OpsPaymentsQueryService } from './payments/ops-payments-query.service';
     OpsOverviewService,
     OpsGrafanaService,
     OpsPaymentsQueryService,
+    OpsPaymentsActionsService,
     OpsAuditQueryService,
   ],
   exports: [

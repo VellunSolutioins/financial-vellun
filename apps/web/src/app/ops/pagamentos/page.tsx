@@ -86,8 +86,19 @@ function PagamentosContent() {
       key: 'attempts',
       header: 'Tentativas',
       align: 'right',
-      cellClassName: 'tabular-nums',
-      cell: (evento) => evento.attempts,
+      cellClassName: 'tabular-nums whitespace-nowrap',
+      cell: (evento) => (
+        <div>
+          <p>{evento.attempts}</p>
+          {/* Só quando há retry agendado: é o que separa "vai se resolver" de
+              "parou e espera alguém". */}
+          {evento.nextRetryAt && (
+            <p className="text-xs font-normal text-muted-foreground">
+              {formatDateTime(evento.nextRetryAt)}
+            </p>
+          )}
+        </div>
+      ),
     },
     {
       key: 'status',
@@ -111,8 +122,8 @@ function PagamentosContent() {
       <div>
         <h1 className="text-lg font-semibold">Webhooks de pagamento</h1>
         <p className="text-sm text-muted-foreground">
-          Eventos do PSP como foram recebidos, antes de processar. A recuperação de um evento que
-          falhou é a Entrega 8; aqui só se lê.
+          Eventos do PSP como foram recebidos, antes de processar. &ldquo;Vai retentar&rdquo; tem
+          data marcada e caminha sozinho; &ldquo;esgotado&rdquo; parou e espera um operador.
         </p>
       </div>
 

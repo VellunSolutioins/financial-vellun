@@ -22,7 +22,8 @@ export interface OpsOverview {
   };
   payments: {
     byStatus: Record<WebhookEventStatus, number>;
-    last24hFailed: number;
+    /** Esgotados nas últimas 24h — o que parou e espera alguém. */
+    last24hExhausted: number;
     oldestUnresolvedAt: Date | null;
   };
   grafana: {
@@ -31,11 +32,18 @@ export interface OpsOverview {
   generatedAt: Date;
 }
 
-/** Estados de webhook que ainda não terminaram bem. */
+/**
+ * Estados de webhook que ainda não terminaram bem.
+ *
+ * `failed` entra porque ainda há retry pendente — está em aberto, mas caminhando
+ * sozinho. `exhausted` entra porque parou e só sai com ação de operador. A
+ * diferença entre os dois é o que o painel precisa mostrar.
+ */
 const WEBHOOK_UNRESOLVED: WebhookEventStatus[] = [
   WebhookEventStatus.received,
   WebhookEventStatus.processing,
   WebhookEventStatus.failed,
+  WebhookEventStatus.exhausted,
 ];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -67,7 +75,7 @@ export class OpsOverviewService {
       oldestPending,
       topErrorTypes,
       paymentsByStatus,
-      paymentsFailedLast24h,
+      paymentsExhaustedLast24h,
       oldestUnresolvedPayment,
     ] = await Promise.all([
       this.failures.countByStatus(),
@@ -89,7 +97,7 @@ export class OpsOverviewService {
         _count: { _all: true },
       }),
       this.prisma.paymentWebhookEvent.count({
-        where: { status: WebhookEventStatus.failed, receivedAt: { gte: desde } },
+        where: { status: WebhookEventStatus.exhausted, receivedAt: { gte: desde } },
       }),
       this.prisma.paymentWebhookEvent.findFirst({
         where: { status: { in: WEBHOOK_UNRESOLVED } },
@@ -105,6 +113,7 @@ export class OpsOverviewService {
       processing: 0,
       processed: 0,
       failed: 0,
+      exhausted: 0,
     };
     for (const linha of paymentsByStatus) pagamentos[linha.status] = linha._count._all;
 
@@ -120,7 +129,7 @@ export class OpsOverviewService {
       },
       payments: {
         byStatus: pagamentos,
-        last24hFailed: paymentsFailedLast24h,
+        last24hExhausted: paymentsExhaustedLast24h,
         oldestUnresolvedAt: oldestUnresolvedPayment?.receivedAt ?? null,
       },
       grafana: { dashboards: this.grafana.dashboards() },

@@ -35,10 +35,15 @@ describe('sanitizePayload', () => {
 describe('WebhookEventService.ingest', () => {
   function setup(createImpl: jest.Mock) {
     const prisma = { paymentWebhookEvent: { create: createImpl } } as any;
-    return new WebhookEventService(prisma);
+    const metrics = { observePaymentWebhook: jest.fn() } as any;
+    return new WebhookEventService(prisma, metrics);
   }
 
-  const event = { providerEventId: 'evt_1', eventType: 'PAYMENT_RECEIVED', payload: { id: 'evt_1' } };
+  const event = {
+    providerEventId: 'evt_1',
+    eventType: 'PAYMENT_RECEIVED',
+    payload: { id: 'evt_1' },
+  };
 
   it('persiste o evento e retorna não-duplicado', async () => {
     const create = jest.fn().mockResolvedValue({ id: 'row_1' });
@@ -55,9 +60,11 @@ describe('WebhookEventService.ingest', () => {
   });
 
   it('trata duplicado (P2002) como idempotente', async () => {
-    const create = jest.fn().mockRejectedValue(
-      new Prisma.PrismaClientKnownRequestError('dup', { code: 'P2002', clientVersion: 'test' }),
-    );
+    const create = jest
+      .fn()
+      .mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('dup', { code: 'P2002', clientVersion: 'test' }),
+      );
     const service = setup(create);
 
     const result = await service.ingest(event);

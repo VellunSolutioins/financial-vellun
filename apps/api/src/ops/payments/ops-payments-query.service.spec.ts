@@ -165,6 +165,7 @@ describe('OpsPaymentsQueryService', () => {
         processing: 0,
         processed: 0,
         failed: 2,
+        exhausted: 0,
       });
     });
   });

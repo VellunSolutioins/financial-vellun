@@ -39,7 +39,7 @@ autorização primeiro, instrumentação depois, coleta e alertas em seguida, e 
 
 ## Estado da implementação (2026-09-10)
 
-Implementado até a **Entrega 7**, na branch `feat/whatsapp-durable-messaging`, um
+Implementado até a **Entrega 8**, na branch `feat/whatsapp-durable-messaging`, um
 commit por entrega.
 
 | Entrega                                                  | Status             | Commit                                                                      |
@@ -53,14 +53,17 @@ commit por entrega.
 | **5 — Catálogo de falhas**                               | ✅                 | `adicionar catalogo de falhas em Postgres`                                  |
 | **6 — Painel de operações**                              | ✅                 | `adicionar painel de operacoes`                                             |
 | **7 — Reprocessamento e auditoria**                      | ✅                 | `adicionar reprocessamento de falhas`                                       |
-| **8 — Webhooks de pagamento** (inclui Achado 4)          | 🔜 Próxima         | última desta leva                                                           |
+| **8 — Webhooks de pagamento** (inclui Achado 4)          | ✅                 | `dar durabilidade ao retry de webhook de pagamento`                         |
 | 9 — Rastreamento distribuído                             | ⏸️ Fora desta leva | por decisão, ver escopo acordado                                            |
 
 Achado 3 (`/internal/*` sem identidade de chamador) segue como dívida, conforme o
 próprio plano previa.
 
-Suítes ao final da Entrega 7: **343 na API**, **194 no agente**, **10 de
-integração**, mais `pnpm obs:check` (20 regras de alerta, 33 casos de teste).
+Suítes ao final da Entrega 8: **373 na API**, **194 no agente**, **10 de
+integração**, mais `pnpm obs:check` (19 regras de alerta, 33 casos de teste).
+
+**O escopo acordado está completo.** A Entrega 9 (rastreamento distribuído)
+segue fora desta leva, por decisão.
 
 ### Premissas do plano que se mostraram erradas
 
@@ -100,25 +103,52 @@ Verificadas contra documentação oficial ou contra o sistema no ar, e corrigida
   `CatalogoDeFalhasDivergindoDaDLQ` foi removido — subtraía contador cumulativo de
   um gauge, e o resultado não significava nada.
 
-### Onde retomar: Entrega 8 (webhooks de pagamento)
+### Onde retomar: o escopo acordado acabou
 
-As Entregas 6 e 7 fecharam o pipeline WhatsApp de ponta a ponta — ler, agir e
-auditar. O que existe:
+Entregas 0 a 8 estão feitas. O que ficou registrado como dívida, em ordem de
+peso:
 
-- **Reprocessar** (`POST /ops/failures/:id/reprocess` e o lote em
-  `POST /ops/failures/reprocess`) e **descartar**
-  (`POST /ops/failures/:id/discard`), com justificativa obrigatória;
-- o agente publica em `POST /internal/ops/reprocess`, com allowlist de rota,
-  revalidação do contrato e _publisher confirm_;
-- `ReprocessReconciliationService` devolve a `pending` o que ficar preso em
-  `reprocessing` por mais de 15 min.
+1. **Não existe deploy versionado para API e agente** (ver Riscos). Continua
+   sendo a maior fragilidade do conjunto: o Railway é operado pelo painel, nada
+   disso está no repositório, e não há como revisar mudança de infraestrutura em
+   PR. Vale trabalho próprio.
+2. **Achado 3** — `/internal/*` com chave única compartilhada, sem identidade de
+   chamador. Agora é mais visível do que era: `POST /internal/ops/reprocess`
+   republica mensagem de cliente, e a única coisa que autentica isso é uma chave
+   estática sem rotação.
+3. **Entrega 9** (rastreamento distribuído), fora desta leva por decisão.
+4. **`sanitizePayload` não é reversível.** Um evento de pagamento que precise de
+   campo redigido para reprocessar não é recuperável sem consultar o PSP. Não
+   apareceu na prática, mas continua verdade.
 
-Falta da Entrega 8: `payment_webhook_events` ainda é uma ilha (Achado 4) — sem
-relação com `Subscription`/`User`/`Payment` e **sem índice por `receivedAt`**, o
-que a listagem de pagamentos do painel já exercita. A recuperação de um evento
-`failed` depende de corrigir antes a durabilidade do retry, e esbarra num limite
-já conhecido: `sanitizePayload` redige antes de persistir, então um evento que
-precise de campo redigido não é recuperável sem consultar o PSP.
+### O que a Entrega 8 mudou de rumo
+
+- **As métricas de pagamento já existiam como expectativa, não como código.** O
+  dashboard `vellun-payments` e dois alertas foram escritos na Entrega 3 contra
+  cinco nomes (`..._received_total`, `_processed_total`, `_failed_total`,
+  `_exhausted_total`, `_pending_retry`) e ficaram inertes por `unless absent()`.
+  A Entrega 8 emitiu exatamente esses nomes — os dois alertas armaram.
+- **O gauge da fila de retry é por processo, e o dashboard somava.** Com mais de
+  uma réplica, `sum(vellun_api_payment_webhook_pending_retry)` daria N vezes o
+  valor real. Corrigido para `max`; o alerta compara série a série e já estava
+  certo.
+- **O gauge é medido na varredura, não num `collect()` por scrape.** Consultar o
+  Postgres a cada scrape amarraria a coleta de métrica à saúde do banco — e é
+  quando ele vacila que o painel precisa funcionar.
+- **`markFailed` passou a decidir os dois estados.** Antes gravava `failed` a
+  cada falha, antes de saber se haveria retry. Agora `nextRetryAt()` decide, e a
+  distinção fica visível: `failed` tem data marcada, `exhausted` não tem.
+- **Os buckets de retry mudaram de escala.** `2^n * 500ms` esgotava o evento em
+  ~7,5 s — antes de uma indisponibilidade de PSP ter qualquer chance de passar.
+  Agora `[30s, 2min, 10min, 30min, 2h]`, e nenhum bucket é menor que um ciclo do
+  cron: um intervalo de 500 ms só produziria a ilusão de urgência.
+- **Recuperar não zera o orçamento de tentativas.** Dá exatamente uma tentativa.
+  Quem corrigiu a causa precisa de uma; quem não corrigiu não deve queimar cinco
+  contra uma dependência ainda quebrada.
+- **Achado 4 foi fechado pelos dois lados**: índice por `received_at` (a
+  listagem do painel ordena por data) e `subscription_id` preenchido pelo
+  processamento, que era o que faltava para perguntar "o que aconteceu com esta
+  assinatura" partindo dos eventos.
 
 ### O que a Entrega 7 mudou de rumo
 
@@ -197,8 +227,11 @@ precise de campo redigido não é recuperável sem consultar o PSP.
   existia na store, e nada de frontend compilava. Restaurado com
   `node <pnpm 10>/pnpm.cjs --config.manage-package-manager-versions=false install --frozen-lockfile --filter @financial-vellun/web...`
   — o lockfile já tinha `next@14.2.35`, então nada nele mudou.
-- no banco local, `ops_audit_log` tem **20 linhas** de verificação manual das
-  Entregas 5 a 7, que o trigger não deixa remover — é a garantia funcionando;
+- migration nova aplicada no banco local:
+  `20260911220000_add_webhook_retry_durability` (acrescenta `exhausted` ao enum,
+  `next_retry_at`, `attempted_at`, `subscription_id` e três índices);
+- no banco local, `ops_audit_log` tem **22 linhas** de verificação manual das
+  Entregas 5 a 8, que o trigger não deixa remover — é a garantia funcionando;
 - **Não rode `pnpm format` no repositório inteiro.** O código em `main` nunca foi
   formatado com a config atual: um `pnpm format` reescreve ~82 arquivos que não
   têm relação nenhuma com a mudança em curso. Formate só o que você tocou
@@ -463,7 +496,7 @@ operação, estado anterior e posterior. Sem payload sensível completo.
 
 ---
 
-### Entrega 8 — Webhooks de pagamento: durabilidade e recuperação 🔜 próxima
+### Entrega 8 — Webhooks de pagamento: durabilidade e recuperação ✅
 
 Você aprovou corrigir antes de construir a recuperação, e o motivo é concreto: hoje o retry vive em
 `setTimeout` no processo (`apps/api/src/billing/webhook/webhook.processor.ts:39-63`, 5 tentativas,

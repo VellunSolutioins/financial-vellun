@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Counter, Histogram, Registry, collectDefaultMetrics } from '@prometheus-io/client';
+import { Counter, Gauge, Histogram, Registry, collectDefaultMetrics } from '@prometheus-io/client';
 
 /**
  * Valor de `route` quando a requisição não casou com nenhuma rota (404).
@@ -9,6 +9,9 @@ import { Counter, Histogram, Registry, collectDefaultMetrics } from '@prometheus
  * que é exatamente o caminho para estourar o limite de séries do free tier.
  */
 export const UNMATCHED_ROUTE = 'unmatched';
+
+/** Marcos do ciclo de vida de um evento de webhook do PSP. */
+export type PaymentWebhookEvent = 'received' | 'processed' | 'failed' | 'exhausted';
 
 /**
  * Métricas Prometheus da API.
@@ -28,6 +31,8 @@ export class MetricsService {
 
   private readonly httpRequests: Counter<'method' | 'route' | 'status'>;
   private readonly httpDuration: Histogram<'method' | 'route' | 'status'>;
+  private readonly paymentWebhooks: Record<PaymentWebhookEvent, Counter<string>>;
+  private readonly paymentWebhookPendingRetry: Gauge<string>;
 
   constructor() {
     this.registry.setDefaultLabels({
@@ -55,6 +60,48 @@ export class MetricsService {
       buckets: [0.005, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
       registers: [this.registry],
     });
+
+    // Contadores separados, não um só com label `status`: os dashboards e os
+    // dois alertas de pagamento (Entrega 3) já foram escritos contra estes
+    // nomes, e eles ficaram inertes por `unless absent()` até existirem.
+    const contador = (nome: string, help: string) =>
+      new Counter({ name: `vellun_api_payment_webhook_${nome}`, help, registers: [this.registry] });
+
+    this.paymentWebhooks = {
+      received: contador('received_total', 'Eventos de webhook do PSP recebidos e persistidos.'),
+      processed: contador('processed_total', 'Eventos de webhook do PSP processados com sucesso.'),
+      failed: contador(
+        'failed_total',
+        'Tentativas de processamento que falharam e foram reagendadas.',
+      ),
+      exhausted: contador(
+        'exhausted_total',
+        'Eventos que esgotaram o retry. Cada um pode ser um pagamento sem acesso concedido.',
+      ),
+    };
+
+    /**
+     * Fila de retry, medida a cada varredura.
+     *
+     * É um gauge por **processo**, não um total do cluster: com mais de uma
+     * réplica, todas reportam o mesmo número do banco. Some isso num painel e o
+     * valor vira N vezes o real — por isso o dashboard usa `max`, e o alerta
+     * compara série a série.
+     */
+    this.paymentWebhookPendingRetry = new Gauge({
+      name: 'vellun_api_payment_webhook_pending_retry',
+      help: 'Eventos de webhook aguardando nova tentativa (status failed).',
+      registers: [this.registry],
+    });
+  }
+
+  /** Marca um evento no ciclo de vida do webhook de pagamento. */
+  observePaymentWebhook(evento: PaymentWebhookEvent, quantidade = 1): void {
+    this.paymentWebhooks[evento].inc(quantidade);
+  }
+
+  setPaymentWebhookPendingRetry(total: number): void {
+    this.paymentWebhookPendingRetry.set(total);
   }
 
   observeHttpRequest(params: {

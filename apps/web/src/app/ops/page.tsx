@@ -142,10 +142,15 @@ export default function OpsOverviewPage() {
 
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatCard
+            label={paymentStatusLabels.exhausted}
+            value={payments.byStatus.exhausted}
+            emphasis={payments.byStatus.exhausted > 0}
+            hint={`${payments.last24hExhausted} nas últimas 24h · espera operador`}
+          />
+          <StatCard
             label={paymentStatusLabels.failed}
             value={payments.byStatus.failed}
-            emphasis={payments.byStatus.failed > 0}
-            hint={`${payments.last24hFailed} nas últimas 24h`}
+            hint="com retry agendado, caminham sozinhos"
           />
           <StatCard
             label="Em aberto"
@@ -156,16 +161,15 @@ export default function OpsOverviewPage() {
                 : 'nada em aberto'
             }
           />
-          <StatCard label={paymentStatusLabels.processed} value={payments.byStatus.processed} />
           <StatCard
-            label="Recebidos"
-            value={Object.values(payments.byStatus).reduce((soma, n) => soma + n, 0)}
-            hint="total histórico"
+            label={paymentStatusLabels.processed}
+            value={payments.byStatus.processed}
+            hint={`${Object.values(payments.byStatus).reduce((soma, n) => soma + n, 0)} recebidos ao todo`}
           />
         </div>
 
         <Button asChild variant="outline" size="sm">
-          <Link href="/ops/pagamentos?status=failed">Ver eventos que falharam</Link>
+          <Link href="/ops/pagamentos?status=exhausted">Ver eventos esgotados</Link>
         </Button>
       </section>
 

@@ -24,11 +24,17 @@ const failureVariants: Record<OpsFailureStatus, Variant> = {
   discarded: 'outline',
 };
 
+/**
+ * `failed` e `warning` e `exhausted` e `destructive`: o primeiro ainda tem retry
+ * agendado, e pintar de vermelho o que esta se resolvendo sozinho treina o
+ * operador a ignorar vermelho.
+ */
 const paymentVariants: Record<WebhookEventStatus, Variant> = {
   received: 'secondary',
   processing: 'secondary',
   processed: 'success',
-  failed: 'destructive',
+  failed: 'warning',
+  exhausted: 'destructive',
 };
 
 const auditVariants: Record<OpsAuditResult, Variant> = {
