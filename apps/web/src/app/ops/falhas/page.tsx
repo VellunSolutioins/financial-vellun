@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
 
+import { ActionDialog } from '@/components/ops/action-dialog';
 import { formatAge, formatDateTime } from '@/components/ops/ops-format';
 import { FailureStatusBadge } from '@/components/ops/status-badge';
 import { Badge } from '@/components/ui/badge';
@@ -13,8 +14,20 @@ import { Label } from '@/components/ui/label';
 import { Pagination } from '@/components/ui/pagination';
 import { Select } from '@/components/ui/select';
 import { DataTable, type DataTableColumn } from '@/components/ui/table';
+import { useToast } from '@/components/ui/toast';
+import { useOpsSession } from '@/contexts/ops-session-context';
 import { useOpsList } from '@/hooks/use-ops-list';
-import { failureSourceLabels, failureStatusLabels, type FailureListItem } from '@/lib/ops-types';
+import { OpsApiError, opsApiClient } from '@/lib/ops-api-client';
+import {
+  failureSourceLabels,
+  failureStatusLabels,
+  reprocessOutcomeLabels,
+  type FailureListItem,
+  type ReprocessBatchResult,
+} from '@/lib/ops-types';
+
+/** Mesmo teto da API: o lote precisa caber numa decisao humana. */
+const MAX_LOTE = 50;
 
 /** Campos do filtro que vivem na URL, para o link poder ser compartilhado. */
 const CAMPOS = ['status', 'source', 'errorType', 'correlationId', 'from', 'to'] as const;
@@ -43,10 +56,55 @@ function FalhasContent() {
   const [rascunho, setRascunho] = useState<Filtros>(naUrl);
   const page = Number(searchParams.get('page') ?? 1);
 
-  const { data, loading, error, totalPages } = useOpsList<FailureListItem>('/ops/failures', {
-    ...naUrl,
-    page,
-  });
+  const { data, loading, error, totalPages, reload } = useOpsList<FailureListItem>(
+    '/ops/failures',
+    { ...naUrl, page },
+  );
+
+  const toast = useToast();
+  const { hasRole } = useOpsSession();
+  const podeReprocessar = hasRole('operator', 'ops_admin');
+
+  const [selecionadas, setSelecionadas] = useState<string[]>([]);
+  const [loteAberto, setLoteAberto] = useState(false);
+  const [resultado, setResultado] = useState<ReprocessBatchResult | null>(null);
+
+  // Só o que está pendente entra no lote: a API pularia o resto, e oferecer uma
+  // caixa que não faz nada é pior do que não oferecer.
+  const elegiveis = (data?.items ?? []).filter((falha) => falha.status === 'pending');
+  const selecionaveis = elegiveis.slice(0, MAX_LOTE).map((falha) => falha.id);
+  const todasMarcadas =
+    selecionaveis.length > 0 && selecionaveis.every((id) => selecionadas.includes(id));
+
+  const alternar = (id: string) =>
+    setSelecionadas((atual) =>
+      atual.includes(id) ? atual.filter((outro) => outro !== id) : [...atual, id],
+    );
+
+  const reprocessarLote = async (reason: string) => {
+    try {
+      const desfecho = await opsApiClient.post<ReprocessBatchResult>('/ops/failures/reprocess', {
+        ids: selecionadas,
+        reason,
+      });
+      setResultado(desfecho);
+      setLoteAberto(false);
+      setSelecionadas([]);
+
+      const republicadas = desfecho.items.filter((item) => item.outcome === 'republished').length;
+      if (republicadas === desfecho.items.length) {
+        toast.success(`${republicadas} mensagem(ns) republicada(s).`);
+      } else {
+        // Um lote parcial não é sucesso: o resumo por item fica na tela.
+        toast.error(`${republicadas} de ${desfecho.items.length} republicada(s).`);
+      }
+      await reload();
+    } catch (err) {
+      toast.error(
+        err instanceof OpsApiError ? err.message : 'Não foi possível reprocessar o lote.',
+      );
+    }
+  };
 
   const aplicar = (filtros: Filtros, novaPagina = 1) => {
     const params = new URLSearchParams();
@@ -66,6 +124,33 @@ function FalhasContent() {
     setRascunho((atual) => ({ ...atual, [campo]: valor }));
 
   const columns: DataTableColumn<FailureListItem>[] = [
+    ...(podeReprocessar
+      ? [
+          {
+            key: 'selecao',
+            header: (
+              <input
+                type="checkbox"
+                className="h-4 w-4"
+                aria-label="Selecionar as pendentes desta página"
+                checked={todasMarcadas}
+                disabled={selecionaveis.length === 0}
+                onChange={(event) => setSelecionadas(event.target.checked ? selecionaveis : [])}
+              />
+            ),
+            cell: (falha: FailureListItem) => (
+              <input
+                type="checkbox"
+                className="h-4 w-4"
+                aria-label={`Selecionar falha ${falha.errorType}`}
+                checked={selecionadas.includes(falha.id)}
+                disabled={falha.status !== 'pending'}
+                onChange={() => alternar(falha.id)}
+              />
+            ),
+          } as DataTableColumn<FailureListItem>,
+        ]
+      : []),
     {
       key: 'capturedAt',
       header: 'Capturada',
@@ -242,6 +327,68 @@ function FalhasContent() {
         </p>
       )}
 
+      {selecionadas.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3">
+          <p className="text-sm">
+            {selecionadas.length} selecionada(s)
+            {selecionadas.length >= MAX_LOTE && ` — teto de ${MAX_LOTE} por lote`}
+          </p>
+          <div className="flex gap-2">
+            <Button size="sm" onClick={() => setLoteAberto(true)}>
+              Reprocessar selecionadas
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setSelecionadas([])}>
+              Limpar seleção
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {resultado && (
+        <div className="space-y-2 rounded-lg border bg-card p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-medium">Resultado do lote</p>
+            <Button size="sm" variant="ghost" onClick={() => setResultado(null)}>
+              Fechar
+            </Button>
+          </div>
+
+          {resultado.aborted && (
+            <p
+              role="alert"
+              className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm"
+            >
+              O lote foi interrompido: {resultado.abortReason}
+            </p>
+          )}
+
+          {/* Resultado POR ITEM, não um total: num lote parcial, saber quais
+              passaram é a diferença entre retomar e recomeçar. */}
+          <ul className="space-y-1 text-sm">
+            {resultado.items.map((item) => (
+              <li key={item.id} className="flex flex-wrap items-baseline gap-2">
+                <Link
+                  href={`/ops/falhas/${item.id}`}
+                  className="font-mono text-xs underline-offset-4 hover:underline"
+                >
+                  {item.id.slice(0, 8)}
+                </Link>
+                <span>{reprocessOutcomeLabels[item.outcome]}</span>
+                {item.detail && (
+                  <span className="text-xs text-muted-foreground">— {item.detail}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+
+          <Button asChild size="sm" variant="outline">
+            <Link href={`/ops/auditoria?operationId=${resultado.operationId}`}>
+              Ver na auditoria
+            </Link>
+          </Button>
+        </div>
+      )}
+
       <DataTable
         columns={columns}
         rows={data?.items ?? []}
@@ -260,6 +407,15 @@ function FalhasContent() {
           disabled={loading}
         />
       )}
+
+      <ActionDialog
+        open={loteAberto}
+        title={`Reprocessar ${selecionadas.length} falha(s)`}
+        description="Cada payload volta para a fila de origem, um de cada vez. Se o agente ou o broker estiverem fora, o lote para e diz onde parou."
+        confirmLabel="Reprocessar lote"
+        onClose={() => setLoteAberto(false)}
+        onConfirm={reprocessarLote}
+      />
     </div>
   );
 }

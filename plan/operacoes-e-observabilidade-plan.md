@@ -39,7 +39,7 @@ autorização primeiro, instrumentação depois, coleta e alertas em seguida, e 
 
 ## Estado da implementação (2026-09-10)
 
-Implementado até a **Entrega 6**, na branch `feat/whatsapp-durable-messaging`, um
+Implementado até a **Entrega 7**, na branch `feat/whatsapp-durable-messaging`, um
 commit por entrega.
 
 | Entrega                                                  | Status             | Commit                                                                      |
@@ -52,14 +52,14 @@ commit por entrega.
 | **4 — RabbitMQ Management como ponte**                   | ✅                 | `documentar o uso do RabbitMQ Management como ponte para a DLQ`             |
 | **5 — Catálogo de falhas**                               | ✅                 | `adicionar catalogo de falhas em Postgres`                                  |
 | **6 — Painel de operações**                              | ✅                 | `adicionar painel de operacoes`                                             |
-| **7 — Reprocessamento e auditoria**                      | 🔜 Próxima         | depende da 6, pronta                                                        |
-| **8 — Webhooks de pagamento** (inclui Achado 4)          | 🔜 Pendente        |                                                                             |
+| **7 — Reprocessamento e auditoria**                      | ✅                 | `adicionar reprocessamento de falhas`                                       |
+| **8 — Webhooks de pagamento** (inclui Achado 4)          | 🔜 Próxima         | última desta leva                                                           |
 | 9 — Rastreamento distribuído                             | ⏸️ Fora desta leva | por decisão, ver escopo acordado                                            |
 
 Achado 3 (`/internal/*` sem identidade de chamador) segue como dívida, conforme o
 próprio plano previa.
 
-Suítes ao final da Entrega 6: **315 na API**, **186 no agente**, **10 de
+Suítes ao final da Entrega 7: **343 na API**, **194 no agente**, **10 de
 integração**, mais `pnpm obs:check` (20 regras de alerta, 33 casos de teste).
 
 ### Premissas do plano que se mostraram erradas
@@ -100,28 +100,62 @@ Verificadas contra documentação oficial ou contra o sistema no ar, e corrigida
   `CatalogoDeFalhasDivergindoDaDLQ` foi removido — subtraía contador cumulativo de
   um gauge, e o resultado não significava nada.
 
-### Onde retomar: Entrega 7 (reprocessamento e auditoria)
+### Onde retomar: Entrega 8 (webhooks de pagamento)
 
-A Entrega 6 fechou toda a leitura. O que existe agora:
+As Entregas 6 e 7 fecharam o pipeline WhatsApp de ponta a ponta — ler, agir e
+auditar. O que existe:
 
-- **Backend** — `GET /ops/overview` (contagens de falha e de webhook, tipo de erro
-  mais frequente entre as pendentes, idade da mais antiga, links do Grafana);
-  `GET /ops/payments` + `/summary` + `/:id`; `GET /ops/audit` + `/vocabulary` +
-  `/:id` (este último só `ops_admin`, porque devolve estado anterior e posterior).
-  `GET /ops/failures/:id` passou a devolver `logsUrl`.
-- **Frontend** — `/ops` (resumo), `/ops/falhas` e `/ops/falhas/[id]`,
-  `/ops/pagamentos` e `/ops/pagamentos/[id]`, `/ops/auditoria`. Filtros vivem na
-  URL, então um recorte é compartilhável; texto e data só vão para a URL no
-  submit, para não empilhar histórico a cada tecla.
-- **Dívida paga** — `components/ui/table.tsx` (`DataTable`) e
-  `components/ui/pagination.tsx`, extraídos do padrão duplicado e adotados nas
-  quatro telas antigas (lançamentos, contatos, categorias, pendências).
+- **Reprocessar** (`POST /ops/failures/:id/reprocess` e o lote em
+  `POST /ops/failures/reprocess`) e **descartar**
+  (`POST /ops/failures/:id/discard`), com justificativa obrigatória;
+- o agente publica em `POST /internal/ops/reprocess`, com allowlist de rota,
+  revalidação do contrato e _publisher confirm_;
+- `ReprocessReconciliationService` devolve a `pending` o que ficar preso em
+  `reprocessing` por mais de 15 min.
 
-Falta da Entrega 7: publicar de volta com allowlist no servidor, marcar
-`reprocessing` → `reprocessed`, o cron de reconciliação de linhas presas, lotes
-com resultado por item, e as ações correspondentes na tela — hoje o detalhe da
-falha diz explicitamente que reprocessar e descartar ainda não existem, em vez
-de mostrar botão morto.
+Falta da Entrega 8: `payment_webhook_events` ainda é uma ilha (Achado 4) — sem
+relação com `Subscription`/`User`/`Payment` e **sem índice por `receivedAt`**, o
+que a listagem de pagamentos do painel já exercita. A recuperação de um evento
+`failed` depende de corrigir antes a durabilidade do retry, e esbarra num limite
+já conhecido: `sanitizePayload` redige antes de persistir, então um evento que
+precise de campo redigido não é recuperável sem consultar o PSP.
+
+### O que a Entrega 7 mudou de rumo
+
+- **O furo de deduplicação que bloqueava esta entrega já estava corrigido** no
+  Achado 1. A lista de "Achados que precisam de correção" mais abaixo é o texto
+  original do plano e não foi reescrita — a tabela de status é a fonte de verdade.
+- **A API não publica no broker; o agente publica.** Duplicar a camada de
+  mensageria em TypeScript significaria manter duas implementações de confirm,
+  topologia e contratos. A API chama `POST /internal/ops/reprocess`, no mesmo
+  sentido que já existia para as boas-vindas.
+- **O código de status do agente virou contrato.** `422` é recusa antes de
+  publicar (certeza de que nada entrou: a linha volta a `pending`); `503` é
+  ambíguo, porque um confirm que não chega não prova que a publicação não
+  aconteceu — a linha fica em `reprocessing` para o cron. `408` e `429` contam
+  como ambíguos, não como recusa.
+- **O lote é sequencial.** Concorrência compraria pouco e custaria a precisão da
+  interrupção: "parou no item 7" vira "parou entre o 5 e o 12", e é essa
+  fronteira que o operador usa para retomar.
+- **Descartar ficou restrito a `pending`.** Uma linha em `reprocessing` pode já
+  ter sido publicada; descartá-la diria "não vamos atender" sobre uma mensagem
+  que talvez esteja sendo processada. O cron devolve essas a `pending` primeiro.
+- **"Republicada" não é "processada com sucesso"**, e a tela diz isso. O catálogo
+  não acompanha o pipeline depois da publicação; o que ele sabe é se a mesma
+  correlação voltou a falhar, e é isso que `subsequentFailures` mostra.
+
+### Duas medições que desmentiram a sonda, não o código
+
+1. **O `messages` do RabbitMQ Management vem de coleta periódica (~5s).** Ler a
+   profundidade logo após publicar devolve o valor **anterior** — a primeira
+   rodada da verificação mostrou "fila = 0" depois de duas publicações
+   confirmadas. O contador cumulativo `message_stats.publish` já mostrava 2.
+   Para verificar publicação, use o contador cumulativo ou espere a coleta.
+2. **O papel do operador vem do banco a cada requisição, não do token.** Um token
+   assinado com `role: viewer` sobre uma linha `operator` é autorizado como
+   `operator` — que é o comportamento correto e documentado do `OpsAuthGuard`
+   (revogar papel tem efeito na chamada seguinte). Testar a escada de permissão
+   exige mudar a **linha**, não o token.
 
 ### O que a Entrega 6 mudou de rumo
 
@@ -163,6 +197,8 @@ de mostrar botão morto.
   existia na store, e nada de frontend compilava. Restaurado com
   `node <pnpm 10>/pnpm.cjs --config.manage-package-manager-versions=false install --frozen-lockfile --filter @financial-vellun/web...`
   — o lockfile já tinha `next@14.2.35`, então nada nele mudou.
+- no banco local, `ops_audit_log` tem **20 linhas** de verificação manual das
+  Entregas 5 a 7, que o trigger não deixa remover — é a garantia funcionando;
 - **Não rode `pnpm format` no repositório inteiro.** O código em `main` nunca foi
   formatado com a config atual: um `pnpm format` reescreve ~82 arquivos que não
   têm relação nenhuma com a mudança em curso. Formate só o que você tocou
@@ -406,7 +442,7 @@ hard-coded. O painel novo não deve aprofundar essa dívida.
 
 ---
 
-### Entrega 7 — Reprocessamento e auditoria 🔜 próxima
+### Entrega 7 — Reprocessamento e auditoria ✅
 
 Depende da Entrega 6. **Antes de implementar, há um furo de deduplicação a corrigir** (ver Achados).
 
@@ -427,7 +463,7 @@ operação, estado anterior e posterior. Sem payload sensível completo.
 
 ---
 
-### Entrega 8 — Webhooks de pagamento: durabilidade e recuperação 🔜
+### Entrega 8 — Webhooks de pagamento: durabilidade e recuperação 🔜 próxima
 
 Você aprovou corrigir antes de construir a recuperação, e o motivo é concreto: hoje o retry vive em
 `setTimeout` no processo (`apps/api/src/billing/webhook/webhook.processor.ts:39-63`, 5 tentativas,

@@ -36,10 +36,19 @@ export class OpsAuditService {
     return randomUUID();
   }
 
-  async record(input: RecordAuditInput): Promise<string> {
+  /**
+   * Grava a linha. Falha alto — use onde a auditoria e pre-condicao da acao.
+   *
+   * `tx` permite gravar **dentro da mesma transacao** que muda o estado do alvo.
+   * Sem isso, descartar uma falha e registrar o descarte seriam dois passos, e
+   * uma queda entre eles deixaria a acao feita e sem rastro — justamente o que
+   * uma trilha de auditoria nao pode permitir.
+   */
+  async record(input: RecordAuditInput, tx?: Prisma.TransactionClient): Promise<string> {
     const operationId = input.operationId ?? this.newOperationId();
+    const db = tx ?? this.prisma;
 
-    const entry = await this.prisma.opsAuditLog.create({
+    const entry = await db.opsAuditLog.create({
       data: {
         operatorId: input.operatorId,
         action: input.action,

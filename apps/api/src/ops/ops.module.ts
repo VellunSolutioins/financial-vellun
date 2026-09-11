@@ -10,11 +10,14 @@ import { OpsAuthService } from './auth/ops-auth.service';
 import { OpsSessionService } from './auth/ops-session.service';
 import { OpsAuthGuard } from './auth/guards/ops-auth.guard';
 import { OpsRolesGuard } from './auth/guards/ops-roles.guard';
+import { AgentReprocessClient } from './failures/agent-reprocess.client';
 import { FailureRetentionService } from './failures/failure-retention.service';
 import { OpsFailuresController } from './failures/ops-failures.controller';
 import { OpsFailuresInternalController } from './failures/ops-failures-internal.controller';
 import { OpsFailedMessagesService } from './failures/ops-failed-messages.service';
+import { OpsFailuresActionsService } from './failures/ops-failures-actions.service';
 import { OpsFailuresQueryService } from './failures/ops-failures-query.service';
+import { ReprocessReconciliationService } from './failures/reprocess-reconciliation.service';
 import { OpsGrafanaService } from './grafana/ops-grafana.service';
 import { OpsOperatorsController } from './operators/ops-operators.controller';
 import { OpsOperatorsService } from './operators/ops-operators.service';
@@ -53,7 +56,10 @@ import { OpsPaymentsQueryService } from './payments/ops-payments-query.service';
     OpsOperatorsService,
     OpsFailedMessagesService,
     OpsFailuresQueryService,
+    OpsFailuresActionsService,
+    AgentReprocessClient,
     FailureRetentionService,
+    ReprocessReconciliationService,
     OpsOverviewService,
     OpsGrafanaService,
     OpsPaymentsQueryService,

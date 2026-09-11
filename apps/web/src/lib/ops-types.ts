@@ -44,7 +44,50 @@ export interface FailureDetail extends FailureListItem {
   retentionUntil: string;
   /** Explore do Grafana filtrado pela correlação; `null` se não configurado. */
   logsUrl: string | null;
+  /** Operação de reprocessamento que tocou esta linha, para achar a trilha. */
+  lastOperationId: string | null;
+  /**
+   * Falhas posteriores da mesma correlação. Zero não prova que o
+   * reprocessamento deu certo; maior que zero prova que não deu.
+   */
+  subsequentFailures: number;
 }
+
+/** Desfecho de um item num reprocessamento. */
+export type ReprocessItemOutcome =
+  | 'republished'
+  | 'skipped'
+  | 'rejected'
+  | 'unresolved'
+  | 'not_attempted';
+
+export interface ReprocessItemResult {
+  id: string;
+  outcome: ReprocessItemOutcome;
+  detail?: string;
+}
+
+export interface ReprocessBatchResult {
+  operationId: string;
+  items: ReprocessItemResult[];
+  aborted: boolean;
+  abortReason?: string;
+}
+
+/**
+ * Rótulos dos desfechos.
+ *
+ * `republished` diz **republicada**, não "resolvida": o catálogo não sabe se o
+ * pipeline terminou bem. Prometer sucesso aqui seria a mentira mais fácil desta
+ * tela.
+ */
+export const reprocessOutcomeLabels: Record<ReprocessItemOutcome, string> = {
+  republished: 'Republicada',
+  skipped: 'Pulada',
+  rejected: 'Recusada',
+  unresolved: 'Sem desfecho',
+  not_attempted: 'Não tentada',
+};
 
 export interface PaymentEventListItem {
   id: string;

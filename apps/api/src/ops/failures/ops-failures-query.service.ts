@@ -41,6 +41,17 @@ export interface FailureDetail extends FailureListItem {
    * link que não leva a nada.
    */
   logsUrl: string | null;
+  /** Operação de reprocessamento que tocou esta linha, para achar a trilha. */
+  lastOperationId: string | null;
+  /**
+   * Falhas **posteriores** da mesma correlação.
+   *
+   * É o que distingue "mensagem republicada" de "processamento concluído": o
+   * catálogo não sabe se o pipeline terminou bem, mas sabe se a mesma correlação
+   * voltou a falhar depois. Zero aqui não prova sucesso; maior que zero prova
+   * que o reprocessamento não resolveu.
+   */
+  subsequentFailures: number;
 }
 
 export interface Paginated<T> {
@@ -111,6 +122,18 @@ export class OpsFailuresQueryService {
     const row = await this.prisma.opsFailedMessage.findUnique({ where: { id } });
     if (!row) throw new NotFoundException('Falha não encontrada.');
 
+    // Sem correlação não há como ligar uma falha à seguinte, e contar "todas as
+    // falhas sem correlação" não diria nada sobre esta.
+    const subsequentFailures = row.correlationId
+      ? await this.prisma.opsFailedMessage.count({
+          where: {
+            correlationId: row.correlationId,
+            capturedAt: { gt: row.capturedAt },
+            id: { not: row.id },
+          },
+        })
+      : 0;
+
     const revelar = operator.canViewSensitive;
     if (revelar) {
       await this.audit.recordBestEffort({
@@ -144,6 +167,8 @@ export class OpsFailuresQueryService {
       reprocessedAt: row.reprocessedAt,
       retentionUntil: row.retentionUntil,
       logsUrl: this.grafana.logsUrl(row.correlationId),
+      lastOperationId: row.lastOperationId,
+      subsequentFailures,
     };
   }
 
