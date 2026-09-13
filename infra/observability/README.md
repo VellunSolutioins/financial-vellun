@@ -46,7 +46,12 @@ pnpm obs:check
 ```
 
 Roda, em sequência: `alloy validate` nas duas configs, `promtool check rules` nas
-regras, e `promtool test rules` nos testes. Só precisa de Docker.
+regras, `promtool test rules` nos testes e, por último, o `promtool` sobre o
+PromQL de todos os painéis dos dashboards. Só precisa de Docker.
+
+A última etapa existe porque um dashboard com consulta inválida importa sem
+reclamar: o painel só aparece com um triângulo vermelho, que parece falta de
+dado. Se ela falhar, o script imprime em qual arquivo e painel está cada consulta.
 
 Os três passos, se quiser rodar um de cada vez:
 

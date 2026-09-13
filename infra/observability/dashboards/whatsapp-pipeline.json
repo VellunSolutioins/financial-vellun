@@ -288,7 +288,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rabbitmq_detailed_queue_messages_ready{env=\"$env\", queue=~\"whatsapp\\..*\\.dlq\"})",
+          "expr": "sum(rabbitmq_detailed_queue_messages_ready{env=\"$env\", queue=~\"whatsapp\\\\..*\\\\.dlq\"})",
           "legendFormat": "parado na DLQ"
         },
         {
