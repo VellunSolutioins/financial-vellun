@@ -108,6 +108,12 @@ class Settings(BaseSettings):
     # src.worker`), que não tem HTTP próprio. Sem ele as réplicas de consumo —
     # justamente onde o trabalho acontece — ficam invisíveis para o scrape.
     worker_metrics_port: int = 8011
+    # Endereço base do `loki.source.api` do Alloy (a aplicação acrescenta
+    # `/loki/api/v1/push`). Vazio desliga o envio de log. Precisa ser campo daqui,
+    # e não `os.getenv`: o pydantic-settings lê o `.env` para este objeto, mas
+    # NÃO o exporta para o ambiente do processo — lido por `os.getenv`, um valor
+    # que só existe no `.env` simplesmente não aparece.
+    loki_push_url: str = ""
 
     # Contexto conversacional fornecido ao LLM
     conversation_context_message_limit: int = 15

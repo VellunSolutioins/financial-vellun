@@ -27,6 +27,9 @@ interface LogLine {
  * desenvolvimento delega ao `ConsoleLogger` do Nest, porque JSON num terminal é
  * ilegível e ninguém depura assim.
  *
+ * Isso vale só para o **terminal**. Com `LOKI_PUSH_URL` definido, o Loki recebe
+ * JSON nos dois ambientes.
+ *
  * O `event` é o nome estável da ocorrência (o contexto do Nest, normalmente o
  * nome da classe). A mensagem varia; o `event` não — é por ele que se agrupa.
  */
@@ -85,26 +88,48 @@ export class AppLoggerService extends ConsoleLogger implements OnApplicationShut
 
   private emit(level: LogLevel, message: unknown, rest: unknown[]): void {
     if (!this.structured) {
-      // `super` espera (message, ...rest) e já trata contexto e cor.
-      switch (level) {
-        case 'error':
-          super.error(message, ...(rest as [string]));
-          return;
-        case 'warn':
-          super.warn(message, ...(rest as [string]));
-          return;
-        case 'debug':
-          super.debug(message, ...(rest as [string]));
-          return;
-        case 'verbose':
-          super.verbose(message, ...(rest as [string]));
-          return;
-        default:
-          super.log(message, ...(rest as [string]));
-          return;
-      }
+      this.emitToConsole(level, message, rest);
+
+      // O formato do terminal e o envio ao Loki são decisões independentes: o
+      // texto colorido existe para quem lê o console, não para o agregador.
+      // Antes o `return` do bloco acima vinha primeiro, e fora de produção o
+      // transporte era criado mas nunca recebia uma linha — em silêncio.
+      if (this.loki) this.loki.push(this.serialize(level, message, rest));
+      return;
     }
 
+    const serialized = this.serialize(level, message, rest);
+
+    // `process.stdout` direto: `console.log` acrescentaria formatação em objeto
+    // grande. O stdout continua recebendo tudo — o envio ao Loki é adicional, não
+    // substituto, então uma falha lá deixa o log no Railway de qualquer forma.
+    process.stdout.write(`${serialized}\n`);
+    this.loki?.push(serialized);
+  }
+
+  private emitToConsole(level: LogLevel, message: unknown, rest: unknown[]): void {
+    // `super` espera (message, ...rest) e já trata contexto e cor.
+    switch (level) {
+      case 'error':
+        super.error(message, ...(rest as [string]));
+        return;
+      case 'warn':
+        super.warn(message, ...(rest as [string]));
+        return;
+      case 'debug':
+        super.debug(message, ...(rest as [string]));
+        return;
+      case 'verbose':
+        super.verbose(message, ...(rest as [string]));
+        return;
+      default:
+        super.log(message, ...(rest as [string]));
+        return;
+    }
+  }
+
+  /** A linha em JSON, no formato que o Loki e o stdout de produção recebem. */
+  private serialize(level: LogLevel, message: unknown, rest: unknown[]): string {
     const { event, stack, extras } = splitRest(rest, this.context);
     const line: LogLine = {
       timestamp: new Date().toISOString(),
@@ -120,13 +145,7 @@ export class AppLoggerService extends ConsoleLogger implements OnApplicationShut
     if (payload.errorType) line.errorType = payload.errorType;
     if (extras.length > 0) line.context = sanitizeForLog(extras);
 
-    const serialized = JSON.stringify({ ...line, message: payload.message });
-
-    // `process.stdout` direto: `console.log` acrescentaria formatação em objeto
-    // grande. O stdout continua recebendo tudo — o envio ao Loki é adicional, não
-    // substituto, então uma falha lá deixa o log no Railway de qualquer forma.
-    process.stdout.write(`${serialized}\n`);
-    this.loki?.push(serialized);
+    return JSON.stringify({ ...line, message: payload.message });
   }
 }
 

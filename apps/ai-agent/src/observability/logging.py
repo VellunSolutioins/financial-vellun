@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
 import uuid
 from contextlib import contextmanager
@@ -184,7 +183,9 @@ def _attach_loki_handler(root: logging.Logger, service: str) -> None:
     **sempre em JSON**, mesmo em desenvolvimento: o formato de texto existe para
     o terminal humano, nao para o agregador.
     """
-    url = (os.getenv("LOKI_PUSH_URL") or "").strip()
+    # Pelo `settings`, e não por `os.getenv`: com o valor só no `.env`, `os.getenv`
+    # devolvia `None` e o handler nunca era criado — o envio falhava em silêncio.
+    url = (settings.loki_push_url or "").strip()
     if not url:
         return
 
