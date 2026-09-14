@@ -32,6 +32,9 @@ const sourceLabels: Record<string, string> = {
   recurring: 'Recorrente',
 };
 
+/** Origens que recebem o selo de destaque: o que foi registrado pela IA. */
+const REGISTRADO_PELA_IA = new Set<string>(['ai', 'whatsapp']);
+
 function monthLabel(month: string) {
   const [year, monthNumber] = month.split('-');
   return `${monthNumber}/${year.slice(2)}`;
@@ -149,9 +152,12 @@ function TransacoesContent() {
       key: 'source',
       header: 'Origem',
       // Manual não ganha selo: é o caso comum, e um selo em toda linha vira ruído.
+      // O destaque é para o que a IA registrou, venha como `ai` ou `whatsapp`: o
+      // pipeline do WhatsApp passou a gravar `whatsapp`, e checar só `ai` deixava
+      // esses lançamentos com o mesmo selo de uma importação.
       cell: (tx) =>
         tx.source === 'manual' ? null : (
-          <Badge variant={tx.source === 'ai' ? 'secondary' : 'outline'}>
+          <Badge variant={REGISTRADO_PELA_IA.has(tx.source) ? 'secondary' : 'outline'}>
             {sourceLabels[tx.source]}
           </Badge>
         ),
