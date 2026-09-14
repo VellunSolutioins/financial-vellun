@@ -16,12 +16,19 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
  * verificação de CSRF. Foi o que quase aconteceu ao introduzir `ops_session`.
  */
 const SESSION_COOKIES = ['access_token', 'refresh_token', OPS_SESSION_COOKIE];
-const AUTH_CSRF_EXEMPT_PATHS = new Set([
-  '/auth/login',
-  '/auth/register',
-  '/auth/logout',
-  '/auth/refresh',
-]);
+/**
+ * Rotas que **criam** sessão, e por isso não têm o que proteger: antes delas não
+ * há sessão a sequestrar. A isenção vale mesmo quando o navegador ainda envia um
+ * cookie antigo, que não pode impedir alguém de entrar de novo.
+ *
+ * `/auth/logout` e `/auth/refresh` ficam **fora** de propósito: elas agem sobre
+ * uma sessão que já existe. Isentas, uma página de terceiro conseguia forçar
+ * logout ou rotação de token com um POST cross-site. Continuam funcionando para
+ * sessões anteriores ao cookie CSRF porque o guard aceita origem web permitida
+ * quando falta o token — e o navegador sempre envia `Origin` num POST
+ * cross-origin.
+ */
+const AUTH_CSRF_EXEMPT_PATHS = new Set(['/auth/login', '/auth/register']);
 
 /**
  * Proteção CSRF para requisições com sessão em cookie. Usa double-submit quando
