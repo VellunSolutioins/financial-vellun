@@ -1,4 +1,10 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountsService } from '../accounts/accounts.service';
@@ -11,6 +17,8 @@ import { parseDateOnly } from '../common/date.util';
 
 @Injectable()
 export class InternalService {
+  private readonly logger = new Logger(InternalService.name);
+
   constructor(
     private prisma: PrismaService,
     private accountsService: AccountsService,
@@ -136,7 +144,7 @@ export class InternalService {
     await this.assertCanUseProduct(dto.userId);
 
     if (dto.idempotencyKey) {
-      const existing = await this.findByIdempotencyKey(dto.idempotencyKey);
+      const existing = await this.findByIdempotencyKey(dto.idempotencyKey, dto.userId);
       if (existing) return existing;
     }
 
@@ -162,7 +170,7 @@ export class InternalService {
         err.code === 'P2002' &&
         dto.idempotencyKey
       ) {
-        const existing = await this.findByIdempotencyKey(dto.idempotencyKey);
+        const existing = await this.findByIdempotencyKey(dto.idempotencyKey, dto.userId);
         if (existing) return existing;
       }
       throw err;
@@ -210,12 +218,44 @@ export class InternalService {
   }
 
   /** Lançamento já criado para uma chave de idempotência, marcado como tal. */
-  private async findByIdempotencyKey(idempotencyKey: string) {
+  private async findByIdempotencyKey(idempotencyKey: string, userId: string) {
     const existing = await this.prisma.transaction.findUnique({
       where: { idempotencyKey },
       include: { category: true, account: true },
     });
-    return existing ? { ...existing, idempotent: true } : null;
+    if (!existing) return null;
+
+    this.assertIdempotencyOwner(existing.userId, userId, 'lançamento');
+    return { ...existing, idempotent: true };
+  }
+
+  /**
+   * Recusa reaproveitar o registro de outro usuário para a mesma chave.
+   *
+   * A chave (`jobId`) é derivada do telefone e dos ids das mensagens, então duas
+   * contas colidirem nela só acontece por bug a montante — e, sem esta checagem,
+   * o segundo usuário recebia de volta o lançamento completo do primeiro.
+   *
+   * A busca continua pela coluna única e compara o dono em seguida, em vez de
+   * filtrar por `userId` na consulta: filtrando, a colisão viraria "não achei",
+   * seguiria para a criação e estouraria no unique como erro genérico. Assim ela
+   * vira um 409 explícito, que não devolve nada do outro usuário.
+   *
+   * A unicidade continua **global**, e não por usuário, de propósito: uma
+   * constraint composta aceitaria a colisão em silêncio, escondendo o bug que ela
+   * denuncia.
+   */
+  private assertIdempotencyOwner(ownerId: string, userId: string, recurso: string): void {
+    if (ownerId === userId) return;
+
+    this.logger.error(
+      `Chave de idempotência de ${recurso} já pertence a outro usuário; recusando reaproveitar`,
+    );
+    throw new ConflictException({
+      statusCode: 409,
+      code: 'IDEMPOTENCY_KEY_CONFLICT',
+      message: 'Chave de idempotência já usada por outro usuário.',
+    });
   }
 
   /** Persiste um evento de auditoria do agente de IA. */
@@ -364,10 +404,8 @@ export class InternalService {
     // a segunda extração ficaria órfã — a criação do lançamento é deduplicada
     // antes e não chega a vinculá-la.
     if (dto.idempotencyKey) {
-      const existing = await this.prisma.aiExtractedTransaction.findUnique({
-        where: { idempotencyKey: dto.idempotencyKey },
-      });
-      if (existing) return { id: existing.id, duplicate: true };
+      const existing = await this.findExtractionByIdempotencyKey(dto.idempotencyKey, dto.userId);
+      if (existing) return existing;
     }
 
     try {
@@ -391,12 +429,26 @@ export class InternalService {
         err.code === 'P2002' &&
         dto.idempotencyKey
       ) {
-        const existing = await this.prisma.aiExtractedTransaction.findUnique({
-          where: { idempotencyKey: dto.idempotencyKey },
-        });
-        if (existing) return { id: existing.id, duplicate: true };
+        const existing = await this.findExtractionByIdempotencyKey(dto.idempotencyKey, dto.userId);
+        if (existing) return existing;
       }
       throw err;
     }
+  }
+
+  /**
+   * Extração já gravada para a chave. Mesma regra do lançamento: a de outro
+   * usuário é recusada, nunca devolvida — senão o chamador vincularia depois o id
+   * de uma extração que não é dele.
+   */
+  private async findExtractionByIdempotencyKey(idempotencyKey: string, userId: string) {
+    const existing = await this.prisma.aiExtractedTransaction.findUnique({
+      where: { idempotencyKey },
+      select: { id: true, userId: true },
+    });
+    if (!existing) return null;
+
+    this.assertIdempotencyOwner(existing.userId, userId, 'extração');
+    return { id: existing.id, duplicate: true as const };
   }
 }

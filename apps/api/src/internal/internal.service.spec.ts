@@ -1,3 +1,4 @@
+import { ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { InternalService } from './internal.service';
 
@@ -175,7 +176,7 @@ describe('InternalService', () => {
     });
 
     it('devolve o lançamento existente sem criar outro quando a chave já foi usada', async () => {
-      prisma.transaction.findUnique.mockResolvedValue({ id: 't1', amount: 47.5 });
+      prisma.transaction.findUnique.mockResolvedValue({ id: 't1', userId: 'u1', amount: 47.5 });
 
       const result = await service.createTransactionFromAi(dto);
 
@@ -205,7 +206,7 @@ describe('InternalService', () => {
     it('trata corrida no unique (P2002) devolvendo o lançamento já criado', async () => {
       prisma.transaction.findUnique
         .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce({ id: 't-existente' });
+        .mockResolvedValueOnce({ id: 't-existente', userId: 'u1' });
       prisma.transaction.create.mockRejectedValue(
         new Prisma.PrismaClientKnownRequestError('unique', {
           code: 'P2002',
@@ -216,6 +217,39 @@ describe('InternalService', () => {
       const result = await service.createTransactionFromAi(dto);
 
       expect(result).toMatchObject({ id: 't-existente', idempotent: true });
+    });
+
+    // A chave é única no banco inteiro, mas a busca não olhava o dono: numa
+    // colisão entre contas, o segundo usuário recebia o lançamento do primeiro.
+    it('recusa com 409 a chave que já pertence a outro usuário, sem devolver o lançamento', async () => {
+      prisma.transaction.findUnique.mockResolvedValue({
+        id: 't-de-outro',
+        userId: 'u2',
+        amount: 999,
+        description: 'lançamento de outra conta',
+      });
+
+      const tentativa = service.createTransactionFromAi(dto);
+
+      await expect(tentativa).rejects.toBeInstanceOf(ConflictException);
+      await expect(tentativa).rejects.toMatchObject({
+        response: expect.not.objectContaining({ id: 't-de-outro' }),
+      });
+      expect(prisma.transaction.create).not.toHaveBeenCalled();
+    });
+
+    it('recusa com 409 também quando a colisão aparece na corrida do unique', async () => {
+      prisma.transaction.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 't-de-outro', userId: 'u2' });
+      prisma.transaction.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('unique', {
+          code: 'P2002',
+          clientVersion: '5',
+        }),
+      );
+
+      await expect(service.createTransactionFromAi(dto)).rejects.toBeInstanceOf(ConflictException);
     });
 
     it('grava lançamento e extração na mesma transação de banco', async () => {
@@ -337,7 +371,7 @@ describe('InternalService', () => {
     });
 
     it('devolve a extração existente sem criar outra quando a chave já foi usada', async () => {
-      prisma.aiExtractedTransaction.findUnique.mockResolvedValue({ id: 'ext1' });
+      prisma.aiExtractedTransaction.findUnique.mockResolvedValue({ id: 'ext1', userId: 'u1' });
 
       const result = await service.recordEvent(dto);
 
@@ -348,7 +382,7 @@ describe('InternalService', () => {
     it('trata corrida no unique (P2002) devolvendo a extração já criada', async () => {
       prisma.aiExtractedTransaction.findUnique
         .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce({ id: 'ext-existente' });
+        .mockResolvedValueOnce({ id: 'ext-existente', userId: 'u1' });
       prisma.aiExtractedTransaction.create.mockRejectedValue(
         new Prisma.PrismaClientKnownRequestError('unique', {
           code: 'P2002',
@@ -359,6 +393,32 @@ describe('InternalService', () => {
       const result = await service.recordEvent(dto);
 
       expect(result).toEqual({ id: 'ext-existente', duplicate: true });
+    });
+
+    it('recusa com 409 a extração de outro usuário, em vez de devolver o id dela', async () => {
+      // Devolver o id levaria o agente a vincular depois uma extração que não é
+      // do usuário dele.
+      prisma.aiExtractedTransaction.findUnique.mockResolvedValue({
+        id: 'ext-de-outro',
+        userId: 'u2',
+      });
+
+      await expect(service.recordEvent(dto)).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.aiExtractedTransaction.create).not.toHaveBeenCalled();
+    });
+
+    it('recusa com 409 a extração de outro usuário também na corrida do unique', async () => {
+      prisma.aiExtractedTransaction.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 'ext-de-outro', userId: 'u2' });
+      prisma.aiExtractedTransaction.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('unique', {
+          code: 'P2002',
+          clientVersion: '5',
+        }),
+      );
+
+      await expect(service.recordEvent(dto)).rejects.toBeInstanceOf(ConflictException);
     });
 
     it('sem chave de idempotência, cria normalmente (modo legado)', async () => {
