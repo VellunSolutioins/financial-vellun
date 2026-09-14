@@ -7,7 +7,12 @@ import { OpsAuditService } from '../audit/ops-audit.service';
 import { CurrentOpsOperator } from '../auth/decorators/current-operator.decorator';
 import { OPS_AUDIT_ACTIONS, OPS_AUDIT_TARGETS } from '../ops.constants';
 
-export type RecoverOutcome = 'processed' | 'retry_scheduled' | 'exhausted' | 'skipped';
+export type RecoverOutcome =
+  | 'processed'
+  | 'retry_scheduled'
+  | 'exhausted'
+  | 'skipped'
+  | 'unrecorded';
 
 export interface RecoverResult {
   id: string;

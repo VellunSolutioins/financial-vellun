@@ -175,7 +175,12 @@ export const paymentStatusLabels: Record<WebhookEventStatus, string> = {
 };
 
 /** Desfecho de uma recuperacao de evento de pagamento. */
-export type RecoverOutcome = 'processed' | 'retry_scheduled' | 'exhausted' | 'skipped';
+export type RecoverOutcome =
+  | 'processed'
+  | 'retry_scheduled'
+  | 'exhausted'
+  | 'skipped'
+  | 'unrecorded';
 
 export interface RecoverResult {
   id: string;
@@ -189,6 +194,9 @@ export const recoverOutcomeLabels: Record<RecoverOutcome, string> = {
   retry_scheduled: 'Falhou de novo, reagendado',
   exhausted: 'Falhou de novo, esgotado',
   skipped: 'Nada a fazer',
+  // A tentativa falhou e o banco não aceitou nem o registro da falha. O evento
+  // volta sozinho à fila pela varredura de presos.
+  unrecorded: 'Falhou sem registro; volta à fila em até 15 min',
 };
 
 export const auditResultLabels: Record<OpsAuditResult, string> = {

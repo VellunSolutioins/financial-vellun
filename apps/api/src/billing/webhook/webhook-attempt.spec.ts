@@ -13,14 +13,16 @@ function setup() {
   const prisma = {
     paymentWebhookEvent: {
       findUniqueOrThrow: jest.fn(),
-      findUnique: jest.fn().mockResolvedValue({ attempts: 1 }),
+      findUnique: jest.fn(),
     },
     subscription: { findFirst: jest.fn() },
   };
   const events = {
     markProcessing: jest.fn().mockResolvedValue(true),
     markProcessed: jest.fn().mockResolvedValue({}),
-    markFailed: jest.fn().mockResolvedValue({ status: 'failed', nextRetryAt: new Date() }),
+    markFailed: jest
+      .fn()
+      .mockResolvedValue({ status: 'failed', attempts: 1, nextRetryAt: new Date() }),
     linkSubscription: jest.fn().mockResolvedValue(undefined),
   };
 
@@ -61,48 +63,40 @@ describe('WebhookProcessor.attempt', () => {
     const desfecho = await processor.attempt('row_1');
 
     expect(desfecho).toBe('retry_scheduled');
-    expect(events.markFailed).toHaveBeenCalledWith('row_1', 'PSP fora', 1);
+    expect(events.markFailed).toHaveBeenCalledWith('row_1', 'PSP fora');
     // Nenhum timer pendente: a próxima tentativa é do cron, e sobrevive a deploy.
     expect(jest.getTimerCount()).toBe(0);
     jest.useRealTimers();
   });
 
-  it('o número da tentativa vem do banco, não de uma variável local', async () => {
-    const { processor, prisma, events } = setup();
-    prisma.paymentWebhookEvent.findUnique.mockResolvedValue({ attempts: 4 });
+  it('não lê a contagem de tentativas por fora do markFailed', async () => {
+    const { processor, prisma } = setup();
     jest.spyOn(processor, 'process').mockRejectedValue(new Error('PSP fora'));
 
     await processor.attempt('row_1');
 
-    // É isto que permite a tentativa 5 acontecer em OUTRO processo, depois de
-    // um deploy que derrubou o que fez as quatro primeiras.
-    expect(events.markFailed).toHaveBeenCalledWith('row_1', 'PSP fora', 4);
+    // A leitura separada existia e tinha um fallback de `attempts = 1`: com o
+    // banco instável, reiniciava o backoff no bucket de 30 s. Agora quem lê a
+    // contagem é o `markFailed`, na mesma transação em que grava.
+    expect(prisma.paymentWebhookEvent.findUnique).not.toHaveBeenCalled();
   });
 
   it('esgotado é desfecho próprio, não mais um retry', async () => {
     const { processor, events } = setup();
-    events.markFailed.mockResolvedValue({ status: 'exhausted', nextRetryAt: null });
+    events.markFailed.mockResolvedValue({ status: 'exhausted', attempts: 6, nextRetryAt: null });
     jest.spyOn(processor, 'process').mockRejectedValue(new Error('PSP fora'));
 
     expect(await processor.attempt('row_1')).toBe('exhausted');
   });
 
-  it('não consegue nem ler as tentativas: assume a primeira e segue', async () => {
-    const { processor, prisma, events } = setup();
-    prisma.paymentWebhookEvent.findUnique.mockRejectedValue(new Error('banco fora'));
-    jest.spyOn(processor, 'process').mockRejectedValue(new Error('PSP fora'));
-
-    // Perder o registro da falha seria pior do que registrá-la como primeira.
-    await expect(processor.attempt('row_1')).resolves.toBe('retry_scheduled');
-    expect(events.markFailed).toHaveBeenCalledWith('row_1', 'PSP fora', 1);
-  });
-
-  it('falha ao gravar a falha não propaga: o cron ainda varre', async () => {
+  it('se nem a falha pode ser gravada, diz isso — não finge que reagendou', async () => {
     const { processor, events } = setup();
     events.markFailed.mockRejectedValue(new Error('banco fora'));
     jest.spyOn(processor, 'process').mockRejectedValue(new Error('PSP fora'));
 
-    await expect(processor.attempt('row_1')).resolves.toBe('retry_scheduled');
+    // Antes devolvia `retry_scheduled` mesmo sem ter gravado nada. A linha fica
+    // em `processing`, e a varredura de presos a devolve à fila depois.
+    await expect(processor.attempt('row_1')).resolves.toBe('unrecorded');
   });
 
   it('erro que não é Error vira mensagem, não "[object Object]" silencioso', async () => {
@@ -111,7 +105,7 @@ describe('WebhookProcessor.attempt', () => {
 
     await processor.attempt('row_1');
 
-    expect(events.markFailed).toHaveBeenCalledWith('row_1', 'string solta', 1);
+    expect(events.markFailed).toHaveBeenCalledWith('row_1', 'string solta');
   });
 });
 

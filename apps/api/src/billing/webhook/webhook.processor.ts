@@ -14,8 +14,20 @@ import { WebhookEventService } from './webhook-event.service';
 
 type SubscriptionWithPlan = Subscription & { plan: Plan };
 
-/** Desfecho de uma tentativa, para o cron registrar e para os testes afirmarem. */
-export type AttemptOutcome = 'processed' | 'skipped' | 'retry_scheduled' | 'exhausted';
+/**
+ * Desfecho de uma tentativa, para o cron registrar e para os testes afirmarem.
+ *
+ * `unrecorded` é a tentativa que falhou **e** cuja falha não pôde ser gravada
+ * (banco fora). A linha fica em `processing`, e a varredura a devolve à fila
+ * depois de 15 min, com a contagem de tentativas intacta. Chamar isso de
+ * `retry_scheduled` seria afirmar um agendamento que não existe.
+ */
+export type AttemptOutcome =
+  | 'processed'
+  | 'skipped'
+  | 'retry_scheduled'
+  | 'exhausted'
+  | 'unrecorded';
 
 /**
  * Processa eventos de webhook de forma assíncrona e idempotente. Mapeia a
@@ -67,25 +79,30 @@ export class WebhookProcessor {
 
       // As tentativas são contadas no banco pelo `markProcessing`, não numa
       // variável local: é o que permite a próxima tentativa acontecer em outro
-      // processo, depois de um deploy.
-      const atual = await this.prisma.paymentWebhookEvent
-        .findUnique({ where: { id: eventId }, select: { attempts: true } })
-        .catch(() => null);
-
-      const atualizado = await this.events
-        .markFailed(eventId, message, atual?.attempts ?? 1)
-        .catch(() => null);
-
-      if (atualizado?.status === 'exhausted') {
+      // processo, depois de um deploy. Quem lê a contagem é o próprio
+      // `markFailed`, na mesma transação em que grava — sem palpite de fallback.
+      let registrado: Awaited<ReturnType<WebhookEventService['markFailed']>>;
+      try {
+        registrado = await this.events.markFailed(eventId, message);
+      } catch (erroAoRegistrar) {
         this.logger.error(
-          `Webhook ${eventId} esgotado após ${atual?.attempts ?? '?'} tentativa(s): ${message}`,
+          `Webhook ${eventId} falhou e a falha não pôde ser registrada; a varredura de ` +
+            `presos o devolve à fila. Falha original: ${message}`,
+          erroAoRegistrar instanceof Error ? erroAoRegistrar.stack : undefined,
+        );
+        return 'unrecorded';
+      }
+
+      if (registrado.status === 'exhausted') {
+        this.logger.error(
+          `Webhook ${eventId} esgotado após ${registrado.attempts} tentativa(s): ${message}`,
         );
         return 'exhausted';
       }
 
       this.logger.warn(
-        `Webhook ${eventId}: tentativa ${atual?.attempts ?? '?'} falhou, reagendada para ` +
-          `${atualizado?.nextRetryAt?.toISOString() ?? 'data desconhecida'}: ${message}`,
+        `Webhook ${eventId}: tentativa ${registrado.attempts} falhou, reagendada para ` +
+          `${registrado.nextRetryAt?.toISOString() ?? 'data desconhecida'}: ${message}`,
       );
       return 'retry_scheduled';
     }

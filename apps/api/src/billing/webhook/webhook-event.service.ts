@@ -110,19 +110,37 @@ export class WebhookEventService {
    * o operador reprocessaria por cima de um retry em andamento. Agora os dois
    * estados sao decididos aqui, por {@link nextRetryAt}, e ficam visiveis:
    * `failed` tem `nextRetryAt` preenchido, `exhausted` nao tem.
+   *
+   * **Le as tentativas aqui dentro, na mesma transacao que grava.** Antes o
+   * chamador lia a contagem a parte e, se essa leitura falhasse, supunha
+   * `attempts = 1` — o que, com o banco instavel, reiniciava o backoff no bucket
+   * de 30 s justamente quando convinha esperar mais. Agora nao ha palpite: ou a
+   * leitura e a gravacao acontecem juntas, ou nenhuma acontece e o erro sobe.
    */
-  async markFailed(id: string, error: string, attempts: number) {
-    const proxima = nextRetryAt(attempts);
-    this.metrics.observePaymentWebhook(proxima ? 'failed' : 'exhausted');
+  async markFailed(id: string, error: string) {
+    const atualizado = await this.prisma.$transaction(async (tx) => {
+      const { attempts } = await tx.paymentWebhookEvent.findUniqueOrThrow({
+        where: { id },
+        select: { attempts: true },
+      });
+      const proxima = nextRetryAt(attempts);
 
-    return this.prisma.paymentWebhookEvent.update({
-      where: { id },
-      data: {
-        status: proxima ? WebhookEventStatus.failed : WebhookEventStatus.exhausted,
-        lastError: error.slice(0, 1000),
-        nextRetryAt: proxima,
-      },
+      return tx.paymentWebhookEvent.update({
+        where: { id },
+        data: {
+          status: proxima ? WebhookEventStatus.failed : WebhookEventStatus.exhausted,
+          lastError: error.slice(0, 1000),
+          nextRetryAt: proxima,
+        },
+      });
     });
+
+    // So depois de gravar: contar uma falha que nao ficou registrada faria a
+    // metrica divergir do banco.
+    this.metrics.observePaymentWebhook(
+      atualizado.status === WebhookEventStatus.exhausted ? 'exhausted' : 'failed',
+    );
+    return atualizado;
   }
 
   /**
@@ -137,13 +155,5 @@ export class WebhookEventService {
     await this.prisma.paymentWebhookEvent
       .update({ where: { id }, data: { subscriptionId } })
       .catch(() => undefined);
-  }
-
-  /** Devolve um evento esgotado para a fila de retry. Usado pelo painel. */
-  async rescheduleNow(id: string) {
-    return this.prisma.paymentWebhookEvent.updateMany({
-      where: { id, status: WebhookEventStatus.exhausted },
-      data: { status: WebhookEventStatus.failed, nextRetryAt: new Date() },
-    });
   }
 }

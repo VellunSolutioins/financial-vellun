@@ -24,6 +24,8 @@ export interface RetrySweepSummary {
   processados: number;
   reagendados: number;
   esgotados: number;
+  /** Falharam e nem a falha pôde ser gravada. Voltam pela varredura de presos. */
+  naoRegistrados: number;
 }
 
 /**
@@ -59,6 +61,7 @@ export class WebhookRetryService {
       processados: 0,
       reagendados: 0,
       esgotados: 0,
+      naoRegistrados: 0,
     };
 
     if (this.rodando) {
@@ -99,7 +102,7 @@ export class WebhookRetryService {
         this.logger.log(
           `Varredura de webhooks: ${resumo.destravados} destravado(s), ${resumo.tentados} tentado(s), ` +
             `${resumo.processados} processado(s), ${resumo.reagendados} reagendado(s), ` +
-            `${resumo.esgotados} esgotado(s)`,
+            `${resumo.esgotados} esgotado(s), ${resumo.naoRegistrados} sem registro`,
         );
       }
       return resumo;
@@ -141,5 +144,6 @@ export class WebhookRetryService {
     if (desfecho === 'processed') resumo.processados += 1;
     else if (desfecho === 'retry_scheduled') resumo.reagendados += 1;
     else if (desfecho === 'exhausted') resumo.esgotados += 1;
+    else if (desfecho === 'unrecorded') resumo.naoRegistrados += 1;
   }
 }

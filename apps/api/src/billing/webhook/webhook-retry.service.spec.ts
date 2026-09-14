@@ -60,20 +60,30 @@ describe('WebhookRetryService', () => {
   });
 
   it('conta cada desfecho separadamente', async () => {
-    const { service, processor } = setup([{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }]);
+    const { service, processor } = setup([
+      { id: 'a' },
+      { id: 'b' },
+      { id: 'c' },
+      { id: 'd' },
+      { id: 'e' },
+    ]);
     processor.attempt
       .mockResolvedValueOnce('processed')
       .mockResolvedValueOnce('retry_scheduled')
       .mockResolvedValueOnce('exhausted')
-      .mockResolvedValueOnce('skipped');
+      .mockResolvedValueOnce('skipped')
+      .mockResolvedValueOnce('unrecorded');
 
     const resumo = await service.sweep();
 
     expect(resumo).toMatchObject({
-      tentados: 4,
+      tentados: 5,
       processados: 1,
       reagendados: 1,
       esgotados: 1,
+      // A falha que nem pôde ser gravada tem contagem própria: somá-la aos
+      // reagendados afirmaria um agendamento que não existe.
+      naoRegistrados: 1,
     });
   });
 

@@ -17,8 +17,17 @@
  */
 export const RETRY_BUCKETS_SECONDS = [30, 120, 600, 1800, 7200] as const;
 
-/** Tentativas antes de o evento virar `exhausted`. */
-export const MAX_ATTEMPTS = RETRY_BUCKETS_SECONDS.length;
+/**
+ * Tentativas antes de o evento virar `exhausted`: a primeira, mais uma depois
+ * de cada bucket.
+ *
+ * Era `RETRY_BUCKETS_SECONDS.length`, e com isso o último bucket nunca era
+ * usado: a quinta falha já esgotava o evento, a espera de 2 h não acontecia, e a
+ * janela real ficava em ~42 min em vez das ~2 h 50 que a tabela promete. Uma
+ * indisponibilidade de PSP que passasse em uma hora e meia virava trabalho
+ * manual no painel.
+ */
+export const MAX_ATTEMPTS = RETRY_BUCKETS_SECONDS.length + 1;
 
 /**
  * Quando tentar de novo, dado o número de tentativas já feitas.
@@ -31,7 +40,8 @@ export function nextRetryAt(attempts: number, from: Date = new Date()): Date | n
   if (attempts >= MAX_ATTEMPTS) return null;
 
   // `attempts` conta as tentativas JA feitas (`markProcessing` incrementa antes
-  // de tentar), entao a primeira falha chega aqui com 1 e usa o bucket 0.
+  // de tentar): a primeira falha chega aqui com 1 e usa o bucket 0; a quinta,
+  // com 5, usa o bucket 4. So a sexta esgota.
   const indice = Math.max(attempts - 1, 0);
   return new Date(from.getTime() + RETRY_BUCKETS_SECONDS[indice] * 1000);
 }
