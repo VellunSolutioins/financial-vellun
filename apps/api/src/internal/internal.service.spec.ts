@@ -185,16 +185,69 @@ describe('InternalService', () => {
       expect(prisma.$transaction).not.toHaveBeenCalled();
     });
 
+    // O cenário que a idempotência cobre: o commit passou e o processo morreu
+    // antes do recálculo. A reentrega caía no retorno antecipado, e o saldo
+    // ficava defasado até outro lançamento tocar a conta.
+    it('recalcula o saldo também quando devolve o lançamento já existente', async () => {
+      prisma.transaction.findUnique.mockResolvedValue({
+        id: 't1',
+        userId: 'u1',
+        accountId: 'a1',
+        status: 'confirmed',
+      });
+      const accounts = { recalculateBalance: jest.fn() };
+      service = new InternalService(prisma as any, accounts as any, access as any);
+
+      await service.createTransactionFromAi(dto);
+
+      expect(accounts.recalculateBalance).toHaveBeenCalledWith('a1');
+      expect(prisma.transaction.create).not.toHaveBeenCalled();
+    });
+
+    it('recalcula o saldo quando a corrida no unique devolve o lançamento do outro worker', async () => {
+      prisma.transaction.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 't1', userId: 'u1', accountId: 'a1', status: 'confirmed' });
+      prisma.transaction.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('unique', { code: 'P2002', clientVersion: '5' }),
+      );
+      const accounts = { recalculateBalance: jest.fn() };
+      service = new InternalService(prisma as any, accounts as any, access as any);
+
+      await service.createTransactionFromAi(dto);
+
+      expect(accounts.recalculateBalance).toHaveBeenCalledWith('a1');
+    });
+
+    it('não recalcula o saldo de lançamento existente que ainda não foi confirmado', async () => {
+      prisma.transaction.findUnique.mockResolvedValue({
+        id: 't1',
+        userId: 'u1',
+        accountId: 'a1',
+        status: 'pending',
+      });
+      const accounts = { recalculateBalance: jest.fn() };
+      service = new InternalService(prisma as any, accounts as any, access as any);
+
+      await service.createTransactionFromAi(dto);
+
+      expect(accounts.recalculateBalance).not.toHaveBeenCalled();
+    });
+
     it('grava a chave e a origem whatsapp ao criar', async () => {
       prisma.transaction.findUnique.mockResolvedValue(null);
-      prisma.transaction.create.mockResolvedValue({ id: 't1', status: 'confirmed' });
+      prisma.transaction.create.mockResolvedValue({
+        id: 't1',
+        accountId: 'a1',
+        status: 'confirmed',
+      });
 
       const accounts = { recalculateBalance: jest.fn() };
       service = new InternalService(prisma as any, accounts as any, access as any);
 
       const result = await service.createTransactionFromAi(dto);
 
-      expect(result).toEqual({ id: 't1', status: 'confirmed' });
+      expect(result).toEqual({ id: 't1', accountId: 'a1', status: 'confirmed' });
       expect(prisma.transaction.create).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ idempotencyKey: 'job-1', source: 'whatsapp' }),

@@ -145,7 +145,7 @@ export class InternalService {
 
     if (dto.idempotencyKey) {
       const existing = await this.findByIdempotencyKey(dto.idempotencyKey, dto.userId);
-      if (existing) return existing;
+      if (existing) return this.comSaldoGarantido(existing);
     }
 
     const account = await this.prisma.account.findUnique({ where: { id: dto.accountId } });
@@ -171,15 +171,31 @@ export class InternalService {
         dto.idempotencyKey
       ) {
         const existing = await this.findByIdempotencyKey(dto.idempotencyKey, dto.userId);
-        if (existing) return existing;
+        if (existing) return this.comSaldoGarantido(existing);
       }
       throw err;
     }
 
-    if (transaction.status === 'confirmed') {
-      await this.accountsService.recalculateBalance(dto.accountId);
-    }
+    return this.comSaldoGarantido(transaction);
+  }
 
+  /**
+   * Recalcula o saldo da conta quando o lançamento está confirmado.
+   *
+   * Vale **também** para o lançamento devolvido pela idempotência. O cenário que
+   * ela existe para cobrir é justamente o processo morrer depois do commit e
+   * antes do recálculo: sem isto, a reentrega caía no retorno antecipado e o
+   * saldo ficava defasado até outro lançamento tocar a mesma conta.
+   *
+   * Recalcular de novo é seguro: `recalculateBalance` recompõe o saldo do zero a
+   * partir dos agregados, sem somar em cima do valor anterior.
+   */
+  private async comSaldoGarantido<T extends { status: string; accountId: string }>(
+    transaction: T,
+  ): Promise<T> {
+    if (transaction.status === 'confirmed') {
+      await this.accountsService.recalculateBalance(transaction.accountId);
+    }
     return transaction;
   }
 
