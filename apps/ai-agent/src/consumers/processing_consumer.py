@@ -9,15 +9,17 @@ Garantias:
 - **idempotência** — o ``jobId`` é determinístico e fica marcado como concluído;
   uma reentrega depois do ack não reprocessa, e o mesmo ``jobId`` vira a chave
   de idempotência do lançamento na API;
-- **ordenação por telefone** — lock distribuído durante todo o processamento.
-  Um job cujo telefone está ocupado é adiado (sem consumir tentativa), então a
-  confirmação nunca é processada antes da pergunta;
+- **ordenação por telefone** — lock distribuído **com dono** durante todo o
+  processamento, **renovado** enquanto o job roda. Um job cujo telefone está
+  ocupado é adiado (sem consumir tentativa), então a confirmação nunca é
+  processada antes da pergunta;
 - **concorrência limitada** — o número de jobs simultâneos vem de
   ``PROCESSING_CONSUMER_CONCURRENCY`` (o semáforo vive no consumer do broker).
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 
@@ -72,9 +74,10 @@ class MessageProcessingConsumer:
                 logger.info("Job já concluído; ignorando reentrega")
                 return
 
-            if not await self.store.acquire(
-                lock_key(job.phone), settings.processing_lock_ttl_seconds
-            ):
+            chave = lock_key(job.phone)
+            ttl = settings.processing_lock_ttl_seconds
+            token = await self.store.acquire(chave, ttl)
+            if token is None:
                 defers = _defer_count(broker_message)
                 if defers >= MAX_DEFERS:
                     raise RuntimeError(
@@ -83,10 +86,43 @@ class MessageProcessingConsumer:
                 metrics.incr("jobs_deferred")
                 raise DeferError("telefone já em processamento por outro worker")
 
+            renovacao = asyncio.create_task(self._manter_lock(chave, token, ttl))
             try:
                 await self._process(job)
             finally:
-                await self.store.release(lock_key(job.phone))
+                renovacao.cancel()
+                # `gather` com `return_exceptions` recolhe o cancelamento da
+                # renovação sem engolir um cancelamento do próprio `handle`.
+                await asyncio.gather(renovacao, return_exceptions=True)
+                if not await self.store.release(chave, token):
+                    # O lock expirou e passou a outro worker antes daqui. Antes,
+                    # o release apagava o lock desse outro, abrindo a porta para
+                    # um terceiro processar o mesmo telefone em paralelo.
+                    metrics.incr("processing_lock_lost")
+                    logger.warning("Lock do telefone já não era deste worker ao liberar")
+
+    async def _manter_lock(self, chave: str, token: str, ttl: int) -> None:
+        """Renova o lock a cada terço do TTL enquanto o job roda.
+
+        Sem renovação, um processamento acima do TTL (uma chamada lenta à IA,
+        por exemplo) perdia o lock no meio, e o próximo job do mesmo telefone
+        entrava em paralelo — a confirmação podia ser tratada antes da pergunta.
+        """
+        intervalo = max(ttl / 3, 1.0)
+        while True:
+            await asyncio.sleep(intervalo)
+            try:
+                if not await self.store.extend(chave, token, ttl):
+                    # Perdido: outro worker já pode ter entrado. Não há como
+                    # recuperar com segurança; o que resta é deixar rastro.
+                    metrics.incr("processing_lock_lost")
+                    logger.warning(
+                        "Lock do telefone perdido durante o processamento; "
+                        "a ordem deste telefone pode não estar garantida"
+                    )
+                    return
+            except Exception:  # noqa: BLE001 - renovar não pode derrubar o job
+                logger.warning("Falha ao renovar o lock do telefone", exc_info=True)
 
     async def _process(self, job: ProcessingJobV1) -> None:
         started = time.monotonic()

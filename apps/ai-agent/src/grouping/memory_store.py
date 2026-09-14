@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import time
 
+from ..services.locks import InMemoryLocks
 from .base import AppendResult, GroupEntry, GroupStore, due_at
 
 
@@ -16,7 +17,7 @@ class InMemoryGroupStore(GroupStore):
         self._buffers: dict[str, list[GroupEntry]] = {}
         self._first: dict[str, float] = {}
         self._due: dict[str, float] = {}
-        self._locks: dict[str, float] = {}
+        self._locks = InMemoryLocks()
 
     async def append(self, phone: str, entry: GroupEntry) -> AppendResult:
         now = time.time()
@@ -60,16 +61,18 @@ class InMemoryGroupStore(GroupStore):
         self._first.pop(phone, None)
         self._due.pop(phone, None)
 
-    async def acquire_lock(self, phone: str, ttl_seconds: int) -> bool:
-        expires = self._locks.get(phone)
-        now = time.time()
-        if expires is not None and expires > now:
-            return False
-        self._locks[phone] = now + ttl_seconds
-        return True
+    async def acquire_lock(self, phone: str, ttl_seconds: int) -> str | None:
+        return self._locks.acquire(phone, ttl_seconds)
 
-    async def release_lock(self, phone: str) -> None:
-        self._locks.pop(phone, None)
+    async def extend_lock(self, phone: str, token: str, ttl_seconds: int) -> bool:
+        return self._locks.extend(phone, token, ttl_seconds)
+
+    async def release_lock(self, phone: str, token: str) -> bool:
+        return self._locks.release(phone, token)
+
+    def expire_lock_now(self, phone: str) -> None:
+        """Auxiliar de teste: simula o TTL do lock vencendo."""
+        self._locks.expire_now(phone)
 
     # ── Auxiliares de teste ─────────────────────────────────────────────────
     def force_due(self, phone: str) -> None:

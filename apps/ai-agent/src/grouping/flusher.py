@@ -108,7 +108,9 @@ class GroupFlusherWorker:
 
     async def _flush_phone(self, phone: str) -> int:
         """Consolida o telefone em fatias. Devolve quantos jobs publicou."""
-        if not await self._store.acquire_lock(phone, settings.redis_lock_ttl_seconds):
+        ttl = settings.redis_lock_ttl_seconds
+        token = await self._store.acquire_lock(phone, ttl)
+        if token is None:
             # Outra instancia ja esta consolidando este telefone.
             return 0
 
@@ -143,6 +145,16 @@ class GroupFlusherWorker:
                 # que o usuario ainda esteja digitando o resto da frase.
                 if restantes < settings.message_buffer_max_messages:
                     break
+                # Vai para outra fatia: renova o lock antes. As fatias somadas
+                # podem passar do TTL, e sem renovar outra instancia entraria no
+                # meio. Se o lock ja nao e nosso, para aqui — o resto fica para
+                # quem o detem agora.
+                if not await self._store.extend_lock(phone, token, ttl):
+                    metrics.incr("group_lock_lost")
+                    logger.warning(
+                        "Lock do grupo perdido entre fatias; restante fica para o proximo tick"
+                    )
+                    break
             else:
                 # Saiu pelo limite de fatias: o resto fica para o proximo tick,
                 # para nao segurar o lock alem do TTL.
@@ -156,4 +168,7 @@ class GroupFlusherWorker:
             logger.exception("Falha ao consolidar grupo; buffer preservado para retry")
             return publicados
         finally:
-            await self._store.release_lock(phone)
+            if not await self._store.release_lock(phone, token):
+                # Expirou e passou a outra instancia antes daqui: nao ha o que
+                # liberar, e apagar o lock dela seria o defeito antigo.
+                metrics.incr("group_lock_lost")

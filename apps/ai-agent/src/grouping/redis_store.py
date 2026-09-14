@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import time
 
+from ..services import locks
 from ..services.redis_client import RedisProvider, redis_provider
 from .base import AppendResult, GroupEntry, GroupStore, due_at as _due_at
 
@@ -124,12 +125,17 @@ class RedisGroupStore(GroupStore):
             pipe.zrem(DUE_KEY, phone)
             await pipe.execute()
 
-    async def acquire_lock(self, phone: str, ttl_seconds: int) -> bool:
+    # O lock usa a mesma implementacao do `StateStore` (`services/locks.py`),
+    # em vez de reimplementar: antes, as duas copias tinham o mesmo defeito de
+    # liberar sem checar o dono.
+    async def acquire_lock(self, phone: str, ttl_seconds: int) -> str | None:
         client = await self._provider.client()
-        return bool(
-            await client.set(_lock_key(phone), "1", nx=True, px=ttl_seconds * 1000)
-        )
+        return await locks.redis_acquire(client, _lock_key(phone), ttl_seconds)
 
-    async def release_lock(self, phone: str) -> None:
+    async def extend_lock(self, phone: str, token: str, ttl_seconds: int) -> bool:
         client = await self._provider.client()
-        await client.delete(_lock_key(phone))
+        return await locks.redis_extend(client, _lock_key(phone), token, ttl_seconds)
+
+    async def release_lock(self, phone: str, token: str) -> bool:
+        client = await self._provider.client()
+        return await locks.redis_release(client, _lock_key(phone), token)

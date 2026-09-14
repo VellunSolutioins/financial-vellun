@@ -158,12 +158,13 @@ async def test_lock_impede_dois_workers_no_mesmo_telefone(broker, group_store):
     await store_a.append(PHONE, entry("gastei 10", 1))
     store_a.force_due(PHONE)
     # Outro worker já segurou o lock deste telefone.
-    assert await store_a.acquire_lock(PHONE, settings.redis_lock_ttl_seconds) is True
+    token = await store_a.acquire_lock(PHONE, settings.redis_lock_ttl_seconds)
+    assert token is not None
 
     assert await worker.tick() == 0
     assert broker.published[ROUTE_PROCESSING] == []
 
-    await store_a.release_lock(PHONE)
+    assert await store_a.release_lock(PHONE, token) is True
     assert await worker.tick() == 1
 
 
@@ -248,6 +249,52 @@ async def test_limite_de_fatias_por_tick_adia_o_resto(broker, group_store, monke
 
     assert await worker.tick() == MAX_SLICES_PER_TICK
     assert await group_store.peek(PHONE) != []  # o resto ficou para o próximo tick
+
+
+async def test_renova_o_lock_entre_fatias(broker, group_store, monkeypatch):
+    """As fatias somadas podem passar do TTL: o lock é renovado antes de cada nova."""
+    monkeypatch.setattr(settings, "message_buffer_max_messages", 10)
+    worker = GroupFlusherWorker(group_store, InMemoryPublisher(broker))
+    renovacoes: list[str] = []
+    extend_original = group_store.extend_lock
+
+    async def extend_espiao(phone, token, ttl):
+        renovacoes.append(phone)
+        return await extend_original(phone, token, ttl)
+
+    monkeypatch.setattr(group_store, "extend_lock", extend_espiao)
+
+    for index in range(1, 26):
+        await group_store.append(PHONE, entry(f"msg{index}", index))
+
+    assert await worker.tick() == 2
+    # Uma renovação para passar da 1ª para a 2ª fatia; nenhuma depois da última.
+    assert renovacoes == [PHONE]
+
+
+async def test_para_de_fatiar_quando_perde_o_lock(broker, group_store, monkeypatch):
+    """Sem o lock, outra instância pode estar consolidando o mesmo telefone: o
+    resto fica para quem o detém agora, em vez de os dois publicarem juntos."""
+    monkeypatch.setattr(settings, "message_buffer_max_messages", 10)
+    worker = GroupFlusherWorker(group_store, InMemoryPublisher(broker))
+
+    async def lock_perdido(phone, token, ttl):
+        group_store.expire_lock_now(phone)
+        await group_store.acquire_lock(phone, 60)  # outra instância entrou
+        return False
+
+    monkeypatch.setattr(group_store, "extend_lock", lock_perdido)
+
+    for index in range(1, 26):
+        await group_store.append(PHONE, entry(f"msg{index}", index))
+
+    assert await worker.tick() == 1
+    jobs = [ProcessingJobV1.model_validate_json(m.body) for m in broker.published[ROUTE_PROCESSING]]
+    assert [len(job.source_message_ids) for job in jobs] == [10]
+    # Nada se perde: o que não foi publicado continua no buffer.
+    assert len(await group_store.peek(PHONE)) == 15
+    # E o lock da outra instância segue de pé — não foi apagado no `finally`.
+    assert await group_store.acquire_lock(PHONE, 60) is None
 
 
 # ── peek/consume ─────────────────────────────────────────────────────────────

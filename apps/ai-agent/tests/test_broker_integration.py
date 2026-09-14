@@ -260,11 +260,13 @@ async def test_agrupamento_no_redis_preserva_ordem_e_lock(redis_client, monkeypa
     entries = await store.peek(phone)
     assert [e.text for e in entries] == ["gastei", "47,50", "no mercado"]
 
-    assert await store.acquire_lock(phone, 10) is True
-    assert await store.acquire_lock(phone, 10) is False  # exclusão mútua real
-    await store.release_lock(phone)
-    assert await store.acquire_lock(phone, 10) is True
-    await store.release_lock(phone)
+    token = await store.acquire_lock(phone, 10)
+    assert token is not None
+    assert await store.acquire_lock(phone, 10) is None  # exclusão mútua real
+    assert await store.release_lock(phone, token) is True
+    segundo = await store.acquire_lock(phone, 10)
+    assert segundo is not None
+    assert await store.release_lock(phone, segundo) is True
 
     await store.clear(phone)
     assert await store.peek(phone) == []
@@ -333,17 +335,52 @@ async def test_lock_de_processamento_e_marcador_de_job_no_redis(redis_client):
     store = RedisStateStore(RedisProvider(REDIS_URL))
     lock = "test:proc:lock:+5541900000003"
     marker = "test:job:done:abc"
-    await store.release(lock)
-    await store.release(marker)
+    await redis_client.delete(lock)
+    await store.forget(marker)
 
-    assert await store.acquire(lock, 10) is True
-    assert await store.acquire(lock, 10) is False
-    await store.release(lock)
+    token = await store.acquire(lock, 10)
+    assert token is not None
+    assert await store.acquire(lock, 10) is None
+    assert await store.release(lock, token) is True
 
     assert await store.exists(marker) is False
     await store.mark(marker, 30)
     assert await store.exists(marker) is True
-    await store.release(marker)
+    await store.forget(marker)
+    assert await store.exists(marker) is False
+
+
+async def test_lock_so_e_liberado_ou_renovado_pelo_dono_no_redis(redis_client):
+    """Compare-and-delete e compare-and-pexpire rodam como script Lua no Redis.
+
+    É o cenário exato do defeito: o lock do worker A expira, o worker B o
+    adquire, e A termina depois. A não pode apagar nem renovar o lock de B.
+    """
+    from src.services.distributed_state import RedisStateStore
+    from src.services.redis_client import RedisProvider
+
+    store = RedisStateStore(RedisProvider(REDIS_URL))
+    lock = "test:proc:lock:+5541900000009"
+    await redis_client.delete(lock)
+
+    token_a = await store.acquire(lock, 10)
+    assert token_a is not None
+    # O TTL de A vence (simulado apagando a chave, como o Redis faria).
+    await redis_client.delete(lock)
+    token_b = await store.acquire(lock, 10)
+    assert token_b is not None
+
+    # A termina atrasado: nem libera nem renova o lock que agora é de B.
+    assert await store.release(lock, token_a) is False
+    assert await store.extend(lock, token_a, 60) is False
+    assert await redis_client.get(lock) == token_b
+    assert await redis_client.pttl(lock) <= 10_000
+
+    # B renova e libera normalmente.
+    assert await store.extend(lock, token_b, 60) is True
+    assert await redis_client.pttl(lock) > 10_000
+    assert await store.release(lock, token_b) is True
+    assert await redis_client.exists(lock) == 0
 
 
 async def test_fatiamento_do_grupo_no_redis(redis_client):

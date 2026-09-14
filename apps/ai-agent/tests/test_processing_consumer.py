@@ -258,7 +258,8 @@ async def test_mesmo_telefone_nao_processa_fora_de_ordem(broker, consumer, env):
     """O segundo job do mesmo telefone é adiado enquanto o primeiro roda."""
     store = get_state_store()
     # Simula o primeiro job ainda em processamento (lock tomado).
-    await store.acquire(lock_key(PHONE), 60)
+    token = await store.acquire(lock_key(PHONE), 60)
+    assert token is not None
 
     await publish_job(broker, make_job(source_message_ids=["ai-2"]))
     await broker._dispatch(broker.queues[ROUTE_PROCESSING].popleft(), consumer.handle)
@@ -269,7 +270,7 @@ async def test_mesmo_telefone_nao_processa_fora_de_ordem(broker, consumer, env):
     assert broker.retried[0].attempt == 0
     assert broker.retried[0].headers["x-defer-count"] == 1
 
-    await store.release(lock_key(PHONE))
+    assert await store.release(lock_key(PHONE), token) is True
     await broker.drain()
     assert env.calls.count("create") == 1
 
@@ -289,6 +290,97 @@ async def test_adiamento_excessivo_deixa_de_ser_infinito(broker, consumer, env):
 
     with pytest.raises(RuntimeError):
         await consumer.handle(message)
+
+
+# ── Lock com dono ────────────────────────────────────────────────────────────
+# `release` era um DELETE incondicional. Se o job passava do TTL, outro worker
+# pegava o lock; quando o primeiro terminava, apagava o lock do segundo, e um
+# terceiro podia entrar em paralelo — quebrando a ordem por telefone.
+
+
+async def test_nao_libera_o_lock_que_ja_passou_a_outro_worker(
+    broker, consumer, env, monkeypatch
+):
+    import src.services.message_processor as mp
+
+    store = get_state_store()
+    chave = lock_key(PHONE)
+    outro: dict[str, str | None] = {}
+    original = mp.MessageProcessor.process_job
+
+    async def processamento_que_passa_do_ttl(self, job):
+        # O TTL vence no meio do trabalho e outro worker adquire o lock.
+        store.expire_lock_now(chave)
+        outro["token"] = await store.acquire(chave, 60)
+        await original(self, job)
+
+    monkeypatch.setattr(mp.MessageProcessor, "process_job", processamento_que_passa_do_ttl)
+
+    await publish_job(broker, make_job())
+    await broker.drain()
+
+    assert outro["token"] is not None
+    # O lock do outro worker continua de pé: um terceiro não consegue entrar.
+    assert await store.acquire(chave, 60) is None
+    assert await store.release(chave, outro["token"]) is True
+
+
+async def test_renova_o_lock_enquanto_o_job_roda(broker, consumer, env, monkeypatch):
+    import src.services.message_processor as mp
+    from src.config import settings
+
+    # TTL de 3 s → renovação a cada 1 s. O job leva mais que um intervalo.
+    monkeypatch.setattr(settings, "processing_lock_ttl_seconds", 3)
+    store = get_state_store()
+    renovacoes: list[str] = []
+    extend_original = store.extend
+
+    async def extend_espiao(key, token, ttl):
+        renovacoes.append(key)
+        return await extend_original(key, token, ttl)
+
+    monkeypatch.setattr(store, "extend", extend_espiao)
+    original = mp.MessageProcessor.process_job
+
+    async def processamento_lento(self, job):
+        await asyncio.sleep(1.3)
+        await original(self, job)
+
+    monkeypatch.setattr(mp.MessageProcessor, "process_job", processamento_lento)
+
+    await publish_job(broker, make_job())
+    await broker.drain()
+
+    assert renovacoes == [lock_key(PHONE)]
+    # Ao terminar, o lock é liberado de verdade — a renovação não o prende.
+    token = await store.acquire(lock_key(PHONE), 60)
+    assert token is not None
+
+
+async def test_renovacao_para_quando_o_lock_foi_perdido(consumer, monkeypatch):
+    from src.services.metrics import metrics
+
+    store = get_state_store()
+    chave = lock_key(PHONE)
+    token = await store.acquire(chave, 60)
+    store.expire_lock_now(chave)
+    assert await store.acquire(chave, 60) is not None  # outro worker entrou
+
+    perdas: list[str] = []
+    monkeypatch.setattr(metrics, "incr", lambda nome, *a, **k: perdas.append(nome))
+    monkeypatch.setattr(asyncio, "sleep", _sleep_instantaneo)
+
+    # Não fica renovando para sempre um lock que já não é dele.
+    await asyncio.wait_for(consumer._manter_lock(chave, token, 3), timeout=2)
+
+    assert perdas == ["processing_lock_lost"]
+
+
+_sleep_real = asyncio.sleep
+
+
+async def _sleep_instantaneo(_segundos: float) -> None:
+    await _sleep_real(0)
 
 
 # ── Assinatura e validação (casos 19 e 20) ───────────────────────────────────
@@ -418,7 +510,7 @@ async def test_confirmacao_pendente_tambem_usa_a_chave_do_job(broker, consumer, 
     await publish_job(broker, job)
     await broker.drain()
     # Reentrega antes do marcador de conclusão (ex.: crash logo após o ack).
-    await get_state_store().release(done_key(job.job_id))
+    await get_state_store().forget(done_key(job.job_id))
     await publish_job(broker, job)
     await broker.drain()
 

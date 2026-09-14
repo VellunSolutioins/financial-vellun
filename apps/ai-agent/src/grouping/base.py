@@ -104,9 +104,14 @@ class GroupStore(ABC):
         """Remove o grupo inteiro e o agendamento."""
 
     @abstractmethod
-    async def acquire_lock(self, phone: str, ttl_seconds: int) -> bool:
-        """Lock distribuido do telefone durante a consolidacao."""
+    async def acquire_lock(self, phone: str, ttl_seconds: int) -> str | None:
+        """Lock do telefone durante a consolidacao. Devolve o token do dono, ou
+        ``None`` se outra instancia detem. Ver ``services/locks.py``."""
 
     @abstractmethod
-    async def release_lock(self, phone: str) -> None:
-        """Libera o lock."""
+    async def extend_lock(self, phone: str, token: str, ttl_seconds: int) -> bool:
+        """Renova o lock. ``False`` quando ja nao pertence ao token."""
+
+    @abstractmethod
+    async def release_lock(self, phone: str, token: str) -> bool:
+        """Libera **so se ainda for o dono**. ``False`` quando ja nao era."""

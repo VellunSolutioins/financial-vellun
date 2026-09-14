@@ -2,10 +2,11 @@
 
 Duas primitivas, ambas com TTL para nunca travar para sempre:
 
-- ``acquire``/``release`` — lock por telefone, garantindo que dois workers nao
-  processem o mesmo numero ao mesmo tempo (ordenacao logica);
-- ``mark``/``exists`` — marcador de job ja concluido, para que uma reentrega
-  apos o ack nao reprocesse.
+- ``acquire``/``extend``/``release`` — lock por telefone **com dono**, garantindo
+  que dois workers nao processem o mesmo numero ao mesmo tempo (ordenacao
+  logica). ``acquire`` devolve um token; so quem o tem renova e libera;
+- ``mark``/``exists``/``forget`` — marcador de job ja concluido, para que uma
+  reentrega apos o ack nao reprocesse.
 
 O backend segue ``GROUP_STORE_BACKEND`` (redis em producao, memory em teste).
 """
@@ -17,6 +18,7 @@ import time
 from abc import ABC, abstractmethod
 
 from ..config import settings
+from . import locks
 from .redis_client import RedisProvider, redis_provider
 
 logger = logging.getLogger(__name__)
@@ -24,10 +26,16 @@ logger = logging.getLogger(__name__)
 
 class StateStore(ABC):
     @abstractmethod
-    async def acquire(self, key: str, ttl_seconds: int) -> bool: ...
+    async def acquire(self, key: str, ttl_seconds: int) -> str | None:
+        """Adquire o lock. Devolve o token do dono, ou ``None`` se outro detem."""
 
     @abstractmethod
-    async def release(self, key: str) -> None: ...
+    async def extend(self, key: str, token: str, ttl_seconds: int) -> bool:
+        """Renova o TTL. ``False`` quando o lock ja nao pertence ao token."""
+
+    @abstractmethod
+    async def release(self, key: str, token: str) -> bool:
+        """Libera **so se ainda for o dono**. ``False`` quando ja nao era."""
 
     @abstractmethod
     async def mark(self, key: str, ttl_seconds: int) -> None: ...
@@ -35,10 +43,15 @@ class StateStore(ABC):
     @abstractmethod
     async def exists(self, key: str) -> bool: ...
 
+    @abstractmethod
+    async def forget(self, key: str) -> None:
+        """Remove um marcador. Nao serve para lock: lock se libera com o token."""
+
 
 class InMemoryStateStore(StateStore):
     def __init__(self) -> None:
         self._entries: dict[str, float] = {}
+        self._locks = locks.InMemoryLocks()
 
     def _alive(self, key: str) -> bool:
         expires = self._entries.get(key)
@@ -49,14 +62,14 @@ class InMemoryStateStore(StateStore):
             return False
         return True
 
-    async def acquire(self, key: str, ttl_seconds: int) -> bool:
-        if self._alive(key):
-            return False
-        self._entries[key] = time.time() + ttl_seconds
-        return True
+    async def acquire(self, key: str, ttl_seconds: int) -> str | None:
+        return self._locks.acquire(key, ttl_seconds)
 
-    async def release(self, key: str) -> None:
-        self._entries.pop(key, None)
+    async def extend(self, key: str, token: str, ttl_seconds: int) -> bool:
+        return self._locks.extend(key, token, ttl_seconds)
+
+    async def release(self, key: str, token: str) -> bool:
+        return self._locks.release(key, token)
 
     async def mark(self, key: str, ttl_seconds: int) -> None:
         self._entries[key] = time.time() + ttl_seconds
@@ -64,18 +77,29 @@ class InMemoryStateStore(StateStore):
     async def exists(self, key: str) -> bool:
         return self._alive(key)
 
+    async def forget(self, key: str) -> None:
+        self._entries.pop(key, None)
+
+    def expire_lock_now(self, key: str) -> None:
+        """Auxiliar de teste: simula o TTL do lock vencendo."""
+        self._locks.expire_now(key)
+
 
 class RedisStateStore(StateStore):
     def __init__(self, provider: RedisProvider | None = None) -> None:
         self._provider = provider or redis_provider
 
-    async def acquire(self, key: str, ttl_seconds: int) -> bool:
+    async def acquire(self, key: str, ttl_seconds: int) -> str | None:
         client = await self._provider.client()
-        return bool(await client.set(key, "1", nx=True, px=ttl_seconds * 1000))
+        return await locks.redis_acquire(client, key, ttl_seconds)
 
-    async def release(self, key: str) -> None:
+    async def extend(self, key: str, token: str, ttl_seconds: int) -> bool:
         client = await self._provider.client()
-        await client.delete(key)
+        return await locks.redis_extend(client, key, token, ttl_seconds)
+
+    async def release(self, key: str, token: str) -> bool:
+        client = await self._provider.client()
+        return await locks.redis_release(client, key, token)
 
     async def mark(self, key: str, ttl_seconds: int) -> None:
         client = await self._provider.client()
@@ -84,6 +108,10 @@ class RedisStateStore(StateStore):
     async def exists(self, key: str) -> bool:
         client = await self._provider.client()
         return bool(await client.exists(key))
+
+    async def forget(self, key: str) -> None:
+        client = await self._provider.client()
+        await client.delete(key)
 
 
 _store: StateStore | None = None
