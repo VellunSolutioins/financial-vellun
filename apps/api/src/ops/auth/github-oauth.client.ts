@@ -51,8 +51,11 @@ export class GithubOAuthClient {
     url.searchParams.set('redirect_uri', this.callbackUrl());
     url.searchParams.set('scope', GITHUB_OAUTH_SCOPE);
     url.searchParams.set('state', state);
-    // Força a tela de contas: sem isso o GitHub reaproveita a sessão do browser
-    // e um operador com duas contas nunca consegue trocar.
+    // Força o seletor de contas: sem isso o GitHub reaproveita a sessão do
+    // browser e um operador com duas contas nunca consegue trocar.
+    url.searchParams.set('prompt', 'select_account');
+    // Esconde o "criar conta" da tela de login: o painel só aceita membros da
+    // organização, e uma conta nova nunca é.
     url.searchParams.set('allow_signup', 'false');
     return url.toString();
   }
