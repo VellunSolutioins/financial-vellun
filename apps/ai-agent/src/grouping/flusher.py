@@ -6,10 +6,11 @@ Sequencia por telefone (a ordem importa para nao perder mensagem):
 2. **le** o grupo sem apagar;
 3. monta o ``ProcessingJobV1`` com ``jobId`` deterministico;
 4. publica e **aguarda o confirm** do broker;
-5. so entao limpa o buffer e o agendamento;
-6. libera o lock.
+5. renova o lock — e, se ele ja nao e nosso, para sem limpar nada;
+6. so entao limpa o buffer e o agendamento;
+7. libera o lock.
 
-Se o processo cair entre 4 e 5, o grupo e republicado no proximo tick — mas com
+Se o processo cair entre 4 e 6, o grupo e republicado no proximo tick — mas com
 o mesmo ``jobId``, entao o consumer de processamento o descarta como duplicata.
 """
 
@@ -115,6 +116,7 @@ class GroupFlusherWorker:
             return 0
 
         publicados = 0
+        perdido = False
         try:
             for _ in range(MAX_SLICES_PER_TICK):
                 entries = await self._store.peek(
@@ -131,7 +133,21 @@ class GroupFlusherWorker:
                     await self._publisher.publish(
                         ROUTE_PROCESSING, job, correlation_id=job.correlation_id
                     )
-                    # Publicacao confirmada: so agora e seguro descartar a fatia.
+                    publicados += 1
+                    # Publicacao confirmada, mas o publish nao tem teto de tempo:
+                    # um broker lento pode segurar esta chamada alem do TTL, e
+                    # outra instancia ja ter lido e descartado esta mesma fatia.
+                    # Descartar de novo apagaria a fatia seguinte, que ninguem
+                    # publicou. Por isso o lock e renovado **antes** do descarte
+                    # — o que tambem cobre a proxima fatia. Se ja nao e nosso, a
+                    # fatia fica: quem detem o lock a republica com o mesmo jobId.
+                    if not await self._store.extend_lock(phone, token, ttl):
+                        perdido = True
+                        metrics.incr("group_lock_lost")
+                        logger.warning(
+                            "Lock do grupo perdido durante a publicacao; fatia nao descartada"
+                        )
+                        break
                     restantes = await self._store.consume(phone, len(entries))
                     metrics.incr("group_flushed")
                     metrics.incr("jobs_published")
@@ -140,20 +156,9 @@ class GroupFlusherWorker:
                         len(entries),
                         restantes,
                     )
-                publicados += 1
                 # Sobra abaixo do limite volta a esperar o debounce: pode ser
                 # que o usuario ainda esteja digitando o resto da frase.
                 if restantes < settings.message_buffer_max_messages:
-                    break
-                # Vai para outra fatia: renova o lock antes. As fatias somadas
-                # podem passar do TTL, e sem renovar outra instancia entraria no
-                # meio. Se o lock ja nao e nosso, para aqui — o resto fica para
-                # quem o detem agora.
-                if not await self._store.extend_lock(phone, token, ttl):
-                    metrics.incr("group_lock_lost")
-                    logger.warning(
-                        "Lock do grupo perdido entre fatias; restante fica para o proximo tick"
-                    )
                     break
             else:
                 # Saiu pelo limite de fatias: o resto fica para o proximo tick,
@@ -168,7 +173,8 @@ class GroupFlusherWorker:
             logger.exception("Falha ao consolidar grupo; buffer preservado para retry")
             return publicados
         finally:
-            if not await self._store.release_lock(phone, token):
+            # Lock ja perdido (e contado): liberar so confirmaria que nao e nosso.
+            if not perdido and not await self._store.release_lock(phone, token):
                 # Expirou e passou a outra instancia antes daqui: nao ha o que
                 # liberar, e apagar o lock dela seria o defeito antigo.
                 metrics.incr("group_lock_lost")

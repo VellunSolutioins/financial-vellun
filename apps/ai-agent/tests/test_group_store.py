@@ -251,30 +251,36 @@ async def test_limite_de_fatias_por_tick_adia_o_resto(broker, group_store, monke
     assert await group_store.peek(PHONE) != []  # o resto ficou para o próximo tick
 
 
-async def test_renova_o_lock_entre_fatias(broker, group_store, monkeypatch):
-    """As fatias somadas podem passar do TTL: o lock é renovado antes de cada nova."""
+async def test_renova_o_lock_antes_de_descartar_cada_fatia(broker, group_store, monkeypatch):
+    """O publish não tem teto de tempo: o lock é renovado depois dele e antes do
+    descarte, em toda fatia — o que também cobre a leitura da fatia seguinte."""
     monkeypatch.setattr(settings, "message_buffer_max_messages", 10)
     worker = GroupFlusherWorker(group_store, InMemoryPublisher(broker))
-    renovacoes: list[str] = []
+    eventos: list[str] = []
     extend_original = group_store.extend_lock
+    consume_original = group_store.consume
 
     async def extend_espiao(phone, token, ttl):
-        renovacoes.append(phone)
+        eventos.append("extend")
         return await extend_original(phone, token, ttl)
 
+    async def consume_espiao(phone, count):
+        eventos.append("consume")
+        return await consume_original(phone, count)
+
     monkeypatch.setattr(group_store, "extend_lock", extend_espiao)
+    monkeypatch.setattr(group_store, "consume", consume_espiao)
 
     for index in range(1, 26):
         await group_store.append(PHONE, entry(f"msg{index}", index))
 
     assert await worker.tick() == 2
-    # Uma renovação para passar da 1ª para a 2ª fatia; nenhuma depois da última.
-    assert renovacoes == [PHONE]
+    assert eventos == ["extend", "consume", "extend", "consume"]
 
 
-async def test_para_de_fatiar_quando_perde_o_lock(broker, group_store, monkeypatch):
-    """Sem o lock, outra instância pode estar consolidando o mesmo telefone: o
-    resto fica para quem o detém agora, em vez de os dois publicarem juntos."""
+async def test_nao_descarta_a_fatia_quando_perde_o_lock(broker, group_store, monkeypatch):
+    """Sem o lock, outra instância pode ter lido e descartado a mesma fatia:
+    descartar de novo apagaria mensagens que ninguém publicou."""
     monkeypatch.setattr(settings, "message_buffer_max_messages", 10)
     worker = GroupFlusherWorker(group_store, InMemoryPublisher(broker))
 
@@ -289,12 +295,49 @@ async def test_para_de_fatiar_quando_perde_o_lock(broker, group_store, monkeypat
         await group_store.append(PHONE, entry(f"msg{index}", index))
 
     assert await worker.tick() == 1
-    jobs = [ProcessingJobV1.model_validate_json(m.body) for m in broker.published[ROUTE_PROCESSING]]
-    assert [len(job.source_message_ids) for job in jobs] == [10]
-    # Nada se perde: o que não foi publicado continua no buffer.
-    assert len(await group_store.peek(PHONE)) == 15
+    # Nada foi descartado: quem detém o lock republica a fatia com o mesmo jobId.
+    assert len(await group_store.peek(PHONE)) == 25
     # E o lock da outra instância segue de pé — não foi apagado no `finally`.
     assert await group_store.acquire_lock(PHONE, 60) is None
+
+
+async def test_publish_lento_alem_do_ttl_nao_perde_nem_duplica_fatia(
+    broker, group_store, monkeypatch
+):
+    """Cenário da revisão: o publish de A demora além do TTL, B assume o telefone e
+    consolida as mesmas mensagens. Antes, A descartava ao voltar — e apagava a
+    fatia seguinte, que ninguém tinha publicado."""
+    monkeypatch.setattr(settings, "message_buffer_max_messages", 10)
+    worker_b = GroupFlusherWorker(group_store, InMemoryPublisher(broker))
+
+    class PublisherLento(InMemoryPublisher):
+        def __init__(self, broker_):
+            super().__init__(broker_)
+            self.primeira = True
+
+        async def publish(self, routing_key, message, **kwargs):
+            if self.primeira:
+                self.primeira = False
+                # O TTL vence durante o publish e B consolida o mesmo telefone.
+                group_store.expire_lock_now(PHONE)
+                group_store.force_due(PHONE)
+                await worker_b.tick()
+            await super().publish(routing_key, message, **kwargs)
+
+    worker_a = GroupFlusherWorker(group_store, PublisherLento(broker))
+
+    for index in range(1, 26):
+        await group_store.append(PHONE, entry(f"msg{index}", index))
+
+    await worker_a.tick()
+
+    jobs = [ProcessingJobV1.model_validate_json(m.body) for m in broker.published[ROUTE_PROCESSING]]
+    # B publicou duas fatias; A republicou a primeira, com o mesmo jobId — o
+    # consumer de processamento a descarta como duplicata.
+    assert [len(job.source_message_ids) for job in jobs] == [10, 10, 10]
+    assert jobs[2].job_id == jobs[0].job_id
+    # Nenhuma mensagem perdida: o resto abaixo do limite continua no buffer.
+    assert [e.text for e in await group_store.peek(PHONE)] == [f"msg{i}" for i in range(21, 26)]
 
 
 # ── peek/consume ─────────────────────────────────────────────────────────────
