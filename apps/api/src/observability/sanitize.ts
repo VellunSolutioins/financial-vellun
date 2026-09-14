@@ -26,11 +26,13 @@ const MAX_DEPTH = 6;
  */
 export function maskPhone(value: string): string {
   const digits = value.replace(/\D/g, '');
-  if (digits.length < 6) return REDACTED;
+  // Com menos de quatro dígitos para esconder, preservar começo e fim revela o
+  // número (ou quase): seis dígitos saíam inteiros.
+  if (digits.length < 10) return REDACTED;
 
   const prefix = digits.slice(0, 4);
   const suffix = digits.slice(-2);
-  return `${prefix}${'*'.repeat(Math.max(digits.length - 6, 1))}${suffix}`;
+  return `${prefix}${'*'.repeat(digits.length - 6)}${suffix}`;
 }
 
 /** Mascara um e-mail preservando o domínio e a primeira letra. */

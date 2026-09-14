@@ -10,6 +10,14 @@ describe('maskPhone', () => {
   it('esconde por completo o que é curto demais para mascarar', () => {
     expect(maskPhone('1234')).toBe('***');
   });
+
+  it('não devolve em claro um número curto que a máscara revelaria inteiro', () => {
+    // Preservar quatro dígitos no começo e dois no fim de um valor com seis
+    // dígitos não esconde nada.
+    expect(maskPhone('123456')).toBe('***');
+    expect(maskPhone('123456789')).toBe('***');
+    expect(maskPhone('4199998877')).toBe('4199****77');
+  });
 });
 
 describe('maskContent', () => {
@@ -69,8 +77,71 @@ describe('maskFailurePayload', () => {
     expect(resultado.phone).toBe('5541*******77');
     expect(resultado.combinedMessage).toContain('[29 caracteres]');
     expect(resultado.mensagens[0].text).toContain('[23 caracteres]');
-    // Valores numéricos e campos neutros seguem intactos.
-    expect(resultado.preExtractedIntent.amount).toBe(47.5);
+    expect(resultado.jobId).toBe('job-1');
+  });
+
+  it('mascara o preExtractedIntent do agente, que chega em snake_case', () => {
+    // Nenhuma destas chaves estava na lista de bloqueio anterior: valor, conta e
+    // descrição do lançamento saíam em claro para quem não pode ver dado sensível.
+    const job = {
+      jobId: 'job-1',
+      attempt: 2,
+      forceConfirm: true,
+      sourceMessageIds: ['m-1', 'm-2'],
+      preExtractedIntent: {
+        intent: 'create_transaction',
+        transaction_type: 'expense',
+        amount: 47.5,
+        description: 'Mercado do bairro',
+        category_name: 'Alimentação',
+        account_name: 'Nubank',
+        transaction_date: '2026-09-14',
+        confidence: 0.92,
+        needs_confirmation: false,
+        confirmation_question: null,
+      },
+    };
+
+    const resultado = maskFailurePayload(job) as any;
+    const intent = resultado.preExtractedIntent;
+
+    expect(intent.amount).toBe('[número]');
+    expect(intent.description).toBe('[17 caracteres]');
+    expect(intent.category_name).toBe('[11 caracteres]');
+    expect(intent.account_name).toBe('[6 caracteres]');
+    expect(intent.transaction_date).toBe('[10 caracteres]');
+    // A classificação continua legível: é o que diz o que o agente entendeu.
+    expect(intent.intent).toBe('create_transaction');
+    expect(intent.transaction_type).toBe('expense');
+    expect(intent.confidence).toBe(0.92);
+    expect(intent.needs_confirmation).toBe(false);
+    expect(intent.confirmation_question).toBeNull();
+    // Estruturais do job seguem intactos, inclusive dentro de listas.
+    expect(resultado.attempt).toBe(2);
+    expect(resultado.forceConfirm).toBe(true);
+    expect(resultado.sourceMessageIds).toEqual(['m-1', 'm-2']);
+  });
+
+  it('mascara por padrão um campo que ninguém declarou', () => {
+    // Lista de permissão: um campo novo num contrato nasce mascarado, e não
+    // vazando até alguém lembrar de adicioná-lo a uma lista de bloqueio.
+    const resultado = maskFailurePayload({
+      correlationId: 'corr-1',
+      pixKey: 'fulano@exemplo.com',
+      saldo: 1234.56,
+      extra: { cpf: '12345678900', itens: ['arroz', 'feijão'] },
+    }) as any;
+
+    expect(resultado.correlationId).toBe('corr-1');
+    expect(resultado.pixKey).toBe('[18 caracteres]');
+    expect(resultado.saldo).toBe('[número]');
+    expect(resultado.extra.cpf).toBe('[11 caracteres]');
+    expect(resultado.extra.itens).toEqual(['[5 caracteres]', '[6 caracteres]']);
+  });
+
+  it('mascara um payload que não é objeto', () => {
+    // Mensagem que nem era JSON chega ao catálogo como texto cru.
+    expect(maskFailurePayload('gastei 47,50 no mercado')).toBe('[23 caracteres]');
   });
 
   it('não estoura com estrutura muito funda', () => {

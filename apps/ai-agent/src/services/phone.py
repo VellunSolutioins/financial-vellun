@@ -36,8 +36,12 @@ def mask_phone(value: str | None) -> str:
     if not value:
         return "?"
     digits = _NON_DIGITS.sub("", value)
-    if len(digits) <= 6:
+    if len(digits) < 8:
         return "*" * len(digits)
+    # Prefixo de 5 e sufixo de 4 so escondem algo a partir de 13 digitos; abaixo
+    # disso a mascara revelava o numero inteiro (ou sobrepunha os dois pedacos).
+    if len(digits) < 13:
+        return f"+{'*' * (len(digits) - 4)}{digits[-4:]}"
     return f"+{digits[:5]}{'*' * (len(digits) - 9)}{digits[-4:]}"
 
 

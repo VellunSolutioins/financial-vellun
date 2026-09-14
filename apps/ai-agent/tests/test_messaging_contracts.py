@@ -135,6 +135,15 @@ def test_mascara_nunca_expoe_o_numero_completo():
     assert "*" in mascarado
 
 
+def test_mascara_nao_revela_numero_curto():
+    # Com prefixo de 5 e sufixo de 4, um numero de 8 digitos saia inteiro.
+    for numero in ("1234567", "12345678", "419999887766"):
+        mascarado = mask_phone(numero)
+        digitos = "".join(c for c in mascarado if c.isdigit())
+        assert len(digitos) <= 4, mascarado
+        assert len(mascarado.replace("+", "")) == len(numero)
+
+
 def test_hash_do_telefone_e_estavel_e_curto():
     assert hash_phone("(41) 99999-9999") == hash_phone("+5541999999999")
     assert len(hash_phone("+5541999999999")) == 12

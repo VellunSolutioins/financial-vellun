@@ -64,6 +64,12 @@ describe('maskPhone', () => {
   it('redige o que é curto demais para mascarar com segurança', () => {
     expect(maskPhone('1234')).toBe(REDACTED);
   });
+
+  it('não revela um número curto que a máscara mostraria inteiro', () => {
+    expect(maskPhone('123456')).toBe(REDACTED);
+    expect(maskPhone('123456789')).toBe(REDACTED);
+    expect(maskPhone('4199998877')).toBe('4199****77');
+  });
 });
 
 describe('maskEmail', () => {
