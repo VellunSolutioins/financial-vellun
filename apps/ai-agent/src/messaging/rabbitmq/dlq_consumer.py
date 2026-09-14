@@ -65,15 +65,36 @@ class DlqCatalogConsumer(MessageConsumer):
     async def start(self, handler: MessageHandler) -> None:
         # Canal proprio: o prefetch e por canal, e a pausa antes do nack nao
         # pode consumir o orcamento de entrega dos consumers principais.
-        self._channel = await self._conn.dedicated_consume_channel(self._prefetch)
-        self._queue = await self._channel.get_queue(self._queue_name, ensure=False)
+        channel = await self._conn.dedicated_consume_channel(self._prefetch)
 
         async def on_message(message: AbstractIncomingMessage) -> None:
             await self._handle(message, handler)
 
-        self._tag = await self._queue.consume(on_message)
+        # O canal so passa a ser da instancia depois que o consumo comecou.
+        # Antes, ele era atribuido logo ao abrir: se `get_queue` ou `consume`
+        # falhasse, o `bootstrap` engolia a excecao e descartava esta instancia
+        # sem nunca chamar `stop()` — e o canal ficava aberto pela vida inteira
+        # do processo.
+        try:
+            queue = await channel.get_queue(self._queue_name, ensure=False)
+            tag = await queue.consume(on_message)
+        except BaseException:
+            await self._close_quietly(channel)
+            raise
+
+        self._channel = channel
+        self._queue = queue
+        self._tag = tag
         self._running = True
         logger.info("Consumer do catalogo ligado em %s", self._queue_name)
+
+    async def _close_quietly(self, channel) -> None:
+        if channel is None or channel.is_closed:
+            return
+        try:
+            await channel.close()
+        except Exception:  # noqa: BLE001 - a excecao que importa e a original
+            logger.debug("Falha ao fechar o canal do catalogo", exc_info=True)
 
     async def _handle(self, message: AbstractIncomingMessage, handler: MessageHandler) -> None:
         broker_message = BrokerMessage(
@@ -108,11 +129,7 @@ class DlqCatalogConsumer(MessageConsumer):
         self._tag = None
         self._queue = None
 
-        if self._channel is not None and not self._channel.is_closed:
-            try:
-                await self._channel.close()
-            except Exception:  # noqa: BLE001 - encerramento nao deve levantar
-                logger.debug("Falha ao fechar o canal do catalogo", exc_info=True)
+        await self._close_quietly(self._channel)
         self._channel = None
 
     async def healthy(self) -> bool:
