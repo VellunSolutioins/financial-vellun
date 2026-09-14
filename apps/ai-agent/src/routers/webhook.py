@@ -21,6 +21,7 @@ import time
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
 from fastapi.responses import PlainTextResponse
+from pydantic import ValidationError
 
 from ..bootstrap import pipeline
 from ..config import settings
@@ -155,7 +156,21 @@ async def receive_whatsapp(
         if item.kind == "text" and len(item.message) > settings.message_max_chars:
             logger.warning("Mensagem muito longa ignorada de %s", safe_phone(item.phone))
             continue
-        messages.append(to_contract(item, correlation_id))
+        try:
+            messages.append(to_contract(item, correlation_id))
+        except ValidationError as exc:
+            # Item que nunca vai validar: texto só com espaços (o `parse_inbound`
+            # só descarta texto vazio) ou mídia sem `id`. Deixar a exceção subir
+            # virava 500, e a Meta reenviaria o lote inteiro para sempre — levando
+            # junto as mensagens válidas do mesmo lote. Descartado por item, o
+            # resto segue.
+            metrics.incr("webhook_invalid_item")
+            logger.warning(
+                "Item do webhook descartado por contrato inválido (%s, %d erro(s)) de %s",
+                item.kind,
+                exc.error_count(),
+                safe_phone(item.phone),
+            )
 
     if not messages:
         metrics.incr("webhook_ignored")

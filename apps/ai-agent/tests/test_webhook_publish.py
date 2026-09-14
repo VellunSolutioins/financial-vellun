@@ -195,6 +195,47 @@ def test_mensagem_longa_demais_nao_e_publicada(client, broker, monkeypatch):
     assert broker.published["inbound"] == []
 
 
+# ── Itens que nunca validam contra o contrato ────────────────────────────────
+# Antes, a `ValidationError` de um item escapava do handler: 500, e a Meta
+# reenviaria o lote inteiro para sempre — levando junto as mensagens válidas.
+
+
+def test_texto_so_com_espacos_e_descartado_sem_500(client, broker):
+    # `parse_inbound` só descarta texto vazio; espaços passavam e estouravam no
+    # validador do contrato.
+    response = client.post("/webhook/whatsapp", json={**SIMPLE_PAYLOAD, "message": "   "})
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ignored"}
+    assert broker.published["inbound"] == []
+
+
+def test_midia_sem_id_e_descartada_sem_500(client, broker):
+    payload = meta_payload(
+        {"from": "5541999999999", "id": "wamid.a", "type": "audio", "audio": {}},
+    )
+
+    response = client.post("/webhook/whatsapp", json=payload)
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ignored"}
+
+
+def test_item_invalido_nao_derruba_os_validos_do_mesmo_lote(client, broker):
+    payload = meta_payload(
+        text_message("wamid.1", "gastei 47,50"),
+        text_message("wamid.2", "   "),
+        {"from": "5541999999999", "id": "wamid.3", "type": "image", "image": {}},
+        text_message("wamid.4", "no mercado"),
+    )
+
+    response = client.post("/webhook/whatsapp", json=payload)
+
+    assert response.status_code == 202
+    assert response.json()["published"] == 2
+    assert [m.provider_message_id for m in published(broker)] == ["wamid.1", "wamid.4"]
+
+
 def test_webhook_nao_toca_api_banco_openai_nem_midia(client, broker, monkeypatch):
     """O ciclo HTTP não pode chamar API principal, LLM ou baixar mídia."""
     import src.services.api_client as api_client_module
