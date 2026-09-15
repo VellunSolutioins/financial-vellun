@@ -2,7 +2,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { OpsAuditResult, OpsOperator, OpsRole } from '@prisma/client';
+import { OpsAuditResult, OpsOperator, OpsRole, Prisma } from '@prisma/client';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import { OpsAuditService } from '../audit/ops-audit.service';
@@ -97,25 +97,61 @@ export class OpsAuthService {
    * pelo dono (e o antigo, reivindicado por outra pessoa), enquanto o id é
    * imutável. `role`, `active` e `canViewSensitive` **nunca** são tocados aqui —
    * quem concede permissão é um `ops_admin`, não o ato de fazer login.
+   *
+   * `githubLogin` também é único, e é aí que a troca de login morde: se o dono
+   * antigo renomeou a conta e ainda não voltou a entrar, a linha dele segue com o
+   * login que agora é de outra pessoa, e o upsert dela falhava com P2002 — um
+   * login legítimo recusado sem explicação. A linha antiga tem o login liberado
+   * antes, na mesma transação.
    */
   private async upsertOperator(identity: GithubIdentity): Promise<OpsOperator> {
     const bootstrap = await this.bootstrapGrant(identity);
 
-    return this.prisma.opsOperator.upsert({
-      where: { githubUserId: identity.githubUserId },
-      create: {
-        githubUserId: identity.githubUserId,
-        githubLogin: identity.login,
-        name: identity.name,
-        email: identity.email,
-        ...bootstrap,
-      },
-      update: {
-        githubLogin: identity.login,
-        name: identity.name,
-        email: identity.email,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      await this.releaseStaleLogin(tx, identity);
+
+      return tx.opsOperator.upsert({
+        where: { githubUserId: identity.githubUserId },
+        create: {
+          githubUserId: identity.githubUserId,
+          githubLogin: identity.login,
+          name: identity.name,
+          email: identity.email,
+          ...bootstrap,
+        },
+        update: {
+          githubLogin: identity.login,
+          name: identity.name,
+          email: identity.email,
+        },
+      });
     });
+  }
+
+  /**
+   * Tira o login de uma linha que não pertence mais a ele.
+   *
+   * Só o `githubLogin` muda: papel, ativação e permissões seguem presos ao
+   * `githubUserId` da linha antiga, que é quem de fato os recebeu — e que volta a
+   * ter o login atualizado no próximo login dele. O valor usa `~`, que o GitHub
+   * não aceita em login, e o id da linha, que é único: não colide com nenhum
+   * login real nem com outra linha liberada.
+   */
+  private async releaseStaleLogin(
+    tx: Prisma.TransactionClient,
+    identity: GithubIdentity,
+  ): Promise<void> {
+    const stale = await tx.opsOperator.findUnique({ where: { githubLogin: identity.login } });
+    if (!stale || stale.githubUserId === identity.githubUserId) return;
+
+    await tx.opsOperator.update({
+      where: { id: stale.id },
+      data: { githubLogin: `${identity.login}~liberado-${stale.githubUserId}` },
+    });
+    this.logger.warn(
+      `Login GitHub "${identity.login}" passou do usuário ${stale.githubUserId} para ` +
+        `${identity.githubUserId}; linha antiga ficou com o login liberado`,
+    );
   }
 
   /**

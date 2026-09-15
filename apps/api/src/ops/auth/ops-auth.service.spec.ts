@@ -43,6 +43,7 @@ function setup(
       findUnique: jest.fn(),
     },
   } as any;
+  prisma.$transaction = jest.fn().mockImplementation((fn: any) => fn(prisma));
 
   const github = {
     exchangeCode: jest.fn().mockResolvedValue('gho_token'),
@@ -139,6 +140,44 @@ describe('OpsAuthService', () => {
       await service.completeLogin('code');
 
       expect(Object.keys(upserted[0].update).sort()).toEqual(['email', 'githubLogin', 'name']);
+    });
+
+    it('libera o login de uma linha antiga antes de gravar o novo dono', async () => {
+      // O dono antigo renomeou a conta e ainda não voltou a entrar: a linha dele
+      // segue com o login, e o upsert do novo dono batia no unique de githubLogin.
+      const { service, prisma } = setup({ isMember: true, operatorCount: 1 });
+      prisma.opsOperator.findUnique.mockResolvedValueOnce({
+        id: 'op-antigo',
+        githubUserId: '1111',
+        githubLogin: 'alguem',
+      });
+
+      await service.completeLogin('code');
+
+      expect(prisma.opsOperator.update).toHaveBeenCalledWith({
+        where: { id: 'op-antigo' },
+        data: { githubLogin: 'alguem~liberado-1111' },
+      });
+      // Liberado antes do upsert, na mesma transação.
+      expect(prisma.opsOperator.update.mock.invocationCallOrder[0]).toBeLessThan(
+        prisma.opsOperator.upsert.mock.invocationCallOrder[0],
+      );
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('não mexe na linha quando o login já é do mesmo usuário', async () => {
+      const { service, prisma } = setup({ isMember: true, operatorCount: 1 });
+      prisma.opsOperator.findUnique.mockResolvedValueOnce({
+        id: 'op-1',
+        githubUserId: identidade.githubUserId,
+        githubLogin: 'alguem',
+      });
+
+      await service.completeLogin('code');
+
+      expect(prisma.opsOperator.update).not.toHaveBeenCalledWith(
+        expect.objectContaining({ data: { githubLogin: expect.any(String) } }),
+      );
     });
 
     it('autoriza operador ativo, marca lastLoginAt e audita', async () => {
