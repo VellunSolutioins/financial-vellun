@@ -182,7 +182,9 @@ def test_evento_de_status_nao_cria_job(client, broker):
     assert broker.published["processing"] == []
 
 
-def test_mensagem_longa_demais_nao_e_publicada(client, broker, monkeypatch):
+def test_mensagem_longa_demais_vai_como_nao_suportada_e_sem_o_texto(client, broker, monkeypatch):
+    # Antes era descartada em silêncio: o usuário ficava sem resposta. Agora segue
+    # para o consumer responder — mas sem carregar o texto que nunca será lido.
     monkeypatch.setattr(settings, "message_max_chars", 10)
 
     response = client.post(
@@ -190,9 +192,11 @@ def test_mensagem_longa_demais_nao_e_publicada(client, broker, monkeypatch):
         json={**SIMPLE_PAYLOAD, "message": "x" * 50},
     )
 
-    assert response.status_code == 200
-    assert response.json() == {"status": "ignored"}
-    assert broker.published["inbound"] == []
+    assert response.status_code == 202
+    [mensagem] = published(broker)
+    assert mensagem.kind == "unsupported"
+    assert mensagem.raw_type == "text_too_long"
+    assert mensagem.text is None
 
 
 # ── Itens que nunca validam contra o contrato ────────────────────────────────

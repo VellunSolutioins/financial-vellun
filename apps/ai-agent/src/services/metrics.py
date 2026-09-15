@@ -57,6 +57,7 @@ KNOWN_COUNTERS = (
     "webhook_received",
     "webhook_ignored",
     "webhook_invalid_signature",
+    "webhook_text_too_long",
     "publish_confirmed",
     "publish_failed",
     # Consumo de entrada
@@ -67,6 +68,7 @@ KNOWN_COUNTERS = (
     "inbound_buffered",
     "inbound_duplicate",
     "not_linked",
+    "message_too_long",
     "subscription_blocked",
     # Mídia
     "media_audio",

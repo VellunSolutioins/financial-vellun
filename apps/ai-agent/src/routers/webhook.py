@@ -26,7 +26,7 @@ from pydantic import ValidationError
 from ..bootstrap import pipeline
 from ..config import settings
 from ..messaging.base import ROUTE_INBOUND, PublishError
-from ..messaging.contracts import InboundMessageV1, new_id
+from ..messaging.contracts import RAW_TYPE_TEXT_TOO_LONG, InboundMessageV1, new_id
 from ..observability.logging import current_context, log_context, safe_phone
 from ..services.metrics import metrics
 from ..services.phone import normalize_phone
@@ -116,6 +116,14 @@ def to_contract(item: InboundMessage, correlation_id: str) -> InboundMessageV1:
     )
 
 
+def _too_long_contract(item: InboundMessage, correlation_id: str) -> InboundMessageV1:
+    """Contrato do texto que passou do limite: nao suportado, sem o conteudo."""
+    contract = to_contract(item, correlation_id)
+    return contract.model_copy(
+        update={"kind": "unsupported", "text": None, "raw_type": RAW_TYPE_TEXT_TOO_LONG}
+    )
+
+
 @router.post("/whatsapp")
 async def receive_whatsapp(
     response: Response,
@@ -153,10 +161,15 @@ async def receive_whatsapp(
     correlation_id = current_context().correlation_id or new_id()
     messages: list[InboundMessageV1] = []
     for item in inbound:
-        if item.kind == "text" and len(item.message) > settings.message_max_chars:
-            logger.warning("Mensagem muito longa ignorada de %s", safe_phone(item.phone))
-            continue
         try:
+            if item.kind == "text" and len(item.message) > settings.message_max_chars:
+                # Antes era descartado em silencio: o usuario ficava sem resposta
+                # e sem saber que o lancamento nao entrou. Vai para a fila como
+                # nao suportado — sem o texto — para o consumer responder.
+                metrics.incr("webhook_text_too_long")
+                logger.warning("Mensagem muito longa recusada de %s", safe_phone(item.phone))
+                messages.append(_too_long_contract(item, correlation_id))
+                continue
             messages.append(to_contract(item, correlation_id))
         except ValidationError as exc:
             # Item que nunca vai validar: texto só com espaços (o `parse_inbound`
@@ -200,12 +213,20 @@ async def receive_whatsapp(
 async def _handle_legacy(inbound: list[InboundMessage]) -> None:
     """Caminho antigo: buffer em processo + tasks de background."""
     from ..services.media_processor import media_processor
+    from ..services.media_resolver import text_too_long_message
     from ..services.message_buffer import message_buffer
+    from ..services.message_processor import message_processor
 
     for item in inbound:
         if item.kind == "text":
             if len(item.message) > settings.message_max_chars:
-                logger.warning("Mensagem muito longa ignorada")
+                metrics.incr("webhook_text_too_long")
+                logger.warning("Mensagem muito longa recusada")
+                _schedule(
+                    message_processor.respond(
+                        item.phone, text_too_long_message(settings.message_max_chars)
+                    )
+                )
                 continue
             await message_buffer.add(
                 item.phone,

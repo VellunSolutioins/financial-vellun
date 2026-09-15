@@ -134,7 +134,7 @@ Agrupamento (debounce) de mensagens fragmentadas:
 | `MESSAGE_BUFFER_MAX_AGE_SECONDS`    | `30`     | Idade máxima do grupo, contada da **primeira** mensagem          |
 | `CONVERSATION_CONTEXT_MESSAGE_LIMIT`| `15`     | Máximo de mensagens de histórico enviadas ao LLM                 |
 | `CONVERSATION_CONTEXT_MAX_CHARS`    | `4000`   | Limite de caracteres do prompt de contexto                       |
-| `MESSAGE_MAX_CHARS`                 | `2000`   | Tamanho máximo de uma mensagem recebida (acima disso é ignorada) |
+| `MESSAGE_MAX_CHARS`                 | `2000`   | Tamanho máximo de uma mensagem recebida (acima disso não é processada e o usuário recebe resposta com o limite) |
 
 Somente para `MESSAGE_PIPELINE=legacy` (buffer em processo, será removido):
 

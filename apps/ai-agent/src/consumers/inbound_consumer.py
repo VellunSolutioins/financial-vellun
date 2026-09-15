@@ -36,11 +36,21 @@ from ..messaging.base import (
     PermanentError,
     TransientError,
 )
-from ..messaging.contracts import InboundMessageV1, ProcessingJobV1, derive_job_id
+from ..config import settings
+from ..messaging.contracts import (
+    RAW_TYPE_TEXT_TOO_LONG,
+    InboundMessageV1,
+    ProcessingJobV1,
+    derive_job_id,
+)
 from ..observability.logging import log_context
 from ..services.audit_service import audit_service
 from ..services.contact_service import contact_service
-from ..services.media_resolver import UNSUPPORTED_MEDIA_MESSAGE, media_resolver
+from ..services.media_resolver import (
+    UNSUPPORTED_MEDIA_MESSAGE,
+    media_resolver,
+    text_too_long_message,
+)
 from ..services.message_processor import NOT_LINKED_MESSAGE, message_processor
 from ..services.metrics import metrics
 from ..services.subscription_gate import subscription_gate
@@ -85,6 +95,12 @@ class InboundMessageConsumer:
             phone=message.phone,
         ):
             metrics.incr("messages_consumed")
+            if message.kind == "unsupported" and message.raw_type == RAW_TYPE_TEXT_TOO_LONG:
+                metrics.incr("message_too_long")
+                await message_processor.respond(
+                    message.phone, text_too_long_message(settings.message_max_chars)
+                )
+                return
             if message.kind == "unsupported":
                 metrics.incr("media_unsupported")
                 await message_processor.respond(message.phone, UNSUPPORTED_MEDIA_MESSAGE)

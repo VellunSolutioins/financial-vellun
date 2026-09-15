@@ -371,3 +371,23 @@ async def test_tipo_nao_suportado_responde_e_nao_cria_job(broker, consumer, grou
     assert len(replies) == 1
     assert await group_store.peek("+5541999999999") == []
     assert broker.published[ROUTE_PROCESSING] == []
+
+
+async def test_texto_longo_demais_responde_com_o_limite(
+    broker, consumer, group_store, replies, monkeypatch
+):
+    from src.config import settings
+
+    monkeypatch.setattr(settings, "message_max_chars", 2000)
+    await publish(
+        broker,
+        InboundMessageV1(phone="+5541999999999", kind="unsupported", raw_type="text_too_long"),
+    )
+    await broker.drain()
+
+    [(phone, texto)] = replies
+    assert phone == "+5541999999999"
+    # Resposta própria, e não a de "tipo de mídia não suportado".
+    assert "2000 caracteres" in texto
+    assert await group_store.peek("+5541999999999") == []
+    assert broker.published[ROUTE_PROCESSING] == []

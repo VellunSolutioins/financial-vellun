@@ -25,6 +25,16 @@ UNSUPPORTED_MEDIA_MESSAGE = (
     "Por enquanto só consigo processar texto, áudio e foto de comprovante 🙂. "
     "Esse tipo de mensagem ainda não é suportado."
 )
+
+
+def text_too_long_message(max_chars: int) -> str:
+    """Resposta ao texto que passou do limite, com o limite explicito."""
+    return (
+        f"Sua mensagem passou do limite de {max_chars} caracteres e não foi processada. "
+        "Pode resumir ou enviar o lançamento em uma mensagem mais curta?"
+    )
+
+
 DOWNLOAD_FALLBACK = "Não consegui baixar sua mídia. Pode tentar enviar novamente?"
 AUDIO_FALLBACK = (
     "Não consegui entender o áudio. Pode repetir mais devagar ou digitar o lançamento?"

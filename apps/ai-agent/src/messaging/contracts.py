@@ -42,6 +42,12 @@ class _VersionedMessage(BaseModel):
         return self.model_dump_json(by_alias=True)
 
 
+#: ``rawType`` de um texto recusado por passar de ``message_max_chars``. Vai como
+#: ``kind="unsupported"`` e sem o texto: o consumer responde ao usuario, e a fila
+#: nao carrega um conteudo que nunca sera processado.
+RAW_TYPE_TEXT_TOO_LONG = "text_too_long"
+
+
 class InboundMessageV1(_VersionedMessage):
     """Uma mensagem individual recebida no webhook, já normalizada."""
 

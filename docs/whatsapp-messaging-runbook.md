@@ -117,7 +117,7 @@ série por URL tentada.
 
 | Métrica                                                | Leitura                                                                                                           |
 | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
-| `webhook_received` / `publish_confirmed`               | divergência entre os dois indica mensagens descartadas antes de publicar (longas demais, ou payload sem mensagem) |
+| `webhook_received` / `publish_confirmed`               | divergência entre os dois indica itens descartados antes de publicar (payload sem mensagem, ou item inválido: `webhook_invalid_item`). Texto longo demais **é** publicado, como não suportado: veja `webhook_text_too_long` |
 | `publish_failed`                                       | o webhook devolveu `503`; o provedor vai reenviar                                                                 |
 | `webhook_latency_ms`                                   | inclui o _publisher confirm_. Subida sustentada = broker sob pressão                                              |
 | `messages_consumed` / `messages_duplicated`            | duplicadas altas são normais após um reenvio da Meta; sustentadas indicam ack lento                               |
