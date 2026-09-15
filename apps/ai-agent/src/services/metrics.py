@@ -58,6 +58,7 @@ KNOWN_COUNTERS = (
     "webhook_ignored",
     "webhook_invalid_signature",
     "webhook_text_too_long",
+    "webhook_invalid_item",
     "publish_confirmed",
     "publish_failed",
     # Consumo de entrada
@@ -82,6 +83,7 @@ KNOWN_COUNTERS = (
     "group_flushed",
     "group_flush_failed",
     "buffer_flush",
+    "group_lock_lost",
     # Processamento
     "jobs_published",
     "jobs_processed",
@@ -90,6 +92,7 @@ KNOWN_COUNTERS = (
     "messages_processed",
     "processing_error",
     "confirmation_requested",
+    "processing_lock_lost",
     # LLM e efeitos
     "llm_success",
     "llm_fallback",
@@ -106,6 +109,9 @@ KNOWN_COUNTERS = (
     "dlq_catalog_duplicated",
     "dlq_catalog_failed",
     "dlq_catalog_invalid_envelope",
+    # Reprocessamento pedido pelo painel de operacoes
+    "ops_reprocess_published",
+    "ops_reprocess_publish_failed",
 )
 
 #: Histogramas declarados na inicialização. A chave é o nome usado em

@@ -83,6 +83,31 @@ def test_observe_ms_converte_para_segundos(metrics: Metrics):
     assert "vellun_agent_llm_latency_seconds_count 1.0" in texto
 
 
+def test_todo_contador_usado_no_codigo_esta_declarado():
+    """O fallback abaixo não perde o dado, mas a série só nasce na primeira
+    ocorrência: `rate()` e `absent()` sobre ela respondem "sem dado" até lá. Foi
+    assim que `group_lock_lost` e `processing_lock_lost` — justamente os que
+    precisam de alerta — ficaram sem linha de base.
+
+    Checagem estática dos nomes literais em `metrics.incr("...")`. Nome montado em
+    tempo de execução (`f"media_{kind}"`) fica de fora e precisa ser declarado à
+    mão.
+    """
+    import re
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parent.parent / "src"
+    padrao = re.compile(r'metrics\.incr\(\s*"([a-z0-9_]+)"')
+    usados = {
+        nome
+        for arquivo in src.rglob("*.py")
+        for nome in padrao.findall(arquivo.read_text(encoding="utf-8"))
+    }
+
+    assert usados, "nenhum uso encontrado: o padrão da busca quebrou"
+    assert sorted(usados - set(KNOWN_COUNTERS)) == []
+
+
 def test_contador_nao_declarado_e_criado_sob_demanda(metrics: Metrics):
     # Esquecer um nome em KNOWN_COUNTERS não deve perder o dado. O nome vem
     # sempre do código, então não há risco de explosão de séries.
