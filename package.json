@@ -11,6 +11,7 @@
     "api:dev": "pnpm --filter @financial-vellun/api dev",
     "web:dev": "pnpm --filter @financial-vellun/web dev",
     "agent:dev": "node apps/ai-agent/scripts/run-python.mjs -m uvicorn src.main:app --reload --port 8010",
+    "agent:worker": "node apps/ai-agent/scripts/run-python.mjs -m src.worker",
     "db:up": "docker compose -f infra/docker/docker-compose.yml up -d",
     "db:down": "docker compose -f infra/docker/docker-compose.yml down",
     "prisma:generate": "pnpm --filter @financial-vellun/api prisma:generate",
@@ -18,9 +19,17 @@
     "prisma:studio": "pnpm --filter @financial-vellun/api prisma:studio",
     "prisma:seed": "pnpm --filter @financial-vellun/api db:seed",
     "lint": "eslint . --ext .ts,.tsx,.js,.jsx",
+    "typecheck": "pnpm --filter @financial-vellun/api exec tsc --noEmit -p tsconfig.build.json",
+    "test": "pnpm --filter @financial-vellun/api test && pnpm test:agent",
+    "test:agent": "node apps/ai-agent/scripts/run-python.mjs -m pytest -q",
     "lint:workspaces": "pnpm -r --if-present lint",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "infra:up": "docker compose -f infra/docker/docker-compose.yml up -d",
+    "infra:down": "docker compose -f infra/docker/docker-compose.yml down",
+    "obs:check": "node infra/observability/check.mjs",
+    "obs:up": "docker compose -f infra/docker/docker-compose.yml -f infra/observability/docker-compose.observability.yml up -d",
+    "obs:down": "docker compose -f infra/docker/docker-compose.yml -f infra/observability/docker-compose.observability.yml down"
   },
   "engines": {
     "node": ">=20",

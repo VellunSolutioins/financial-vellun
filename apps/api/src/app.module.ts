@@ -17,6 +17,8 @@ import { TransactionsModule } from './transactions/transactions.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { InternalModule } from './internal/internal.module';
 import { BillingModule } from './billing/billing.module';
+import { ObservabilityModule } from './observability/observability.module';
+import { OpsModule } from './ops/ops.module';
 
 @Module({
   imports: [
@@ -28,6 +30,9 @@ import { BillingModule } from './billing/billing.module';
     // Rate limiting global: 120 req/min por IP (rotas sensíveis sobrescrevem).
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }]),
     PrismaModule,
+    // Antes dos módulos de domínio: o middleware de correlação precisa ser o
+    // primeiro da cadeia para que nenhum log fique sem `correlationId`.
+    ObservabilityModule,
     AuthModule,
     UsersModule,
     CategoriesModule,
@@ -37,6 +42,7 @@ import { BillingModule } from './billing/billing.module';
     DashboardModule,
     InternalModule,
     BillingModule,
+    OpsModule,
   ],
   controllers: [AppController],
   providers: [

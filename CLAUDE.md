@@ -13,6 +13,7 @@ Monorepo iniciado em 2026-06-17. Aplicação de controle financeiro para **pesso
 | AI Agent  | Python + FastAPI (`apps/ai-agent`)                  |
 | Shared    | TypeScript + Zod (`packages/shared`)                |
 | Config    | TS / ESLint / Prettier compartilhados (`packages/config`) |
+| Mensageria| RabbitMQ (broker durável) + Redis (estado distribuído) |
 | Monorepo  | pnpm workspaces                                     |
 | Language  | TypeScript (strict) + Python 3.11                   |
 
@@ -28,8 +29,8 @@ financial-vellun/
 │   ├── shared/         # @financial-vellun/shared — tipos, enums e schemas Zod
 │   └── config/         # @financial-vellun/config — tsconfig/eslint/prettier base
 ├── infra/
-│   └── docker/         # docker-compose.yml (PostgreSQL)
-├── docs/               # technical-requirements.md, implementation-prompts.md
+│   └── docker/         # docker-compose.yml (PostgreSQL + RabbitMQ + Redis)
+├── docs/               # requisitos, runbook e ADRs (docs/adrs/)
 ├── package.json        # raiz: scripts dev/db/lint/format
 ├── pnpm-workspace.yaml
 ├── tsconfig.json       # raiz (references)
@@ -40,11 +41,19 @@ financial-vellun/
 ## Estrutura interna dos apps
 
 ```
-apps/api/src/        accounts/ auth/ categories/ contacts/ dashboard/
-                     internal/ transactions/ users/ prisma/ (cada módulo: *.module/*.controller/*.service + dto/)
+apps/api/src/        accounts/ auth/ billing/ categories/ contacts/ dashboard/
+                     internal/ notifications/ observability/ ops/ transactions/ users/
+                     prisma/ (cada módulo: *.module/*.controller/*.service + dto/)
+                     observability/ (métricas, health, correlação, log estruturado)
+                     ops/ (auth GitHub OAuth, audit append-only, operators)
 apps/web/src/        app/ components/ contexts/ hooks/ lib/ middleware.ts
                      app/(auth)/{login,cadastro}  app/app/{pessoal,empresa,conta}
-apps/ai-agent/src/   main.py config.py routers/ schemas/ services/
+                     app/ops/ (área de operações — sessão e cliente HTTP próprios)
+apps/ai-agent/src/   main.py worker.py bootstrap.py config.py
+                     routers/ schemas/ services/
+                     messaging/ (contracts, base, rabbitmq/, inmemory)
+                     consumers/ (inbound, processing)  grouping/
+                     observability/ (logging, middleware de correlação, worker_server)
 ```
 
 ## Commands
@@ -52,11 +61,12 @@ apps/ai-agent/src/   main.py config.py routers/ schemas/ services/
 ```bash
 pnpm install                       # instalar dependências Node
 pnpm dev                           # db:up + api + web + agent em paralelo (concurrently)
-pnpm db:up                         # subir PostgreSQL via Docker
-pnpm db:down                       # parar o container do banco
+pnpm db:up                         # subir PostgreSQL + RabbitMQ + Redis via Docker
+pnpm db:down                       # parar os containers de infraestrutura
 pnpm api:dev                       # apenas API (porta 3001)
 pnpm web:dev                       # apenas frontend (porta 3000)
 pnpm agent:dev                     # apenas agente de IA (porta 8010, usa .venv\Scripts\python.exe)
+pnpm agent:worker                  # apenas os consumers das filas (sem HTTP)
 pnpm lint                          # ESLint em todo o repo
 pnpm format                        # aplicar Prettier
 pnpm format:check                  # checar formatação
@@ -67,13 +77,25 @@ pnpm --filter @financial-vellun/api exec prisma migrate reset    # resetar (dev)
 pnpm --filter @financial-vellun/api db:seed                      # categorias padrão + usuário demo
 ```
 
-| Serviço  | URL                            |
-| -------- | ------------------------------ |
-| Web      | http://localhost:3000          |
-| API      | http://localhost:3001          |
-| Swagger  | http://localhost:3001/api/docs |
-| AI Agent | http://localhost:8010          |
-| Health   | http://localhost:8010/health   |
+| Serviço              | URL                                        |
+| -------------------- | ------------------------------------------ |
+| Web                  | http://localhost:3000                      |
+| Operações (painel)   | http://localhost:3000/ops                  |
+| API                  | http://localhost:3001                      |
+| Swagger              | http://localhost:3001/api/docs             |
+| AI Agent             | http://localhost:8010                      |
+| RabbitMQ             | http://localhost:15672 (guest/guest)       |
+
+**Observabilidade** — os três serviços expõem o mesmo trio. `/metrics` é texto
+Prometheus e exige `Authorization: Bearer ${METRICS_TOKEN}`; `/metrics.json` (só
+no agente) preserva o shape antigo `{counters, timings}` usado por
+`scripts/monitor.py` e `scripts/loadtest.py`.
+
+| Serviço              | Liveness / Readiness                    | Métricas                        |
+| -------------------- | --------------------------------------- | ------------------------------- |
+| API                  | :3001/health/live · :3001/health/ready  | :3001/metrics                   |
+| AI Agent             | :8010/health/live · :8010/health/ready  | :8010/metrics · /metrics.json   |
+| AI Agent (worker)    | :8011/health/live · :8011/health/ready  | :8011/metrics · /metrics.json   |
 
 ### Agente de IA (Python)
 
@@ -83,6 +105,10 @@ A venv é dedicada a `apps/ai-agent`. **Não recrie `.venv` por cima** se ela j�
 cd apps/ai-agent
 python -m venv .venv                          # apenas na primeira vez
 .venv\Scripts\python.exe -m pip install -e .  # instalar deps na própria venv
+
+# Testes: os de integração exigem RabbitMQ + Redis no ar e ficam de fora por padrão
+.venv\Scripts\python.exe -m pytest -q
+.venv\Scripts\python.exe -m pytest -m integration -q
 ```
 
 ## Conventions
@@ -94,6 +120,12 @@ python -m venv .venv                          # apenas na primeira vez
 - API (NestJS): um diretório por domínio com `*.module.ts`, `*.controller.ts`, `*.service.ts` e `dto/`; validação com **class-validator** nos DTOs; documentar com `@ApiProperty` (Swagger)
 - Web (Next.js App Router): rotas em `app/`, componentes shadcn/ui em `components/ui`, cliente de API em `lib/api-client.ts`, auth em `contexts/auth-context.tsx` + `lib/auth.ts`
 - AI Agent (FastAPI): rotas em `routers/`, contratos em `schemas/`, lógica em `services/`
+- Mensageria: o domínio **nunca** importa `aio_pika`. Todo acesso ao broker passa por
+  `src/messaging/base.py`; o driver concreto fica em `src/messaging/rabbitmq/`.
+  Contratos publicados em filas vivem em `src/messaging/contracts.py`, com
+  `schemaVersion` e aliases camelCase
+- O webhook do WhatsApp só valida, normaliza e publica: nada de chamada à API principal,
+  banco, OpenAI ou download de mídia dentro do request HTTP
 - Variáveis sensíveis sempre em `.env` (nunca commitar); `INTERNAL_API_KEY` deve ser idêntica entre API e agente de IA
 
 ## Obrigatório
@@ -181,12 +213,14 @@ Em modo edição, converter o valor vindo da API para display antes de passar ao
 | ---- | ------ | ------ |
 | **1 — Fundação** | ✅ Completo | Monorepo, schema Prisma, bootstrap dos apps, Docker |
 | **2 — Produto Pessoal** | ✅ Completo | Auth JWT, perfis, CRUD de contas/categorias/lançamentos, dashboard |
-| **3 — IA e WhatsApp** | 🔜 Pendente | Webhook, extração de intenção, integração LLM |
+| **3 — IA e WhatsApp** | ✅ Em andamento | Webhook, extração de intenção, integração LLM, pipeline durável (RabbitMQ + Redis) |
 | **4 — Pessoa Jurídica** | ✅ Em andamento | Dashboard empresarial, contas a pagar/receber, clientes/fornecedores, categorias |
 | **5 — Evolução (pós-MVP)** | 🔜 Pendente | Recorrência, metas, relatórios, importação de extratos |
 
 ## Documentação
 
+- [ADRs — decisões arquiteturais](docs/adrs/README.md)
+- [Runbook do pipeline WhatsApp](docs/whatsapp-messaging-runbook.md)
 - [Requisitos técnicos](docs/technical-requirements.md)
 - [Prompts de implementação](docs/implementation-prompts.md)
 - [README](README.md) — setup detalhado, variáveis de ambiente e troubleshooting

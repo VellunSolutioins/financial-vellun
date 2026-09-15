@@ -94,35 +94,75 @@ Messenger (resposta ao usuário — ver [factory](apps/ai-agent/src/services/mes
 | `WHATSAPP_API_BASE_URL`    | `https://graph.facebook.com/v18.0`  | Base da Graph API da Meta                                       |
 | `WHATSAPP_WEBHOOK_SECRET`  | —                                   | Segredo HMAC-SHA256 para validar webhooks (**obrigatório em produção**) |
 
-Buffer / debounce de mensagens fragmentadas:
+Pipeline de mensageria (broker durável):
+
+| Variável                          | Padrão                                 | Descrição                                                                 |
+| --------------------------------- | -------------------------------------- | ------------------------------------------------------------------------- |
+| `MESSAGE_PIPELINE`                | `broker`                               | `broker` (webhook publica em fila) \| `legacy` (buffer em processo, rollback) |
+| `MESSAGE_BROKER`                  | `rabbitmq`                             | `rabbitmq` \| `inmemory` (dev sem Docker; **não é durável**)              |
+| `RABBITMQ_URL`                    | `amqp://guest:guest@localhost:5672/`   | Conexão com o broker                                                       |
+| `RABBITMQ_INBOUND_QUEUE`          | `whatsapp.inbound.v1`                  | Fila das mensagens individuais                                             |
+| `RABBITMQ_PROCESSING_QUEUE`       | `whatsapp.processing.v1`               | Fila dos jobs consolidados por telefone                                    |
+| `RABBITMQ_PREFETCH`               | `10`                                   | Mensagens não ackadas entregues por canal de consumo                       |
+| `INBOUND_CONSUMER_CONCURRENCY`    | `5`                                    | Jobs simultâneos no consumer de entrada                                    |
+| `PROCESSING_CONSUMER_CONCURRENCY` | `3`                                    | Jobs simultâneos no consumer de processamento (limita chamadas à OpenAI)   |
+| `MESSAGE_MAX_RETRIES`             | `5`                                    | Tentativas antes de mandar para a DLQ                                      |
+| `MESSAGE_RETRY_BASE_SECONDS`      | `1.0`                                  | Base do backoff (`base * 2^tentativa`, com jitter)                         |
+| `MESSAGE_RETRY_MAX_SECONDS`       | `300.0`                                | Teto do backoff                                                            |
+| `RUN_CONSUMERS_IN_API`            | `true`                                 | `false` = a API só publica; consumo em `pnpm agent:worker`                 |
+| `SHUTDOWN_DRAIN_SECONDS`          | `20.0`                                 | Espera pelo que está em voo antes de devolver à fila no shutdown           |
+
+Estado distribuído (Redis) — agrupamento, locks e estado de conversa:
+
+| Variável                          | Padrão                     | Descrição                                                     |
+| --------------------------------- | -------------------------- | ------------------------------------------------------------- |
+| `REDIS_URL`                       | `redis://localhost:6379/0` | Conexão Redis                                                  |
+| `GROUP_STORE_BACKEND`             | `redis`                    | `redis` \| `memory` (agrupamento, locks e marcadores de job)  |
+| `CONVERSATION_STATE_BACKEND`      | `redis`                    | `redis` \| `memory` (confirmações pendentes)                  |
+| `CONVERSATION_STATE_TTL_SECONDS`  | `1800`                     | TTL da confirmação pendente                                    |
+| `PROCESSING_LOCK_TTL_SECONDS`     | `120`                      | TTL do lock por telefone durante o processamento               |
+| `JOB_DEDUPE_TTL_SECONDS`          | `86400`                    | Janela de deduplicação por `jobId`                             |
+| `REDIS_LOCK_TTL_SECONDS`          | `30`                       | TTL do lock durante a consolidação do grupo                    |
+| `WORKER_POLL_INTERVAL_SECONDS`    | `1.0`                      | Intervalo de polling do worker de agrupamento                  |
+
+Agrupamento (debounce) de mensagens fragmentadas:
 
 | Variável                            | Padrão   | Descrição                                                        |
 | ----------------------------------- | -------- | ---------------------------------------------------------------- |
-| `MESSAGE_BUFFER_BACKEND`            | `memory` | `memory` (dev/single-instance) \| `redis` (produção/multi-instância) |
 | `MESSAGE_BUFFER_DEBOUNCE_SECONDS`   | `5`      | Janela de espera para agrupar mensagens do mesmo telefone        |
-| `MESSAGE_BUFFER_MAX_MESSAGES`       | `10`     | Flush imediato ao atingir N mensagens na janela                  |
-| `MESSAGE_BUFFER_MAX_AGE_SECONDS`    | `30`     | Idade máxima da janela antes do flush forçado                    |
+| `MESSAGE_BUFFER_MAX_MESSAGES`       | `10`     | Consolida imediatamente ao atingir N mensagens na janela         |
+| `MESSAGE_BUFFER_MAX_AGE_SECONDS`    | `30`     | Idade máxima do grupo, contada da **primeira** mensagem          |
 | `CONVERSATION_CONTEXT_MESSAGE_LIMIT`| `15`     | Máximo de mensagens de histórico enviadas ao LLM                 |
 | `CONVERSATION_CONTEXT_MAX_CHARS`    | `4000`   | Limite de caracteres do prompt de contexto                       |
-| `MESSAGE_MAX_CHARS`                 | `2000`   | Tamanho máximo de uma mensagem recebida (webhook rejeita acima)  |
+| `MESSAGE_MAX_CHARS`                 | `2000`   | Tamanho máximo de uma mensagem recebida (acima disso não é processada e o usuário recebe resposta com o limite) |
 
-Redis / fila distribuída (apenas quando `MESSAGE_BUFFER_BACKEND=redis`):
+Somente para `MESSAGE_PIPELINE=legacy` (buffer em processo, será removido):
 
-| Variável                            | Padrão                      | Descrição                                          |
-| ----------------------------------- | --------------------------- | -------------------------------------------------- |
-| `REDIS_URL`                         | `redis://localhost:6379/0`  | Conexão Redis                                      |
-| `REDIS_LOCK_TTL_SECONDS`            | `30`                        | TTL do lock distribuído por telefone               |
-| `WORKER_POLL_INTERVAL_SECONDS`      | `1.0`                       | Intervalo de polling do worker de flush            |
-| `MESSAGE_BUFFER_MAX_RETRIES`        | `3`                         | Tentativas de processamento antes de ir para a DLQ |
-| `MESSAGE_BUFFER_RETRY_BASE_SECONDS` | `1.0`                       | Base do backoff exponencial entre tentativas       |
+| Variável                            | Padrão   | Descrição                                          |
+| ----------------------------------- | -------- | -------------------------------------------------- |
+| `MESSAGE_BUFFER_BACKEND`            | `memory` | `memory` \| `redis`                                |
+| `MESSAGE_BUFFER_MAX_RETRIES`        | `3`      | Tentativas antes de ir para a DLQ do buffer antigo |
+| `MESSAGE_BUFFER_RETRY_BASE_SECONDS` | `1.0`    | Base do backoff do buffer antigo                   |
 
-### 3. Iniciar o banco de dados
+### 3. Iniciar a infraestrutura local
 
 ```bash
-pnpm db:up
+pnpm db:up   # PostgreSQL + RabbitMQ + Redis
 ```
 
-Aguarde o container ficar saudável (`docker ps` deve mostrar `healthy`).
+Aguarde os três containers ficarem saudáveis:
+
+```bash
+docker compose -f infra/docker/docker-compose.yml ps
+# financial-vellun-db         Up (healthy)
+# financial-vellun-rabbitmq   Up (healthy)
+# financial-vellun-redis      Up (healthy)
+```
+
+O painel do RabbitMQ fica em http://localhost:15672 (`guest`/`guest`), e é por
+onde você inspeciona filas, retries e DLQ. Usuário e senha vêm de
+`RABBITMQ_USER`/`RABBITMQ_PASSWORD` em `infra/docker/.env`.
+
 
 ### 4. Criar as tabelas e popular dados iniciais
 
@@ -210,53 +250,141 @@ pnpm web:dev
 pnpm agent:dev
 ```
 
-| Serviço    | URL                                      |
-| ---------- | ---------------------------------------- |
-| Web        | http://localhost:3000                    |
-| API        | http://localhost:3001                    |
-| Swagger    | http://localhost:3001/api/docs           |
-| AI Agent   | http://localhost:8010                    |
-| Health     | http://localhost:8010/health             |
-| Métricas   | http://localhost:8010/metrics            |
+| Serviço            | URL                                 |
+| ------------------ | ----------------------------------- |
+| Web                | http://localhost:3000               |
+| API                | http://localhost:3001               |
+| Swagger            | http://localhost:3001/api/docs      |
+| AI Agent           | http://localhost:8010               |
+| Liveness           | http://localhost:8010/health/live   |
+| Readiness          | http://localhost:8010/health/ready  |
+| Métricas           | http://localhost:8010/metrics       |
+| Painel do RabbitMQ | http://localhost:15672 (guest/guest) |
+
+> O `pnpm dev` sobe os consumers junto com a API (`RUN_CONSUMERS_IN_API=true`).
+> Para escalar o processamento separadamente, use `pnpm agent:worker`.
 
 ---
 
 ## Arquitetura de processamento de mensagens (WhatsApp + IA)
 
-O fluxo do agente foi desenhado para o uso real do WhatsApp, onde o usuário
-fragmenta uma instrução em várias mensagens curtas ("gastei" / "47,50" /
-"no mercado") e responde a perguntas anteriores ("Nubank").
+O fluxo foi desenhado para o uso real do WhatsApp, onde o usuário fragmenta uma
+instrução em várias mensagens curtas ("gastei" / "47,50" / "no mercado") e
+responde a perguntas anteriores ("Nubank"). O webhook **só recebe e publica**;
+todo o resto roda em consumers, fora do ciclo HTTP.
 
 ```
-Webhook  ──►  Buffer/Debounce  ──►  Worker/Processor  ──►  IA (LLM + histórico)  ──►  Lançamento
-(valida +     (agrupa por           (consolida e           (contexto: categorias,     (cria via API
- bufferiza)    telefone, debounce)   processa fora          contas, histórico recente)  interna)
-                                     do request)
+Meta ──► POST /webhook/whatsapp ──► assinatura ──► normaliza ──► publish confirmado ──► 202
+                                                                        │
+                                                            whatsapp.inbound.v1
+                                                                        │
+                                                          InboundMessageConsumer
+                                    ┌───────────────────────────────────┴──────────────┐
+                            texto / áudio (transcrito)                          imagem (visão)
+                                    │                                                  │
+                        persiste AiMessage (idempotente)                    persiste AiMessage
+                                    │                                                  │
+                        agrupamento Redis por telefone                        job próprio direto
+                                    │                                                  │
+                                    └──────────► whatsapp.processing.v1 ◄──────────────┘
+                                                            │
+                                              MessageProcessingConsumer
+                                    (lock por telefone → contato → assinatura →
+                                     contexto → IA → confirmação → lançamento →
+                                     resposta WhatsApp → outbound)
 ```
 
-1. **Ingestão rápida** — `POST /webhook/whatsapp` valida assinatura/payload,
-   persiste a mensagem inbound, enfileira no buffer e responde
-   `{"status":"accepted"}` imediatamente. Nenhuma chamada de IA acontece no
-   request. Ver [webhook.py](apps/ai-agent/src/routers/webhook.py).
-2. **Buffer/debounce por telefone** — mensagens do mesmo número são agrupadas
-   numa janela (`MESSAGE_BUFFER_DEBOUNCE_SECONDS`); o flush ocorre por debounce,
-   por `MAX_MESSAGES` ou por `MAX_AGE`. Telefones distintos são isolados por lock.
-   Ver [message_buffer.py](apps/ai-agent/src/services/message_buffer.py).
-3. **Processamento assíncrono** — o [message_processor.py](apps/ai-agent/src/services/message_processor.py)
-   consolida as mensagens, resolve o contato, classifica a intenção, cria o
-   lançamento (ou pede confirmação) e envia a resposta via `messenger`.
-4. **Contexto conversacional** — a IA recebe o histórico recente da conversa
-   (via `GET /internal/whatsapp/contacts/:phone/messages`) para interpretar
-   respostas curtas e correções. Ver [conversation_history_service.py](apps/ai-agent/src/services/conversation_history_service.py).
-5. **Idempotência** — `providerMessageId` é único em `ai_messages`; o reenvio do
-   mesmo webhook não duplica mensagem nem lançamento.
+1. **Webhook** ([webhook.py](apps/ai-agent/src/routers/webhook.py)) — lê o corpo
+   bruto, valida `X-Hub-Signature-256`, normaliza o payload e publica cada
+   mensagem em `whatsapp.inbound.v1`. Responde `202 Accepted` **depois** do
+   *publisher confirm*, ou `503` se não puder garantir a publicação. Não chama a
+   API principal, o banco, a OpenAI, nem baixa mídia.
+2. **Consumer de entrada** ([inbound_consumer.py](apps/ai-agent/src/consumers/inbound_consumer.py))
+   — persiste a `AiMessage` de forma idempotente, baixa e transcreve áudio /
+   aplica visão em comprovantes, e grava o texto no agrupamento por telefone.
+3. **Agrupamento** ([grouping/](apps/ai-agent/src/grouping/)) — debounce de 5 s,
+   no máximo 10 mensagens, idade máxima de 30 s, com lock distribuído por
+   telefone. Publica a mensagem consolidada em `whatsapp.processing.v1` e só
+   limpa o buffer **depois** do confirm.
+4. **Consumer de processamento** ([processing_consumer.py](apps/ai-agent/src/consumers/processing_consumer.py))
+   — resolve contato, valida assinatura, monta o contexto, classifica a
+   intenção, cria o lançamento (ou pede confirmação) e responde ao usuário.
+5. **Estado de conversa** — confirmações pendentes ficam no Redis com TTL, então
+   sobrevivem a restart e funcionam entre instâncias.
 
-**Backends de buffer:**
+### Filas
 
-- `memory` (padrão) — `asyncio` em processo único. Ideal para desenvolvimento.
-  Não sobrevive a restart e não suporta múltiplas instâncias.
-- `redis` — buffer/lock distribuídos + worker com **retry/backoff e DLQ**.
-  Necessário em produção com mais de uma instância. Ver [redis_buffer.py](apps/ai-agent/src/services/redis_buffer.py).
+| Fila | Papel |
+| ---- | ----- |
+| `whatsapp.inbound.v1` | mensagens individuais publicadas pelo webhook |
+| `whatsapp.processing.v1` | mensagens já consolidadas por telefone |
+| `whatsapp.{inbound,processing}.retry.{1,4,16,60,300}s` | buckets de retry com TTL e dead-letter de volta à fila de origem |
+| `whatsapp.{inbound,processing}.dlq` | falhas permanentes ou tentativas esgotadas |
+
+Tudo é declarado `durable`, as mensagens são publicadas como persistentes e o
+consumo usa ack manual: uma mensagem só é ackada quando o efeito da etapa está
+duravelmente concluído.
+
+### Idempotência
+
+| Nível             | Chave                                  | Onde                                                 |
+| ----------------- | -------------------------------------- | ---------------------------------------------------- |
+| Entrada           | `providerMessageId`                    | `ai_messages.provider_message_id` (único)            |
+| Job consolidado   | `jobId` derivado de `sourceMessageIds` | marcador `job:done:{jobId}` no Redis                 |
+| Efeitos no banco  | `idempotencyKey` (= `jobId`)           | `transactions.idempotency_key` e                     |
+|                   |                                        | `ai_extracted_transactions.idempotency_key` (únicos) |
+
+Os três são necessários: um timeout **depois** de a escrita ter acontecido só é
+coberto pelo terceiro nível, no banco. Deduplicar também a extração é o que
+impede que o retry deixe uma `AiExtractedTransaction` órfã — a criação do
+lançamento é deduplicada antes e não chegaria a vinculá-la.
+
+### Publicar uma mensagem de teste
+
+```bash
+# Payload simplificado de desenvolvimento
+curl -i -X POST http://localhost:8010/webhook/whatsapp \
+  -H "Content-Type: application/json" \
+  -d '{"phone":"+5541999999999","message":"gastei 47,50 no mercado","message_id":"wamid.teste-1"}'
+# esperado: HTTP/1.1 202 Accepted  {"status":"accepted","published":1}
+```
+
+Com `WHATSAPP_WEBHOOK_SECRET` configurado, a assinatura é obrigatória:
+
+```bash
+BODY='{"phone":"+5541999999999","message":"gastei 10","message_id":"wamid.teste-2"}'
+SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$WHATSAPP_WEBHOOK_SECRET" | awk '{print $2}')
+curl -i -X POST http://localhost:8010/webhook/whatsapp \
+  -H "Content-Type: application/json" -H "X-Hub-Signature-256: sha256=$SIG" -d "$BODY"
+```
+
+Acompanhe o caminho da mensagem em http://localhost:15672 (guest/guest) e em
+`GET /metrics`.
+
+### Runbook: DLQ, retries e reprocesso
+
+Ver [docs/whatsapp-messaging-runbook.md](docs/whatsapp-messaging-runbook.md).
+As decisões arquiteturais e o porquê de cada uma estão em
+[docs/adrs/](docs/adrs/README.md).
+
+### Rodando sem Docker
+
+Para desenvolver sem RabbitMQ e sem Redis, todo o pipeline roda em um processo:
+
+```bash
+MESSAGE_BROKER=inmemory
+GROUP_STORE_BACKEND=memory
+CONVERSATION_STATE_BACKEND=memory
+```
+
+**Não é durável** — nada sobrevive a restart. Use apenas em desenvolvimento.
+
+### Rollback para o caminho antigo
+
+`MESSAGE_PIPELINE=legacy` reativa o buffer em processo
+([message_buffer.py](apps/ai-agent/src/services/message_buffer.py)), sem broker.
+Serve como rede de segurança por uma release; ver
+[ADR 0009](docs/adrs/0009-rollout-por-flag-message-pipeline.md).
 
 ---
 
@@ -267,19 +395,39 @@ Webhook  ──►  Buffer/Debounce  ──►  Worker/Processor  ──►  IA 
 ```bash
 # AI Agent
 ENVIRONMENT=production
-WHATSAPP_WEBHOOK_SECRET=<segredo-forte>        # obrigatório: webhooks sem assinatura válida são rejeitados (401)
+WHATSAPP_WEBHOOK_SECRET=<segredo-forte>
 WHATSAPP_PROVIDER=cloud-api
-WHATSAPP_PROVIDER_TOKEN=<token-do-cloud-api>
+WHATSAPP_PROVIDER_TOKEN=<token-da-meta>
 WHATSAPP_PHONE_NUMBER_ID=<phone-number-id>
-MESSAGE_BUFFER_BACKEND=redis
-REDIS_URL=redis://<host>:6379/0
+WHATSAPP_VERIFY_TOKEN=<token-do-handshake>
 LLM_PROVIDER=openai
 OPENAI_API_KEY=<chave>
+
+# Pipeline de mensageria
+MESSAGE_PIPELINE=broker
+MESSAGE_BROKER=rabbitmq
+RABBITMQ_URL=amqp://<user>:<senha>@<host>:5672/
+RABBITMQ_PREFETCH=10
+INBOUND_CONSUMER_CONCURRENCY=5
+PROCESSING_CONSUMER_CONCURRENCY=3
+MESSAGE_MAX_RETRIES=5
+MESSAGE_RETRY_BASE_SECONDS=1.0
+MESSAGE_RETRY_MAX_SECONDS=300.0
+RUN_CONSUMERS_IN_API=false     # consumo em processos dedicados
+SHUTDOWN_DRAIN_SECONDS=20.0
+
+# Estado distribuído
+REDIS_URL=redis://<host>:6379/0
+GROUP_STORE_BACKEND=redis
+CONVERSATION_STATE_BACKEND=redis
+CONVERSATION_STATE_TTL_SECONDS=1800
+PROCESSING_LOCK_TTL_SECONDS=120
+JOB_DEDUPE_TTL_SECONDS=86400
 ```
 
-Em produção (`ENVIRONMENT=production`) o `WHATSAPP_WEBHOOK_SECRET` é
-**obrigatório** — sem ele o webhook recusa todas as requisições. Tokens e
-chaves nunca são gravados em log.
+Em produção, `ENVIRONMENT=production` também troca o log para **JSON
+estruturado** e passa a usar o **hash** do telefone (em vez da versão
+mascarada) nos logs.
 
 ### 2. Banco de dados (migrations)
 
@@ -301,26 +449,27 @@ pnpm --filter @financial-vellun/web build
 pnpm --filter @financial-vellun/web start
 ```
 
-### 4. Agente de IA com Redis
-
-O backend Redis exige o pacote opcional `redis`:
+### 4. Agente de IA: API e workers
 
 ```bash
 cd apps/ai-agent
+python -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
 
-# Windows
-.venv\Scripts\python.exe -m pip install -e .[redis]
-# Servir com uvicorn (sem --reload em produção; ajuste workers conforme a carga)
-.venv\Scripts\python.exe -m uvicorn src.main:app --host 0.0.0.0 --port 8010
-
-# Linux/macOS
-.venv/bin/python -m pip install -e '.[redis]'
+# Processo que recebe os webhooks (RUN_CONSUMERS_IN_API=false: só publica)
 .venv/bin/python -m uvicorn src.main:app --host 0.0.0.0 --port 8010
+
+# Processos que consomem as filas — escale este independentemente
+.venv/bin/python -m src.worker
 ```
 
-O worker do buffer Redis é iniciado/encerrado automaticamente pelo ciclo de
-vida da aplicação ([main.py](apps/ai-agent/src/main.py)). Jobs que falham após
-`MESSAGE_BUFFER_MAX_RETRIES` vão para a lista `dlq` no Redis.
+Ambos encerram de forma graciosa: param de receber, aguardam o que está em voo
+até `SHUTDOWN_DRAIN_SECONDS` e devolvem à fila o que não terminou. Nenhuma
+mensagem confirmada se perde num deploy.
+
+O `readiness` (`/health/ready`) falha com `503` quando o broker ou o Redis estão
+fora — aponte o health check do orquestrador para ele, e o `liveness`
+(`/health/live`) para o restart.
 
 ### 5. Observabilidade
 
@@ -343,6 +492,8 @@ vida da aplicação ([main.py](apps/ai-agent/src/main.py)). Jobs que falham apó
 pnpm --filter @financial-vellun/api test
 
 # Agente de IA (pytest) — a partir de apps/ai-agent
+# Testes de integração (RabbitMQ + Redis reais) ficam de fora por padrão;
+# rode-os com `-m integration` depois de `pnpm db:up`.
 # Windows
 cd apps/ai-agent && .venv\Scripts\python.exe -m pytest -q
 # Linux/macOS

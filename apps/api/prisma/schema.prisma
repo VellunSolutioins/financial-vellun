@@ -98,11 +98,55 @@ enum PaymentMethodType {
   credit_card
 }
 
+/// Ciclo de vida de um evento de webhook do PSP.
+///
+/// `failed` e `exhausted` sao estados **diferentes** de proposito: antes, toda
+/// falha gravava `failed`, e o painel nao conseguia distinguir "vai ser
+/// retentado sozinho" de "acabou" — o operador reprocessaria por cima de um
+/// retry em andamento. So `exhausted` e recuperavel pelo painel.
 enum WebhookEventStatus {
   received
   processing
   processed
   failed
+  exhausted
+}
+
+// ── Operações ───────────────────────────────────────────────────────────────
+
+/// Papel do operador na área de operações. `viewer` só lê, `operator` age sobre
+/// falhas, `ops_admin` administra operadores e permissões.
+enum OpsRole {
+  viewer
+  operator
+  ops_admin
+}
+
+/// Desfecho registrado na trilha de auditoria. `denied` existe para que uma
+/// tentativa recusada por autorização também deixe rastro.
+enum OpsAuditResult {
+  success
+  failure
+  denied
+}
+
+/// De qual DLQ a mensagem veio.
+enum OpsFailureSource {
+  whatsapp_inbound
+  whatsapp_processing
+}
+
+/// Ciclo de vida de uma falha no catálogo.
+///
+/// `reprocessing` é um estado real, não um detalhe: publicar e marcar não são
+/// atômicos, então uma falha entre os dois deixa a linha aqui, e um cron a
+/// reconcilia. Sem esse estado, o operador não distinguiria "estou tratando"
+/// de "ninguém tocou" e dois operadores reprocessariam o mesmo item.
+enum OpsFailureStatus {
+  pending
+  reprocessing
+  reprocessed
+  discarded
 }
 
 // ── Core ──────────────────────────────────────────────────────────────────────
@@ -225,6 +269,9 @@ model Transaction {
   status          TransactionStatus @default(confirmed)
   source          TransactionSource @default(manual)
   rawInput        String?           @map("raw_input")
+  // Chave de idempotencia da origem (ex.: jobId do pipeline do WhatsApp).
+  // Um retry apos timeout devolve o lancamento existente em vez de duplicar.
+  idempotencyKey  String?           @unique @map("idempotency_key")
   createdAt       DateTime          @default(now()) @map("created_at")
   updatedAt       DateTime          @updatedAt @map("updated_at")
 
@@ -323,6 +370,9 @@ model AiExtractedTransaction {
   extractedPayload Json               @map("extracted_payload")
   confidence       Float
   status           AiExtractionStatus @default(pending)
+  // Chave de idempotencia da origem (o `jobId` do pipeline do WhatsApp). Um
+  // retry reaproveita a extracao existente em vez de criar outra orfa.
+  idempotencyKey   String?            @unique @map("idempotency_key")
   createdAt        DateTime           @default(now()) @map("created_at")
   updatedAt        DateTime           @updatedAt @map("updated_at")
 
@@ -330,6 +380,8 @@ model AiExtractedTransaction {
   transaction   Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
   sourceMessage AiMessage?   @relation(fields: [sourceMessageId], references: [id], onDelete: SetNull)
 
+  @@index([transactionId])
+  @@index([userId])
   @@map("ai_extracted_transactions")
 }
 
@@ -371,8 +423,9 @@ model Subscription {
 
   user     User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   plan     Plan                @relation(fields: [planId], references: [id])
-  payments Payment[]
-  audits   SubscriptionAudit[]
+  payments      Payment[]
+  audits        SubscriptionAudit[]
+  webhookEvents PaymentWebhookEvent[]
 
   @@index([userId])
   @@index([status])
@@ -413,10 +466,33 @@ model PaymentWebhookEvent {
   processedAt      DateTime?          @map("processed_at")
   sanitizedPayload Json?              @map("sanitized_payload")
   lastError        String?            @map("last_error")
-  createdAt        DateTime           @default(now()) @map("created_at")
-  updatedAt        DateTime           @updatedAt @map("updated_at")
+
+  /// Quando a ultima tentativa comecou. Com `nextRetryAt`, responde "esta
+  /// parado ha quanto tempo?" sem depender de `updatedAt`, que muda por
+  /// qualquer escrita.
+  attemptedAt DateTime? @map("attempted_at")
+
+  /// Quando o cron deve tentar de novo. **E aqui que mora a durabilidade**: o
+  /// retry vivia em `setTimeout` no processo, e um deploy dentro da janela de
+  /// ~7,5s perdia o evento. Agendado no banco, ele sobrevive a reinicio.
+  nextRetryAt DateTime? @map("next_retry_at")
+
+  /// Assinatura correlacionada, preenchida quando o processamento a encontra.
+  /// Antes desta coluna a tabela era uma ilha: nao havia como perguntar "o que
+  /// aconteceu com esta assinatura" partindo dos eventos. Nula porque nem todo
+  /// evento correlaciona — e quando nao correlaciona, isso e a informacao.
+  subscriptionId String?       @map("subscription_id")
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([status])
+  /// A varredura do cron: eventos vencidos, por status.
+  @@index([status, nextRetryAt])
+  /// A listagem do painel ordena por data — sem isto, varredura completa.
+  @@index([receivedAt])
+  @@index([subscriptionId])
   @@map("payment_webhook_events")
 }
 
@@ -435,4 +511,139 @@ model SubscriptionAudit {
 
   @@index([subscriptionId])
   @@map("subscription_audits")
+}
+
+// ── Operações ───────────────────────────────────────────────────────────────
+
+/// Operador da área de operações, identificado pelo GitHub.
+///
+/// **Tabela separada de `users` por construção**: nenhum cliente do produto vira
+/// operador por ser admin da própria conta, porque não existe caminho de código
+/// entre as duas identidades. A sessão também é separada (cookie e segredo
+/// próprios), então um `access_token` de cliente nunca serve aqui.
+///
+/// O primeiro login entra como `viewer` **inativo** — um `ops_admin` precisa
+/// ativar. Pertencer à organização é condição necessária, não suficiente.
+model OpsOperator {
+  id           String  @id @default(uuid())
+  githubLogin  String  @unique @map("github_login")
+  githubUserId String  @unique @map("github_user_id")
+  name         String?
+  email        String?
+  role         OpsRole @default(viewer)
+
+  /// Permissão extra para ver dados sensíveis em claro (telefone, conteúdo de
+  /// mensagem). Separada do papel de propósito: `operator` reprocessa sem
+  /// precisar ler o conteúdo. Cada visualização gera linha de auditoria.
+  canViewSensitive Boolean @default(false) @map("can_view_sensitive")
+
+  active      Boolean   @default(false)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  lastLoginAt DateTime? @map("last_login_at")
+
+  auditEntries OpsAuditLog[]
+
+  @@map("ops_operators")
+}
+
+/// Trilha append-only das ações de operadores.
+///
+/// Sem `update` nem `delete` no service, e o usuário de banco da aplicação não
+/// recebe `DELETE` nesta tabela (ver a migration). A relação com `OpsOperator`
+/// é `Restrict` por omissão: apagar um operador com histórico é recusado pelo
+/// banco, em vez de levar a trilha embora.
+model OpsAuditLog {
+  id          String         @id @default(uuid())
+  operatorId  String         @map("operator_id")
+  action      String
+  targetType  String         @map("target_type")
+  targetId    String?        @map("target_id")
+  reason      String?
+  result      OpsAuditResult
+  /// Correlaciona as linhas de uma mesma operação (um lote, por exemplo).
+  operationId String         @map("operation_id")
+  beforeState Json?          @map("before_state")
+  afterState  Json?          @map("after_state")
+  createdAt   DateTime       @default(now()) @map("created_at")
+
+  operator OpsOperator @relation(fields: [operatorId], references: [id])
+
+  @@index([createdAt])
+  @@index([operatorId, createdAt])
+  @@index([operationId])
+  @@index([targetType, targetId])
+  @@map("ops_audit_log")
+}
+
+/// Catálogo de falhas definitivas do pipeline WhatsApp.
+///
+/// **A DLQ é transporte; esta tabela é a fonte de verdade do que falhou.** O
+/// RabbitMQ não oferece navegação arbitrária, paginação nem filtro: montar a tela
+/// lendo a DLQ transformaria cada abertura de página em consumo e republicação da
+/// fila. Um consumer dedicado drena as duas DLQs, grava aqui e só então acka.
+///
+/// Se esse consumer cair, as mensagens **se acumulam na DLQ** — nada se perde — e
+/// a profundidade da fila dispara o alerta.
+model OpsFailedMessage {
+  id String @id @default(uuid())
+
+  /// Identidade da falha, derivada do conteúdo do envelope (ver
+  /// `OpsFailedMessagesService.buildDedupeKey`). Existe porque o consumer pode
+  /// reentregar a mesma mensagem — um `nack` após uma gravação que expirou por
+  /// timeout, por exemplo — e sem ela a mesma falha viraria duas linhas no painel.
+  /// Uma falha **nova** da mesma mensagem gera chave diferente, porque `failedAt`
+  /// entra na composição.
+  dedupeKey String @unique @map("dedupe_key")
+
+  source      OpsFailureSource
+  sourceQueue String           @map("source_queue")
+  routingKey  String           @map("routing_key")
+
+  correlationId     String? @map("correlation_id")
+  providerMessageId String? @map("provider_message_id")
+  jobId             String? @map("job_id")
+
+  /// Telefone **apenas como hash**, para agrupar falhas do mesmo número sem
+  /// expô-lo. O número em claro continua dentro de `payload`, que precisa ficar
+  /// íntegro para o reprocessamento funcionar — a proteção está na leitura, que
+  /// mascara por padrão e só devolve em claro a operador com `canViewSensitive`,
+  /// gerando linha de auditoria.
+  phoneHash String? @map("phone_hash")
+
+  errorType    String  @map("error_type")
+  errorMessage String  @map("error_message")
+  attempts     Int
+  permanent    Boolean @default(false)
+
+  /// Envelope original, íntegro. Sem ele não há o que republicar.
+  payload Json
+
+  status OpsFailureStatus @default(pending)
+
+  /// Quando a mensagem tropeçou pela primeira vez (nulo se falhou permanente já
+  /// na primeira tentativa). `capturedAt` é quando o catálogo a registrou — a
+  /// distância entre os dois expõe atraso do consumer do catálogo.
+  firstFailedAt DateTime? @map("first_failed_at")
+  failedAt      DateTime  @map("failed_at")
+  capturedAt    DateTime  @default(now()) @map("captured_at")
+
+  /// Expurgo por cron. Itens já `reprocessed` saem antes dos `pending`: o que foi
+  /// resolvido não precisa ocupar espaço tanto quanto o que ainda espera ação.
+  retentionUntil DateTime @map("retention_until")
+
+  /// Preenchidos pelo reprocessamento (Entrega 7).
+  reprocessedAt  DateTime? @map("reprocessed_at")
+  lastOperationId String?  @map("last_operation_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([status, capturedAt])
+  @@index([capturedAt])
+  @@index([correlationId])
+  @@index([errorType])
+  @@index([phoneHash])
+  @@index([retentionUntil])
+  @@map("ops_failed_messages")
 }

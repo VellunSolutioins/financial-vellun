@@ -1,0 +1,490 @@
+{
+  "uid": "vellun-whatsapp",
+  "title": "Vellun — Pipeline WhatsApp",
+  "description": "Funil do webhook ao lançamento criado. É o dashboard linkado pelos alertas do pipeline.",
+  "tags": ["vellun", "operacoes", "whatsapp"],
+  "timezone": "America/Sao_Paulo",
+  "editable": true,
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": {
+    "from": "now-3h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "ds",
+        "label": "Métricas",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "env",
+        "label": "Ambiente",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${ds}"
+        },
+        "query": "label_values(up, env)",
+        "refresh": 1,
+        "current": {},
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Funil",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "collapsed": false
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Entrada e publicação",
+      "description": "Divergência entre recebido e publicado indica mensagem descartada antes de publicar (longa demais, ou payload sem mensagem). `publish_failed` significa 503 no webhook — a Meta vai reenviar, com limite.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(vellun_agent_webhook_received_total{env=\"$env\"}[5m]))",
+          "legendFormat": "recebido/s"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(vellun_agent_publish_confirmed_total{env=\"$env\"}[5m]))",
+          "legendFormat": "publicado/s"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(rate(vellun_agent_publish_failed_total{env=\"$env\"}[5m]))",
+          "legendFormat": "falha de publicação/s"
+        },
+        {
+          "refId": "D",
+          "expr": "sum(rate(vellun_agent_webhook_ignored_total{env=\"$env\"}[5m]))",
+          "legendFormat": "ignorado/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "falha de publicação/s"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Consumo e processamento",
+      "description": "`duplicadas` altas são normais após um reenvio da Meta; sustentadas indicam ack lento. `deferred` alto significa muita mensagem simultânea do mesmo número (lock de telefone).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(vellun_agent_messages_consumed_total{env=\"$env\"}[5m]))",
+          "legendFormat": "consumido/s"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(vellun_agent_jobs_processed_total{env=\"$env\"}[5m]))",
+          "legendFormat": "jobs processados/s"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(rate(vellun_agent_messages_duplicated_total{env=\"$env\"}[5m]))",
+          "legendFormat": "duplicadas/s"
+        },
+        {
+          "refId": "D",
+          "expr": "sum(rate(vellun_agent_jobs_deferred_total{env=\"$env\"}[5m]))",
+          "legendFormat": "adiados por lock/s"
+        },
+        {
+          "refId": "E",
+          "expr": "sum(rate(vellun_agent_processing_error_total{env=\"$env\"}[5m]))",
+          "legendFormat": "erro de processamento/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 5
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "erro de processamento/s"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "Filas",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "collapsed": false
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Profundidade por fila",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rabbitmq_detailed_queue_messages_ready{env=\"$env\", queue=~\"whatsapp\\\\..*\"}",
+          "legendFormat": "{{queue}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Consumidores por fila",
+      "description": "As filas de retry têm zero consumidor por construção: o TTL devolve a mensagem à fila principal. Zero nas filas `.v1` com mensagem pendente é incidente.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rabbitmq_detailed_queue_consumers{env=\"$env\", queue=~\"whatsapp\\\\.(inbound|processing)\\\\.v1\"}",
+          "legendFormat": "{{queue}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 20,
+      "type": "row",
+      "title": "Falha definitiva",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
+      "collapsed": false
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "DLQ: profundidade da fila vs. catálogo",
+      "description": "O par que expõe divergência. A DLQ é transporte; o Postgres (`ops_failed_messages`) é a fonte de verdade do que falhou. Com o catálogo saudável a linha da fila fica rente a zero — o consumer drena em segundos — enquanto o contador do catálogo sobe. Fila acima de zero de forma sustentada significa que o consumer parou: nada se perde, mas o painel de operações passa a mostrar MENOS falhas do que existem.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 17
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rabbitmq_detailed_queue_messages_ready{env=\"$env\", queue=~\"whatsapp\\\\..*\\\\.dlq\"})",
+          "legendFormat": "parado na DLQ"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(increase(vellun_agent_dlq_catalog_captured_total{env=\"$env\"}[5m]))",
+          "legendFormat": "catalogado (5m)"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(increase(vellun_agent_dlq_catalog_failed_total{env=\"$env\"}[5m]))",
+          "legendFormat": "falha ao catalogar (5m)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "falha ao catalogar (5m)"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "Entradas em DLQ",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 17
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(vellun_agent_dlq_total{env=\"$env\"}[5m]))",
+          "legendFormat": "novas entradas (5m)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 25,
+            "drawStyle": "bars"
+          },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "red"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 30,
+      "type": "row",
+      "title": "Latência",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "collapsed": false
+    },
+    {
+      "id": 31,
+      "type": "timeseries",
+      "title": "Latência do webhook (p50 / p95 / p99)",
+      "description": "Inclui o publisher confirm do RabbitMQ, que é justamente a garantia que o 202 representa. Subida sustentada = broker sob pressão.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 25
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(vellun_agent_webhook_latency_seconds_bucket{env=\"$env\"}[5m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vellun_agent_webhook_latency_seconds_bucket{env=\"$env\"}[5m])))",
+          "legendFormat": "p95"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(vellun_agent_webhook_latency_seconds_bucket{env=\"$env\"}[5m])))",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 32,
+      "type": "timeseries",
+      "title": "Recebimento até processamento (p95)",
+      "description": "Inclui o debounce de 5s do agrupamento, então o piso é ~5s por construção.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 25
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vellun_agent_receive_to_process_seconds_bucket{env=\"$env\"}[10m])))",
+          "legendFormat": "p95"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 33,
+      "type": "timeseries",
+      "title": "Processamento e LLM (p95)",
+      "description": "O processamento é dominado pela latência do LLM; as duas linhas juntas mostram quanto do tempo é nosso.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 25
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vellun_agent_processing_duration_seconds_bucket{env=\"$env\"}[10m])))",
+          "legendFormat": "processamento p95"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vellun_agent_llm_latency_seconds_bucket{env=\"$env\"}[10m])))",
+          "legendFormat": "LLM p95"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      }
+    }
+  ]
+}

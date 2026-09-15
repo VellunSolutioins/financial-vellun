@@ -6,6 +6,7 @@ import {
   IsOptional,
   IsString,
   Max,
+  MaxLength,
   Min,
 } from 'class-validator';
 import { AiExtractionStatus, AiMessageDirection } from '@prisma/client';
@@ -69,4 +70,15 @@ export class AiEventDto {
   @IsOptional()
   @IsString()
   sourceMessageId?: string;
+
+  /**
+   * Chave de idempotência da extração (o `jobId` do pipeline do WhatsApp).
+   * Reenvio com a mesma chave devolve a extração já criada, em vez de criar
+   * uma segunda que ficaria órfã — o lançamento é deduplicado antes e não
+   * chega a vinculá-la.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  idempotencyKey?: string;
 }

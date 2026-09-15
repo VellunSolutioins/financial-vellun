@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+import { correlationHeaders } from '../observability/correlation';
+
 export interface WelcomeNotificationParams {
   /** Telefone em E.164 (ex.: `+5519993987410`). */
   phone: string;
@@ -38,6 +40,9 @@ export class WelcomeNotificationService {
         headers: {
           'x-internal-api-key': this.apiKey,
           'Content-Type': 'application/json',
+          // Propaga a correlação: o cadastro na API e a mensagem enviada pelo
+          // agente passam a aparecer no Loki sob o mesmo id.
+          ...correlationHeaders(),
         },
         body: JSON.stringify(params),
         signal: controller.signal,

@@ -43,7 +43,9 @@ Métricas operacionais a acompanhar (doc Fase 7):
 - conversão de checkout (iniciados × ativados);
 - pagamentos aprovados × recusados;
 - assinaturas em `past_due` e em grace;
-- falhas de webhook e **tamanho da DLQ** (`payment_webhook_events` com `status = failed`);
+- falhas de webhook: `status = exhausted` e **so isso** e a fila de trabalho do
+  operador. `failed` tem `next_retry_at` marcado e caminha sozinho — contar os
+  dois juntos faria o numero subir a cada indisponibilidade passageira do PSP;
 - divergências detectadas pela reconciliação (`SubscriptionAudit` com ator `reconciliation`);
 - chargebacks e cancelamentos;
 - latência/erros das chamadas ao Asaas;

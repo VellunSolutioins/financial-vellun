@@ -12,6 +12,7 @@ import unicodedata
 from datetime import date
 
 from ..config import settings
+from ..messaging.contracts import ProcessingJobV1
 from ..schemas.financial_intent import FinancialIntent, IntentType
 from .audit_service import audit_service
 from .confirmation_rules import needs_confirmation
@@ -43,18 +44,54 @@ def _normalize_text(text: str) -> str:
 
 
 class MessageProcessor:
+    async def process_job(self, job: ProcessingJobV1) -> str:
+        """Processa um job consolidado vindo de ``whatsapp.processing.v1``.
+
+        O ``jobId`` vira a chave de idempotência da criação do lançamento: um
+        retry após timeout não cria um segundo lançamento.
+        """
+        return await self._process(
+            phone=job.phone,
+            message=job.combined_message.strip(),
+            source_message_ids=job.source_message_ids,
+            idempotency_key=job.job_id,
+            response_prefix=job.response_prefix,
+            pre_extracted=job.pre_extracted_intent,
+            force_confirm=job.force_confirm,
+            confirm_question=job.confirm_question,
+        )
+
     async def process_buffered_message(
         self,
         phone: str,
         combined_message: str,
         source_message_ids: list[str] | None = None,
     ) -> str:
-        """Processa a mensagem consolidada e devolve a resposta enviada.
+        """Caminho legado (``MESSAGE_PIPELINE=legacy``), sem broker.
 
         ``source_message_ids`` são os ids das ``AiMessage`` inbound já
         persistidas pelo buffer (a última é usada como origem da extração).
         """
-        message = combined_message.strip()
+        return await self._process(
+            phone=phone,
+            message=combined_message.strip(),
+            source_message_ids=source_message_ids or [],
+            idempotency_key=None,
+        )
+
+    async def _process(
+        self,
+        *,
+        phone: str,
+        message: str,
+        source_message_ids: list[str],
+        idempotency_key: str | None,
+        response_prefix: str = "",
+        pre_extracted: dict | None = None,
+        force_confirm: bool = False,
+        confirm_question: str | None = None,
+    ) -> str:
+        """Núcleo do processamento; devolve a resposta enviada ao usuário."""
         last_inbound_id = source_message_ids[-1] if source_message_ids else None
 
         metrics.incr("messages_processed")
@@ -62,7 +99,7 @@ class MessageProcessor:
         contact = await contact_service.find_by_phone(phone)
         if contact is None:
             metrics.incr("not_linked")
-            logger.info("Contato não vinculado: %s", phone)
+            logger.info("Contato não vinculado")
             return await self._respond(phone, NOT_LINKED_MESSAGE)
 
         user_id = contact["userId"]
@@ -71,24 +108,38 @@ class MessageProcessor:
         allowed, block_message = await subscription_gate.evaluate(user_id)
         if not allowed:
             metrics.incr("subscription_blocked")
-            logger.info("Acesso bloqueado por assinatura: %s", phone)
+            logger.info("Acesso bloqueado por assinatura")
             return await self._respond(phone, block_message or NOT_LINKED_MESSAGE)
 
-        state = conversation_manager.get(phone)
-
-        if state.awaiting_confirmation and state.pending_intent is not None:
-            context = await self._build_context(user_id, contact, phone)
-            intent, confirmed = self._merge_confirmation_reply(
-                state.pending_intent, message, context
-            )
-            if confirmed is False:  # usuário cancelou
-                conversation_manager.clear(phone)
-                return await self._respond(phone, "Ok, cancelei. Nada foi registrado.")
+        if pre_extracted is not None:
+            # Comprovante: a visão já extraiu o intent no consumer de entrada.
+            intent = FinancialIntent(**pre_extracted)
         else:
-            context = await self._build_context(user_id, contact, phone)
-            intent = await intent_classifier.classify(message, context)
+            state = await conversation_manager.get(phone)
 
-        return await self.handle_intent(phone, user_id, intent, message, last_inbound_id)
+            if state.awaiting_confirmation and state.pending_intent is not None:
+                context = await self._build_context(user_id, contact, phone)
+                intent, confirmed = self._merge_confirmation_reply(
+                    state.pending_intent, message, context
+                )
+                if confirmed is False:  # usuário cancelou
+                    await conversation_manager.clear(phone)
+                    return await self._respond(phone, "Ok, cancelei. Nada foi registrado.")
+            else:
+                context = await self._build_context(user_id, contact, phone)
+                intent = await intent_classifier.classify(message, context)
+
+        return await self.handle_intent(
+            phone,
+            user_id,
+            intent,
+            message,
+            last_inbound_id,
+            response_prefix=response_prefix,
+            force_confirm=force_confirm,
+            confirm_question=confirm_question,
+            idempotency_key=idempotency_key,
+        )
 
     async def handle_intent(
         self,
@@ -101,6 +152,7 @@ class MessageProcessor:
         response_prefix: str = "",
         force_confirm: bool = False,
         confirm_question: str | None = None,
+        idempotency_key: str | None = None,
     ) -> str:
         """Trata um ``FinancialIntent`` já extraído (texto, áudio ou imagem).
 
@@ -132,7 +184,7 @@ class MessageProcessor:
 
         if must_confirm:
             metrics.incr("confirmation_requested")
-            conversation_manager.set_pending(phone, intent)
+            await conversation_manager.set_pending(phone, intent)
             await audit_service.log_extraction(
                 user_id=user_id,
                 raw_input=raw_message,
@@ -140,6 +192,7 @@ class MessageProcessor:
                 confidence=intent.confidence,
                 status="pending",
                 source_message_id=last_inbound_id,
+                idempotency_key=idempotency_key,
             )
             return await self._respond(phone, response_prefix + question)
 
@@ -151,22 +204,36 @@ class MessageProcessor:
             confidence=intent.confidence,
             status="confirmed",
             source_message_id=last_inbound_id,
+            idempotency_key=idempotency_key,
         )
 
         result = await transaction_creator.create_from_intent(
-            intent, user_id, raw_message, ai_extracted_transaction_id=extraction_id
+            intent,
+            user_id,
+            raw_message,
+            ai_extracted_transaction_id=extraction_id,
+            idempotency_key=idempotency_key,
         )
-        conversation_manager.clear(phone)
+        await conversation_manager.clear(phone)
 
         metrics.incr("transactions_created" if result.get("ok") else "transaction_failed")
 
         return await self._respond(phone, response_prefix + result["message"])
 
-    async def _respond(self, phone: str, text: str) -> str:
+    async def respond(self, phone: str, text: str) -> str:
         """Envia a resposta ao usuário e registra como outbound."""
-        await messenger.send(phone, text)
+        try:
+            await messenger.send(phone, text)
+        except Exception:  # noqa: BLE001 — falha de envio não pode perder a auditoria
+            metrics.incr("whatsapp_send_failed")
+            logger.exception("Falha ao enviar resposta pelo WhatsApp")
+            raise
         await audit_service.log_message(phone, "outbound", text)
         return text
+
+    # Mantido para compatibilidade com chamadores existentes.
+    async def _respond(self, phone: str, text: str) -> str:
+        return await self.respond(phone, text)
 
     def _merge_confirmation_reply(
         self, pending: FinancialIntent, reply: str, context: dict | None = None

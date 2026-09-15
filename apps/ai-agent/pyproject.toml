@@ -11,11 +11,16 @@ dependencies = [
     "httpx>=0.28.0",
     "python-dotenv>=1.0.1",
     "openai>=1.58.0",
+    # Estado distribuido: agrupamento por telefone, locks e estado de conversa.
+    "redis>=5.0.0",
+    # Broker duravel do pipeline WhatsApp (MESSAGE_BROKER=rabbitmq).
+    "aio-pika>=9.4.0",
+    # Exposicao de metricas em formato Prometheus (/metrics).
+    "prometheus-client>=0.21.0",
 ]
 
 [project.optional-dependencies]
-# Backend de buffer distribuído (MESSAGE_BUFFER_BACKEND=redis). Instale com
-# `pip install -e .[redis]` em produção.
+# Mantido por compatibilidade: o redis agora e dependencia obrigatoria.
 redis = [
     "redis>=5.0.0",
 ]
@@ -24,4 +29,12 @@ redis = [
 dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-m 'not integration'"
+markers = [
+    "integration: exige RabbitMQ e Redis reais (rode com `pytest -m integration`)",
 ]

@@ -1,0 +1,85 @@
+# Stack de observabilidade para verificação LOCAL.
+#
+# Existe porque a alternativa é validar alerta e dashboard direto em produção, e
+# o plano é explícito: nenhum reprocessamento nem exercício de alerta em produção.
+# Não há ambiente de staging, então "ambiente isolado" é esta máquina.
+#
+#   docker compose -f infra/docker/docker-compose.yml \
+#                  -f infra/observability/docker-compose.observability.yml up -d
+#
+# Sem GRAFANA_CLOUD_* definidos, o Alloy sobe e falha o `remote_write` — o que é
+# suficiente para validar scrape, targets e recebimento de log. Para exercitar o
+# caminho completo, aponte as variáveis para a sua instância do Grafana Cloud.
+#
+# Versões pinadas, todas confirmadas na documentação oficial em 2026-09-09:
+#   grafana/alloy                            v1.19.2  (2026-08-26)
+#   prometheuscommunity/postgres-exporter    v0.20.1  (2026-07-07)
+#   oliver006/redis_exporter                 v1.91.1  (2026-09-07)
+#
+# Pinar exato, e não `latest`, porque um exporter que muda nome de métrica entre
+# versões quebra dashboard e alerta em silêncio — o gráfico simplesmente esvazia.
+
+services:
+  alloy:
+    image: grafana/alloy:v1.19.2
+    container_name: financial-vellun-alloy
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    environment:
+      TZ: America/Sao_Paulo
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      METRICS_TOKEN: ${METRICS_TOKEN:-local-dev-metrics-token}
+      GRAFANA_CLOUD_PROM_URL: ${GRAFANA_CLOUD_PROM_URL:-}
+      GRAFANA_CLOUD_PROM_USER: ${GRAFANA_CLOUD_PROM_USER:-}
+      GRAFANA_CLOUD_LOKI_URL: ${GRAFANA_CLOUD_LOKI_URL:-}
+      GRAFANA_CLOUD_LOKI_USER: ${GRAFANA_CLOUD_LOKI_USER:-}
+      GRAFANA_CLOUD_TOKEN: ${GRAFANA_CLOUD_TOKEN:-}
+    ports:
+      # UI de diagnóstico: mostra cada componente, seus alvos e o último erro.
+      - '12345:12345'
+      # Recebimento dos logs empurrados pelas aplicações.
+      - '3100:3100'
+    volumes:
+      # Caminho relativo ao **primeiro** `-f` (infra/docker/), que é o diretório
+      # de projeto que o Compose usa para resolver bind mounts — não ao diretório
+      # deste arquivo. Mesma razão do mount de `enabled_plugins` no RabbitMQ.
+      - ../observability/alloy/config.alloy.local:/etc/alloy/config.alloy:ro
+      - alloy_data:/var/lib/alloy/data
+    restart: unless-stopped
+
+  # Métricas do Postgres. Conecta com um usuário SOMENTE-LEITURA de pg_stat_* —
+  # ver alloy/postgres-monitoring-user.sql. Nunca com o usuário da aplicação:
+  # monitoramento não precisa de escrita, e um exporter comprometido com
+  # credencial de escrita é um problema muito maior.
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.20.1
+    container_name: financial-vellun-postgres-exporter
+    environment:
+      TZ: America/Sao_Paulo
+      DATA_SOURCE_NAME: ${POSTGRES_EXPORTER_DSN:-postgresql://vellun_monitor:vellun_monitor_dev@postgres:5432/financial_vellun?sslmode=disable}
+    ports:
+      - '9187:9187'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.91.1
+    container_name: financial-vellun-redis-exporter
+    environment:
+      TZ: America/Sao_Paulo
+      REDIS_ADDR: redis://redis:6379
+    ports:
+      - '9121:9121'
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  alloy_data:
+    name: financial-vellun-alloy

@@ -1,0 +1,305 @@
+# Testes das regras de disponibilidade, API e pagamentos.
+#
+#   promtool test rules infra/observability/alerts/tests/*.test.yaml
+
+rule_files:
+  - ../plataforma.yaml
+
+evaluation_interval: 30s
+
+tests:
+  # ── Disponibilidade ──────────────────────────────────────────────────────
+  - interval: 30s
+    name: servico no ar não alerta
+    input_series:
+      - series: 'up{job="api",instance="api.railway.internal:3001"}'
+        values: '1x20'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: ServicoIndisponivel
+        exp_alerts: []
+
+  - interval: 30s
+    name: servico fora por mais de 2 minutos alerta
+    input_series:
+      - series: 'up{job="api",instance="api.railway.internal:3001"}'
+        values: '0x20'
+    alert_rule_test:
+      # A tolerância de 2 minutos existe para um deploy não acordar ninguém.
+      - eval_time: 1m
+        alertname: ServicoIndisponivel
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: ServicoIndisponivel
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              job: api
+              instance: api.railway.internal:3001
+            exp_annotations:
+              summary: 'api não responde ao scrape'
+              description: >-
+                O alvo api.railway.internal:3001 (api) está inalcançável há mais de 2 minutos.
+              dashboard: 'DASHBOARD_BASE/d/vellun-overview/visao-geral'
+              runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#saúde'
+
+  - interval: 30s
+    name: deploy curto não dispara alerta
+    input_series:
+      # 1 minuto fora e volta: é o que um deploy faz.
+      - series: 'up{job="api",instance="api.railway.internal:3001"}'
+        values: '1x4 0x2 1x20'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: ServicoIndisponivel
+        exp_alerts: []
+
+  # ── Ausência de dados: o alerta que cobre o silêncio ─────────────────────
+  - interval: 30s
+    name: todos os alvos presentes não alerta ausencia
+    input_series:
+      - series: 'up{job="api"}'
+        values: '1x40'
+      - series: 'up{job="ai-agent"}'
+        values: '1x40'
+      - series: 'up{job="ai-agent-worker"}'
+        values: '1x40'
+      - series: 'up{job="rabbitmq"}'
+        values: '1x40'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: AusenciaInesperadaDeDados
+        exp_alerts: []
+
+  - interval: 30s
+    name: alvo que nunca aparece dispara ausencia de dados
+    input_series:
+      # O worker nunca foi registrado no scrape (ou o Alloy caiu). Não existe
+      # `up{job="ai-agent-worker"}` — então `up == 0` NÃO dispara, e o painel fica
+      # verde por falta de dado. É o pior caso, e é o que esta regra cobre.
+      - series: 'up{job="api"}'
+        values: '1x40'
+      - series: 'up{job="ai-agent"}'
+        values: '1x40'
+      - series: 'up{job="rabbitmq"}'
+        values: '1x40'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: ServicoIndisponivel
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: AusenciaInesperadaDeDados
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: alloy
+              # `absent()` preserva o label do seletor, então o alerta diz QUAL
+              # alvo desapareceu em vez de só "algum".
+              job: ai-agent-worker
+            exp_annotations:
+              summary: 'Parou de chegar métrica de pelo menos um serviço'
+              description: >-
+                Nenhuma série `up` para um dos serviços há 10 minutos. Isso não é o serviço fora — é a **coleta** fora (Alloy caído, alvo removido da config, ou credencial do remote_write inválida). O painel parece saudável porque não há dado, e é justamente o pior caso.
+              dashboard: 'DASHBOARD_BASE/d/vellun-overview/visao-geral'
+              runbook: 'RUNBOOK_BASE/observability.md#verificação-local'
+
+  # ── Recursos ─────────────────────────────────────────────────────────────
+  - interval: 1m
+    name: alarme de recurso do RabbitMQ alerta como critico
+    input_series:
+      # Neste estado o broker bloqueia publicação e o webhook devolve 503.
+      - series: 'rabbitmq_alarms_memory_used_watermark'
+        values: '0x3 1x20'
+      - series: 'rabbitmq_alarms_free_disk_space_watermark'
+        values: '0x30'
+      - series: 'rabbitmq_alarms_file_descriptor_limit'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: RabbitMqSobAlarmeDeRecurso
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: rabbitmq
+            exp_annotations:
+              summary: 'RabbitMQ em alarme de recurso — publicações bloqueadas'
+              description: >-
+                Um alarme de disco, memória ou descritores está ativo. Nesse estado o broker bloqueia publicação, e o webhook passa a devolver 503.
+              dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
+              runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#webhook-devolvendo-503'
+
+  - interval: 1m
+    name: sem alarme de recurso não alerta
+    input_series:
+      - series: 'rabbitmq_alarms_memory_used_watermark'
+        values: '0x30'
+      - series: 'rabbitmq_alarms_free_disk_space_watermark'
+        values: '0x30'
+      - series: 'rabbitmq_alarms_file_descriptor_limit'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: RabbitMqSobAlarmeDeRecurso
+        exp_alerts: []
+
+  - interval: 1m
+    name: Redis com memoria confortavel não alerta
+    input_series:
+      - series: 'redis_memory_used_bytes'
+        values: '100000000x30'
+      - series: 'redis_memory_max_bytes'
+        values: '1000000000x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: MemoriaDoRedisAcabando
+        exp_alerts: []
+
+  - interval: 1m
+    name: Redis sem limite configurado não alerta
+    input_series:
+      # `maxmemory` em 0 significa "sem limite", e a divisão daria +Inf. O
+      # `> 0` na regra é o que evita alerta permanente numa instalação padrão.
+      - series: 'redis_memory_used_bytes'
+        values: '100000000x30'
+      - series: 'redis_memory_max_bytes'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: MemoriaDoRedisAcabando
+        exp_alerts: []
+
+  - interval: 1m
+    name: Redis acima de 85% da memoria alerta
+    input_series:
+      - series: 'redis_memory_used_bytes'
+        values: '900000000x30'
+      - series: 'redis_memory_max_bytes'
+        values: '1000000000x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: MemoriaDoRedisAcabando
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: redis
+            exp_annotations:
+              summary: 'Redis acima de 85% da memória'
+              description: '90% da memória máxima em uso.'
+              dashboard: 'DASHBOARD_BASE/d/vellun-overview/visao-geral'
+              runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#confirmações-pendentes-travadas'
+
+  # ── API ──────────────────────────────────────────────────────────────────
+  - interval: 30s
+    name: apenas erro 4xx não alerta
+    input_series:
+      # 4xx é o cliente errando (validação, permissão) — não é incidente nosso.
+      - series: 'http_requests_total{job="api",status="400",route="/transactions"}'
+        values: '0+5x40'
+      - series: 'http_requests_total{job="api",status="200",route="/transactions"}'
+        values: '0+10x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: ApiComTaxaDeErro5xxAlta
+        exp_alerts: []
+
+  - interval: 30s
+    name: taxa de 5xx acima de 5% alerta
+    input_series:
+      - series: 'http_requests_total{job="api",status="500",route="/transactions"}'
+        values: '0+2x40'
+      - series: 'http_requests_total{job="api",status="200",route="/transactions"}'
+        values: '0+10x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: ApiComTaxaDeErro5xxAlta
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: api
+            exp_annotations:
+              summary: 'API com mais de 5% de erro 5xx'
+              description: '16.67% das requisições nos últimos 5 minutos.'
+              dashboard: 'DASHBOARD_BASE/d/vellun-api/api'
+              runbook: 'RUNBOOK_BASE/observability.md'
+
+  - interval: 30s
+    name: API sem trafego não alerta por divisao por zero
+    input_series:
+      - series: 'http_requests_total{job="api",status="200",route="/transactions"}'
+        values: '100x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: ApiComTaxaDeErro5xxAlta
+        exp_alerts: []
+
+  - interval: 30s
+    name: readiness da API falhando alerta como critico
+    input_series:
+      # A API está de pé (o scrape funciona) mas não fala com o Postgres. Distinto
+      # de `up == 0`, que seria o processo fora.
+      - series: 'http_requests_total{job="api",route="/health/ready",status="503"}'
+        values: '0x4 1+1x20'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: BancoDeDadosNaoPronto
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: api
+              job: api
+              route: /health/ready
+              status: '503'
+            exp_annotations:
+              summary: 'Readiness da API falhando — Postgres inalcançável'
+              description: >-
+                A API está no ar mas o readiness responde 503, o que significa que o `SELECT 1` no Postgres está falhando.
+              dashboard: 'DASHBOARD_BASE/d/vellun-api/api'
+              runbook: 'RUNBOOK_BASE/observability.md'
+
+  # ── Pagamentos ───────────────────────────────────────────────────────────
+  - interval: 1m
+    name: metrica de pagamento ausente mantem a regra inerte
+    input_series:
+      # Antes da Entrega 8 estas métricas não existem. Sem o `unless absent(...)`,
+      # `increase()` de série inexistente não alertaria — mas a regra ficaria
+      # dependendo desse detalhe em vez de dizê-lo.
+      - series: 'up{job="api"}'
+        values: '1x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: WebhookDePagamentoEsgotouTentativas
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: EventosDePagamentoAcumulandoParaRetry
+        exp_alerts: []
+
+  - interval: 1m
+    name: evento de pagamento esgotado alerta imediatamente
+    input_series:
+      # É dinheiro: alguém pagou e o acesso pode não ter sido concedido. Um único
+      # evento já é critical, sem `for`.
+      - series: 'vellun_api_payment_webhook_exhausted_total'
+        values: '0x3 1x20'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: WebhookDePagamentoEsgotouTentativas
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: api
+            exp_annotations:
+              summary: 'Evento de pagamento esgotou as tentativas'
+              description: >-
+                1 evento(s) de webhook do PSP esgotou(esgotaram) o retry nos últimos 10 minutos. Pode haver pagamento confirmado sem acesso concedido.
+              dashboard: 'DASHBOARD_BASE/d/vellun-payments/pagamentos'
+              runbook: 'RUNBOOK_BASE/observability.md'
+
+  - interval: 1m
+    name: fila de retry de pagamento pequena não alerta
+    input_series:
+      - series: 'vellun_api_payment_webhook_pending_retry'
+        values: '3x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: EventosDePagamentoAcumulandoParaRetry
+        exp_alerts: []
