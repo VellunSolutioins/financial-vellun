@@ -1,0 +1,20 @@
+# Coletor de metricas e logs (Grafana Alloy) para o Railway.
+#
+# O Railway nao monta arquivo do repositorio dentro de uma imagem pronta, entao o
+# config vai COPIADO para dentro da imagem. Consequencia: mudar
+# infra/observability/alloy/config.alloy exige redeploy deste servico.
+#
+# Versao pinada, a mesma de infra/observability/check.mjs e do compose local:
+# validar com uma versao e rodar com outra e como nao validar. Ao atualizar,
+# troque nos tres lugares.
+FROM grafana/alloy:v1.19.2
+
+# Sem CMD proprio: a imagem oficial ja roda
+#   alloy run /etc/alloy/config.alloy --storage.path=/var/lib/alloy/data
+# e repetir o comando aqui so criaria uma copia para divergir na proxima versao.
+#
+# Esse storage.path guarda o WAL do remote_write. Sem volume no Railway, um
+# restart perde o que ainda nao tinha sido enviado ao Grafana Cloud -- minutos de
+# amostra, aceitavel. A UI de diagnostico fica no padrao (127.0.0.1:12345), ou
+# seja, inalcancavel de fora do container, que e o que queremos em producao.
+COPY infra/observability/alloy/config.alloy /etc/alloy/config.alloy
