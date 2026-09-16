@@ -473,15 +473,22 @@ fora — aponte o health check do orquestrador para ele, e o `liveness`
 
 ### 5. Observabilidade
 
-- **Health:** `GET /health`
-- **Métricas:** `GET /metrics` — contadores (webhooks recebidos, mensagens
-  processadas, lançamentos criados, fallback de LLM, duplicatas, DLQ) e
-  latências médias (recebimento→processamento, LLM). Ver [metrics.py](apps/ai-agent/src/services/metrics.py).
+- **Health:** `GET /health/live` (restart) e `GET /health/ready` (tráfego).
+- **Métricas:** `GET /metrics` em formato Prometheus, com
+  `Authorization: Bearer ${METRICS_TOKEN}`.
 - Logs estruturados em cada etapa (webhook → buffer → flush → contato →
   histórico → LLM/fallback → intenção → confirmação → transação → resposta).
+- **Coleta:** um serviço **Alloy** no mesmo projeto do Railway scrapa as métricas
+  pela rede privada, recebe os logs que API e agente empurram e envia tudo ao
+  Grafana Cloud. A imagem é [`Dockerfile.alloy`](Dockerfile.alloy), com o
+  [`config.alloy`](infra/observability/alloy/config.alloy) copiado para dentro.
 
-> O coletor de métricas é **em memória por processo**. Com múltiplas instâncias,
-> exporte para Prometheus/StatsD (fora do escopo do MVP).
+O Alloy encontra os serviços pelo nome (`financial-vellun-api`,
+`financial-vellun-ai-agent`) e em porta fixa, então a API precisa de `PORT=3001` e
+o agente de `PORT=8010`. Ordem: subir o Alloy → conferir os alvos `up` → só então
+preencher `LOKI_PUSH_URL=http://alloy.railway.internal:3100` na API e no agente.
+O passo a passo, as variáveis e as armadilhas (IPv6, alvos comentados) estão em
+[docs/observability.md](docs/observability.md#produção-no-railway).
 
 ---
 

@@ -5,6 +5,7 @@ visão geral, o orçamento de cardinalidade e o roteiro de verificação estão 
 [docs/observability.md](../../docs/observability.md).
 
 ```
+../../Dockerfile.alloy             imagem do Alloy no Railway (copia config.alloy)
 alloy/
   config.alloy                     coleta em produção (Railway)
   config.alloy.local               a mesma coisa, com alvos locais
