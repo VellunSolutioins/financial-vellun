@@ -90,7 +90,9 @@ class GroupFlusherWorker:
             self._task = None
 
     def is_running(self) -> bool:
-        return self._running
+        # A flag sozinha continuava `True` se a task morresse por algo que o
+        # `except Exception` do laço não pega (ex.: `BaseException`).
+        return self._running and self._task is not None and not self._task.done()
 
     async def _run(self) -> None:
         while self._running:

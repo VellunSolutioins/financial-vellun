@@ -14,7 +14,11 @@ Garantias:
   ocupado é adiado (sem consumir tentativa), então a confirmação nunca é
   processada antes da pergunta;
 - **concorrência limitada** — o número de jobs simultâneos vem de
-  ``PROCESSING_CONSUMER_CONCURRENCY`` (o semáforo vive no consumer do broker).
+  ``PROCESSING_CONSUMER_CONCURRENCY`` (o semáforo vive no consumer do broker);
+- **entrega retentável sem reprocessar** — a resposta calculada é guardada antes
+  de ser enviada. Se só o envio falhar, o retry reenvia esse texto: refazer o job
+  repetiria efeitos que não são idempotentes (a confirmação pendente já foi
+  consumida). O job só é marcado como concluído **depois** da entrega.
 """
 
 from __future__ import annotations
@@ -46,6 +50,10 @@ def lock_key(phone: str) -> str:
 
 def done_key(job_id: str) -> str:
     return f"job:done:{job_id}"
+
+
+def reply_key(job_id: str) -> str:
+    return f"job:reply:{job_id}"
 
 
 class MessageProcessingConsumer:
@@ -131,11 +139,22 @@ class MessageProcessingConsumer:
             max((utcnow() - job.first_received_at).total_seconds() * 1000, 0.0),
         )
 
-        await message_processor.process_job(job)
+        chave_resposta = reply_key(job.job_id)
+        reply = await self.store.get(chave_resposta)
+        if reply is None:
+            reply = await message_processor.process_job(job)
+            await self.store.put(chave_resposta, reply, settings.job_dedupe_ttl_seconds)
+        else:
+            metrics.incr("jobs_reply_resumed")
+            logger.info("Resposta já calculada numa tentativa anterior; só reenviando")
+
+        if reply:
+            await message_processor.deliver(job.phone, reply)
 
         # Só marca como concluído depois que o estado final está persistido
-        # (lançamento criado ou confirmação pendente gravada) e a resposta enviada.
+        # (lançamento criado ou confirmação pendente gravada) e a resposta entregue.
         await self.store.mark(done_key(job.job_id), settings.job_dedupe_ttl_seconds)
+        await self.store.forget(chave_resposta)
         metrics.observe_ms("processing_duration_ms", (time.monotonic() - started) * 1000)
         metrics.incr("jobs_processed")
 

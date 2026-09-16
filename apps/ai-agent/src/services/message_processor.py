@@ -9,12 +9,13 @@ registrar outbound/extração.
 
 import logging
 import unicodedata
-from datetime import date
+from contextvars import ContextVar
 
 from ..config import settings
 from ..messaging.contracts import ProcessingJobV1
 from ..schemas.financial_intent import FinancialIntent, IntentType
 from .audit_service import audit_service
+from .clock import today_local
 from .confirmation_rules import needs_confirmation
 from .contact_service import contact_service
 from .conversation_manager import conversation_manager
@@ -33,6 +34,10 @@ HELP_MESSAGE = (
     "Posso registrar seus lançamentos! Ex.: 'gastei 100 no mercado' ou "
     "'recebi 5000 de salário'. Você também pode pedir um resumo."
 )
+#: Quando ativa, ``respond`` acumula o texto aqui em vez de enviar. Só o
+#: ``process_job`` a ativa — ver a docstring dele.
+_reply_outbox: ContextVar[list[str] | None] = ContextVar("reply_outbox", default=None)
+
 AFFIRMATIVE = ("sim", "isso", "confirmo", "ok", "pode", "correto", "certo", "exato")
 NEGATIVE = ("não", "nao", "cancela", "cancelar", "errado", "deixa")
 
@@ -47,19 +52,33 @@ class MessageProcessor:
     async def process_job(self, job: ProcessingJobV1) -> str:
         """Processa um job consolidado vindo de ``whatsapp.processing.v1``.
 
+        **Não envia a resposta: devolve o texto** para o consumer entregar com
+        :meth:`deliver`. Calcular e entregar são separados porque o processamento
+        tem efeitos que não se repetem com segurança — a confirmação pendente é
+        apagada ao criar o lançamento, e um "sim" reprocessado seria classificado
+        do zero, sem a pergunta. Se só a entrega falhar, o retry reenvia o texto
+        guardado em vez de refazer o job.
+
         O ``jobId`` vira a chave de idempotência da criação do lançamento: um
         retry após timeout não cria um segundo lançamento.
         """
-        return await self._process(
-            phone=job.phone,
-            message=job.combined_message.strip(),
-            source_message_ids=job.source_message_ids,
-            idempotency_key=job.job_id,
-            response_prefix=job.response_prefix,
-            pre_extracted=job.pre_extracted_intent,
-            force_confirm=job.force_confirm,
-            confirm_question=job.confirm_question,
-        )
+        outbox: list[str] = []
+        token = _reply_outbox.set(outbox)
+        try:
+            await self._process(
+                phone=job.phone,
+                message=job.combined_message.strip(),
+                source_message_ids=job.source_message_ids,
+                idempotency_key=job.job_id,
+                response_prefix=job.response_prefix,
+                pre_extracted=job.pre_extracted_intent,
+                force_confirm=job.force_confirm,
+                confirm_question=job.confirm_question,
+            )
+        finally:
+            _reply_outbox.reset(token)
+        # Todo ramo de `_process` responde uma única vez; juntar é só defesa.
+        return "\n\n".join(outbox)
 
     async def process_buffered_message(
         self,
@@ -221,10 +240,18 @@ class MessageProcessor:
         return await self._respond(phone, response_prefix + result["message"])
 
     async def respond(self, phone: str, text: str) -> str:
-        """Envia a resposta ao usuário e registra como outbound."""
+        """Envia a resposta ao usuário — ou a guarda, dentro de ``process_job``."""
+        outbox = _reply_outbox.get()
+        if outbox is not None:
+            outbox.append(text)
+            return text
+        return await self.deliver(phone, text)
+
+    async def deliver(self, phone: str, text: str) -> str:
+        """Entrega ao usuário e registra como outbound. **Levanta** se não entregar."""
         try:
             await messenger.send(phone, text)
-        except Exception:  # noqa: BLE001 — falha de envio não pode perder a auditoria
+        except Exception:  # noqa: BLE001 — conta e propaga: quem chama decide
             metrics.incr("whatsapp_send_failed")
             logger.exception("Falha ao enviar resposta pelo WhatsApp")
             raise
@@ -315,7 +342,7 @@ class MessageProcessor:
         )
 
         return {
-            "today": date.today().isoformat(),
+            "today": today_local().isoformat(),
             "categories": categories,
             "accounts": accounts,
             "profile_type": contact.get("profileType"),

@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from .bootstrap import pipeline
+from .bootstrap import log_runtime_config, pipeline
 from .config import settings
 from .observability.logging import configure_logging
 from .observability.middleware import CorrelationIdMiddleware
@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    log_runtime_config()
     if settings.is_broker_pipeline:
         # O publisher e obrigatorio: sem ele o webhook nao consegue responder 202.
         await pipeline.start_publisher()

@@ -17,6 +17,12 @@ Mensagem que nao valida como ``DlqEnvelopeV1`` **nao** volta para a fila: seria 
 loop infinito, porque nenhuma tentativa futura a fara validar. Ela e catalogada
 como esta, com ``errorType`` proprio, e o payload cru vai junto para o operador
 decidir.
+
+**Depois de catalogar, avisa o usuario.** Mensagem na DLQ e mensagem que nunca
+teve resposta; antes o usuario ficava em silencio para sempre. O aviso e
+best-effort — nunca impede o ack, porque a falha ja esta gravada — e limitado a
+um por telefone a cada ``DLQ_USER_NOTICE_COOLDOWN_SECONDS``, para nao inundar
+ninguem durante um incidente.
 """
 
 from __future__ import annotations
@@ -25,10 +31,13 @@ import logging
 
 from pydantic import ValidationError
 
+from ..config import settings
 from ..messaging.base import BrokerMessage, TransientError
 from ..messaging.contracts import DlqEnvelopeV1
 from ..observability.logging import log_context
+from ..services.distributed_state import get_state_store
 from ..services.failure_catalog import failure_catalog
+from ..services.message_processor import message_processor
 from ..services.metrics import metrics
 
 logger = logging.getLogger(__name__)
@@ -49,6 +58,18 @@ def source_from_queue(source_queue: str) -> str:
     # nome novo seria pior que classifica-la de forma imprecisa.
     logger.warning("Fila de origem nao reconhecida: %s", source_queue)
     return "whatsapp_inbound"
+
+
+#: Nao afirma que nada foi registrado: a falha pode ter vindo depois de o
+#: lancamento ser criado (so a entrega da resposta falhou).
+DLQ_USER_NOTICE = (
+    "Tive um problema para processar sua última mensagem. "
+    "Confira no app se o lançamento foi registrado antes de enviar de novo."
+)
+
+
+def notice_key(phone: str) -> str:
+    return f"dlq:notified:{phone}"
 
 
 class DlqCatalogMessageConsumer:
@@ -93,6 +114,34 @@ class DlqCatalogMessageConsumer:
                 logger.info(
                     "Falha catalogada (%s, %s)", envelope.source_queue, envelope.error_type
                 )
+                if not invalido:
+                    await self._avisar_usuario(envelope)
+
+    async def _avisar_usuario(self, envelope: DlqEnvelopeV1) -> None:
+        """Avisa quem enviou a mensagem que falhou. **Nunca levanta.**
+
+        A janela e marcada **antes** do envio: se o proprio WhatsApp e o que esta
+        fora, cada falha da DLQ tentaria de novo e seguraria o consumer no timeout
+        do envio. Assim e no maximo uma tentativa por telefone por janela.
+        """
+        cooldown = settings.dlq_user_notice_cooldown_seconds
+        payload = envelope.payload if isinstance(envelope.payload, dict) else {}
+        phone = payload.get("phone")
+        if cooldown <= 0 or not isinstance(phone, str) or not phone:
+            return
+
+        try:
+            store = get_state_store()
+            chave = notice_key(phone)
+            if await store.exists(chave):
+                metrics.incr("dlq_user_notice_suppressed")
+                return
+            await store.mark(chave, cooldown)
+            await message_processor.deliver(phone, DLQ_USER_NOTICE)
+            metrics.incr("dlq_user_notified")
+        except Exception:  # noqa: BLE001 - a falha ja esta catalogada; o aviso e extra
+            metrics.incr("dlq_user_notice_failed")
+            logger.warning("Nao foi possivel avisar o usuario sobre a falha", exc_info=True)
 
     def _parse(self, broker_message: BrokerMessage) -> tuple[DlqEnvelopeV1, bool]:
         """Envelope validado, ou um envelope sintetico para o payload cru.

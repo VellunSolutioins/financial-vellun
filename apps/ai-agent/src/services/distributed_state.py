@@ -6,7 +6,10 @@ Duas primitivas, ambas com TTL para nunca travar para sempre:
   que dois workers nao processem o mesmo numero ao mesmo tempo (ordenacao
   logica). ``acquire`` devolve um token; so quem o tem renova e libera;
 - ``mark``/``exists``/``forget`` — marcador de job ja concluido, para que uma
-  reentrega apos o ack nao reprocesse.
+  reentrega apos o ack nao reprocesse;
+- ``put``/``get`` — valor curto com TTL. Guarda a resposta ja calculada de um
+  job, para que o retry de uma **entrega** que falhou reenvie o texto em vez de
+  reprocessar o job inteiro.
 
 O backend segue ``GROUP_STORE_BACKEND`` (redis em producao, memory em teste).
 """
@@ -45,12 +48,20 @@ class StateStore(ABC):
 
     @abstractmethod
     async def forget(self, key: str) -> None:
-        """Remove um marcador. Nao serve para lock: lock se libera com o token."""
+        """Remove um marcador ou valor. Nao serve para lock: lock se libera com o token."""
+
+    @abstractmethod
+    async def put(self, key: str, value: str, ttl_seconds: int) -> None: ...
+
+    @abstractmethod
+    async def get(self, key: str) -> str | None:
+        """Valor gravado por ``put``, ou ``None`` se ausente ou expirado."""
 
 
 class InMemoryStateStore(StateStore):
     def __init__(self) -> None:
         self._entries: dict[str, float] = {}
+        self._values: dict[str, str] = {}
         self._locks = locks.InMemoryLocks()
 
     def _alive(self, key: str) -> bool:
@@ -59,6 +70,7 @@ class InMemoryStateStore(StateStore):
             return False
         if expires <= time.time():
             self._entries.pop(key, None)
+            self._values.pop(key, None)
             return False
         return True
 
@@ -79,6 +91,14 @@ class InMemoryStateStore(StateStore):
 
     async def forget(self, key: str) -> None:
         self._entries.pop(key, None)
+        self._values.pop(key, None)
+
+    async def put(self, key: str, value: str, ttl_seconds: int) -> None:
+        self._entries[key] = time.time() + ttl_seconds
+        self._values[key] = value
+
+    async def get(self, key: str) -> str | None:
+        return self._values.get(key) if self._alive(key) else None
 
     def expire_lock_now(self, key: str) -> None:
         """Auxiliar de teste: simula o TTL do lock vencendo."""
@@ -112,6 +132,14 @@ class RedisStateStore(StateStore):
     async def forget(self, key: str) -> None:
         client = await self._provider.client()
         await client.delete(key)
+
+    async def put(self, key: str, value: str, ttl_seconds: int) -> None:
+        client = await self._provider.client()
+        await client.set(key, value, ex=ttl_seconds)
+
+    async def get(self, key: str) -> str | None:
+        client = await self._provider.client()
+        return await client.get(key)
 
 
 _store: StateStore | None = None

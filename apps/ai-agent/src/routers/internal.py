@@ -46,7 +46,12 @@ async def send_welcome(payload: WelcomeNotification, x_internal_api_key: str | N
     _require_internal_key(x_internal_api_key)
     if not payload.phone:
         raise HTTPException(status_code=400, detail="phone é obrigatório")
-    await welcome_service.send_welcome(payload.phone, payload.name)
+    try:
+        await welcome_service.send_welcome(payload.phone, payload.name)
+    except Exception as exc:  # noqa: BLE001 - a API trata não-2xx como best-effort
+        raise HTTPException(
+            status_code=502, detail="Não foi possível entregar as boas-vindas"
+        ) from exc
     return {"status": "sent"}
 
 

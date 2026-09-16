@@ -100,6 +100,7 @@ KNOWN_COUNTERS = (
     "transactions_idempotent_hit",
     "extractions_idempotent_hit",
     "whatsapp_send_failed",
+    "jobs_reply_resumed",
     # Falha definitiva
     "dlq",
     # Catalogo de falhas (Entrega 5): a DLQ e transporte, o Postgres e a fonte
@@ -109,6 +110,10 @@ KNOWN_COUNTERS = (
     "dlq_catalog_duplicated",
     "dlq_catalog_failed",
     "dlq_catalog_invalid_envelope",
+    # Aviso ao usuário cuja mensagem caiu na DLQ: sem ele, a falha era silêncio.
+    "dlq_user_notified",
+    "dlq_user_notice_suppressed",
+    "dlq_user_notice_failed",
     # Reprocessamento pedido pelo painel de operacoes
     "ops_reprocess_published",
     "ops_reprocess_publish_failed",
