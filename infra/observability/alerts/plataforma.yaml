@@ -13,6 +13,12 @@ groups:
         # ou o token de métricas está errado. Dois minutos de tolerância porque um
         # deploy derruba o alvo por alguns segundos, e acordar alguém a cada deploy
         # é o caminho mais curto para o alerta ser silenciado.
+        #
+        # `ai-agent-worker` fica na alternância de propósito, mesmo sem serviço de
+        # worker nesta topologia (os consumers rodam dentro do `ai-agent`): `up == 0`
+        # só dispara se a série EXISTIR, então hoje ele é inerte, e se o worker
+        # virar serviço próprio já nasce coberto. Quem não pode citá-lo é o
+        # `absent()` abaixo.
         expr: up{job=~"api|ai-agent|ai-agent-worker"} == 0
         for: 2m
         labels:
@@ -41,10 +47,14 @@ groups:
         # dispara se a série **existir**. Se o Alloy cair, ou se um serviço nunca
         # for registrado no scrape, não há `up` nenhum — e o painel fica verde
         # porque não há nada vermelho. `absent()` é o que cobre esse silêncio.
+        #
+        # Só entram jobs que existem na topologia do Railway. `absent()` dispara
+        # justamente quando a série nunca aparece, então citar um serviço que não
+        # existe (o `ai-agent-worker`, com os consumers dentro do `ai-agent`) é um
+        # critical permanente. Ao criar um serviço novo, inclua-o aqui junto.
         expr: |
           absent(up{job="api"})
             or absent(up{job="ai-agent"})
-            or absent(up{job="ai-agent-worker"})
             or absent(up{job="rabbitmq"})
         for: 10m
         labels:

@@ -58,11 +58,12 @@ tests:
   - interval: 30s
     name: todos os alvos presentes não alerta ausencia
     input_series:
+      # Sem `up{job="ai-agent-worker"}` de propósito: com os consumers dentro do
+      # `ai-agent` (RUN_CONSUMERS_IN_API=true) o worker não existe, e isso é o
+      # estado normal, não coleta fora.
       - series: 'up{job="api"}'
         values: '1x40'
       - series: 'up{job="ai-agent"}'
-        values: '1x40'
-      - series: 'up{job="ai-agent-worker"}'
         values: '1x40'
       - series: 'up{job="rabbitmq"}'
         values: '1x40'
@@ -74,12 +75,11 @@ tests:
   - interval: 30s
     name: alvo que nunca aparece dispara ausencia de dados
     input_series:
-      # O worker nunca foi registrado no scrape (ou o Alloy caiu). Não existe
-      # `up{job="ai-agent-worker"}` — então `up == 0` NÃO dispara, e o painel fica
-      # verde por falta de dado. É o pior caso, e é o que esta regra cobre.
+      # O agente saiu do scrape (alvo removido da config, serviço renomeado no
+      # Railway). Não existe `up{job="ai-agent"}` — então `up == 0` NÃO dispara, e
+      # o painel fica verde por falta de dado. É o pior caso, e é o que esta regra
+      # cobre.
       - series: 'up{job="api"}'
-        values: '1x40'
-      - series: 'up{job="ai-agent"}'
         values: '1x40'
       - series: 'up{job="rabbitmq"}'
         values: '1x40'
@@ -95,7 +95,7 @@ tests:
               service: alloy
               # `absent()` preserva o label do seletor, então o alerta diz QUAL
               # alvo desapareceu em vez de só "algum".
-              job: ai-agent-worker
+              job: ai-agent
             exp_annotations:
               summary: 'Parou de chegar métrica de pelo menos um serviço'
               description: >-
