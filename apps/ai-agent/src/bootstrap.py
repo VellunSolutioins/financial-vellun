@@ -103,7 +103,7 @@ class Pipeline:
                 dlq_rk = dlq_routing_key(routing_key)
                 consumer = create_dlq_consumer(nome, dlq_rk)
                 if consumer is None:
-                    return
+                    continue
 
                 handler = DlqCatalogMessageConsumer(nome, dlq_rk)
                 await consumer.start(handler.handle)
@@ -150,9 +150,13 @@ class Pipeline:
         can_publish = self.publisher is not None and await self.publisher.healthy()
 
         consumers_ok = True
+        flusher_ok = True
         if self._consumers_running:
             for consumer in self._broker_consumers:
                 consumers_ok = consumers_ok and await consumer.healthy()
+            # Sem o flusher, texto é ackado na entrada e fica parado no Redis:
+            # nenhuma fila cresce e nenhuma DLQ acende. Só o readiness enxerga.
+            flusher_ok = self.flusher is not None and self.flusher.is_running()
 
         redis_ok = True
         if _uses_redis():
@@ -165,9 +169,44 @@ class Pipeline:
             "consumers": ("up" if consumers_ok else "down")
             if self._consumers_running
             else "disabled",
+            "flusher": ("up" if flusher_ok else "down")
+            if self._consumers_running
+            else "disabled",
             "redis": ("up" if redis_ok else "down") if _uses_redis() else "disabled",
         }
-        return (can_publish and consumers_ok and redis_ok), details
+        return (can_publish and consumers_ok and flusher_ok and redis_ok), details
+
+
+def log_runtime_config() -> None:
+    """Declara no log, uma vez na subida, a configuração que decide o fluxo.
+
+    Sem isto, nada nos logs dizia que o agente estava respondendo só no log
+    (``WHATSAPP_PROVIDER=log``) ou falando com a API errada: o webhook devolvia
+    ``202`` e o resto do pipeline era invisível. Nenhum segredo sai daqui —
+    apenas se está configurado.
+    """
+    from .services.messenger import messenger
+
+    logger.info(
+        "Configuração efetiva: environment=%s pipeline=%s broker=%s "
+        "run_consumers_in_api=%s group_store=%s main_api_url=%s llm_provider=%s "
+        "openai_key=%s messenger=%s whatsapp_phone_number_id=%s webhook_secret=%s",
+        settings.environment,
+        settings.message_pipeline,
+        settings.message_broker,
+        settings.run_consumers_in_api,
+        settings.group_store_backend,
+        settings.main_api_url,
+        settings.llm_provider,
+        _configurado(settings.openai_api_key),
+        type(messenger).__name__,
+        _configurado(settings.whatsapp_phone_number_id),
+        _configurado(settings.whatsapp_webhook_secret),
+    )
+
+
+def _configurado(value: str | None) -> str:
+    return "set" if value else "missing"
 
 
 def _uses_redis() -> bool:

@@ -3,11 +3,14 @@ import time
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Fuso horário da aplicação: Brasil (America/Sao_Paulo). Garante que
-# `date.today()`/`datetime.now()` (ex.: parsing de "hoje/ontem") usem o horário
-# de Brasília. `tzset` só existe em sistemas Unix.
-os.environ.setdefault("TZ", "America/Sao_Paulo")
+# Fuso do processo em Brasília, para logs e bibliotecas que usam o horário local.
+# Datas de negócio NÃO dependem disto: saem de `services/clock.py`.
+#
+# Só em Unix. No Windows não existe `tzset`, e definir `TZ` era pior que não
+# definir: o processo filho do `uvicorn --reload` nascia com a variável e o
+# runtime C lia "America/Sao_Paulo" como UTC+1 — às 20h, já era amanhã.
 if hasattr(time, "tzset"):
+    os.environ.setdefault("TZ", "America/Sao_Paulo")
     time.tzset()
 
 
@@ -97,6 +100,9 @@ class Settings(BaseSettings):
     # operacoes nao enxerga nada — util so para depurar o proprio pipeline.
     run_dlq_catalog_consumer: bool = True
     dlq_catalog_prefetch: int = 5
+    # Janela em que um mesmo telefone recebe no máximo um aviso de falha vinda da
+    # DLQ. Evita inundar o usuário num incidente. 0 desliga o aviso.
+    dlq_user_notice_cooldown_seconds: int = 600
 
     # ── Observabilidade ────────────────────────────────────────────────────
     # Token exigido em `GET /metrics` (`Authorization: Bearer ...`). Precisa ser

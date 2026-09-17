@@ -12,7 +12,8 @@ import json
 import pytest
 
 from src.consumers import DlqCatalogMessageConsumer, source_from_queue
-from src.messaging.base import BrokerMessage, TransientError
+from src.consumers.dlq_catalog_consumer import DLQ_USER_NOTICE
+from src.messaging.base import BrokerMessage, PermanentError, TransientError
 from src.messaging.contracts import DlqEnvelopeV1
 
 FILA = "whatsapp.processing.dlq"
@@ -39,8 +40,31 @@ class FakeCatalogo:
         return {"id": f"falha-{len(self.vistos)}", "duplicate": False}
 
 
+class FakeEntrega:
+    """Dublê do `message_processor.deliver`. `erro` simula o WhatsApp recusando."""
+
+    def __init__(self) -> None:
+        self.enviadas: list[tuple[str, str]] = []
+        self.erro: BaseException | None = None
+
+    async def deliver(self, phone, text):
+        if self.erro is not None:
+            raise self.erro
+        self.enviadas.append((phone, text))
+        return text
+
+
 @pytest.fixture
-def catalogo(monkeypatch):
+def entrega(monkeypatch):
+    fake = FakeEntrega()
+    import src.consumers.dlq_catalog_consumer as module
+
+    monkeypatch.setattr(module, "message_processor", fake)
+    return fake
+
+
+@pytest.fixture
+def catalogo(monkeypatch, entrega):
     fake = FakeCatalogo()
     import src.consumers.dlq_catalog_consumer as module
 
@@ -163,3 +187,71 @@ async def test_corpo_nao_json_tambem_e_catalogado(catalogo):
 
     assert catalogo.chamadas[0]["error_type"] == "InvalidDlqEnvelope"
     assert "raw" in catalogo.chamadas[0]["payload"]
+
+
+# ── Aviso ao usuario ─────────────────────────────────────────────────────────
+async def test_usuario_e_avisado_depois_de_catalogar(catalogo, entrega):
+    """Mensagem na DLQ e mensagem sem resposta: o usuario nao pode ficar no silencio."""
+    await consumer().handle(mensagem(envelope()))
+
+    assert entrega.enviadas == [("+5541999999999", DLQ_USER_NOTICE)]
+
+
+async def test_aviso_limitado_a_um_por_telefone_na_janela(catalogo, entrega):
+    # Duas falhas distintas do mesmo telefone num incidente: um aviso so.
+    await consumer().handle(mensagem(envelope(correlation_id="corr-1")))
+    await consumer().handle(mensagem(envelope(correlation_id="corr-2")))
+
+    assert len(catalogo.vistos) == 2
+    assert len(entrega.enviadas) == 1
+
+
+async def test_duplicata_nao_avisa_de_novo(catalogo, entrega):
+    from src.consumers.dlq_catalog_consumer import notice_key
+    from src.services.distributed_state import get_state_store
+
+    msg = mensagem(envelope())
+    await consumer().handle(msg)
+    # Janela ja vencida na reentrega: so a deduplicacao do catalogo impede o
+    # segundo aviso.
+    await get_state_store().forget(notice_key("+5541999999999"))
+    await consumer().handle(msg)
+
+    assert len(entrega.enviadas) == 1
+
+
+async def test_falha_ao_avisar_nao_impede_o_ack(catalogo, entrega):
+    """A falha ja esta gravada; o aviso e extra e nunca devolve a mensagem a fila."""
+    entrega.erro = PermanentError("WhatsApp Cloud API recusou envio: HTTP 401")
+
+    await consumer().handle(mensagem(envelope()))  # nao levanta
+
+    assert len(catalogo.vistos) == 1
+
+
+async def test_api_fora_nao_avisa(catalogo, entrega):
+    # Sem catalogar, a mensagem volta a DLQ e sera entregue de novo: avisar agora
+    # repetiria o aviso a cada volta.
+    catalogo.disponivel = False
+
+    with pytest.raises(TransientError):
+        await consumer().handle(mensagem(envelope()))
+
+    assert entrega.enviadas == []
+
+
+async def test_envelope_sem_telefone_nao_avisa(catalogo, entrega):
+    await consumer().handle(mensagem(envelope(payload={"raw": "corpo ilegivel"})))
+    await consumer().handle(BrokerMessage(body=b"nao json", routing_key=ROUTING_KEY))
+
+    assert entrega.enviadas == []
+
+
+async def test_aviso_desligado_com_janela_zero(catalogo, entrega, monkeypatch):
+    from src.config import settings
+
+    monkeypatch.setattr(settings, "dlq_user_notice_cooldown_seconds", 0)
+
+    await consumer().handle(mensagem(envelope()))
+
+    assert entrega.enviadas == []

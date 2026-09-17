@@ -70,11 +70,15 @@ novos.
 Resposta saudável:
 
 ```json
-{ "status": "ok", "pipeline": "broker", "broker": "up", "consumers": "up", "redis": "up" }
+{ "status": "ok", "pipeline": "broker", "broker": "up", "consumers": "up", "flusher": "up", "redis": "up" }
 ```
 
-`consumers: "disabled"` é esperado quando `RUN_CONSUMERS_IN_API=false` (a
-instância só publica).
+`consumers: "disabled"` e `flusher: "disabled"` são esperados quando
+`RUN_CONSUMERS_IN_API=false` (a instância só publica).
+
+`flusher: "down"` com os consumers de pé é grave e silencioso: o texto é ackado
+na entrada e fica parado no agrupamento do Redis, sem fila crescendo e sem DLQ.
+Reinicie a instância.
 
 ---
 
@@ -345,6 +349,11 @@ Confirme que o `errorType` bate com o que você corrigiu. Um `ConnectionError` q
 some depois de a API principal voltar é uma coisa; um `ValidationError`
 recorrente é outra, e nenhum restart conserta.
 
+> **Reprocessar um job de `processing` cuja entrega falhou não refaz o job.**
+> A resposta calculada fica em `job:reply:{jobId}` (TTL `JOB_DEDUPE_TTL_SECONDS`)
+> e o reprocessamento só a reenvia. Corrija a causa da recusa (token, número)
+> antes de republicar.
+
 ### 4. Republicar
 
 Não há shovel configurado. O caminho é republicar o **conteúdo do campo
@@ -478,6 +487,60 @@ docker exec financial-vellun-rabbitmq rabbitmqctl set_user_tags vellun_monitor m
 A tag `monitoring` dá leitura do painel e das métricas sem poder mexer nas filas —
 o que também torna as duas armadilhas acima inacessíveis por acidente. Republicar
 exige um usuário com escrita no vhost, e isso é decisão consciente, não o padrão.
+
+---
+
+## Webhook deu 202, mas o usuário não recebeu resposta
+
+O `202` só prova que a mensagem entrou em `whatsapp.inbound.v1`. Para achar onde
+ela parou, leia os contadores em `/metrics.json` do agente: o último que subiu
+aponta o salto. O passo a passo, com a tabela de leitura, está em
+[whatsapp-flow-gap-analysis.md](whatsapp-flow-gap-analysis.md#roteiro-de-diagnóstico).
+
+Sinais que só existem desde essa análise:
+
+- **O agente não sobe em produção** com `MessengerConfigError` no log: falta
+  `WHATSAPP_PROVIDER=cloud-api`, `WHATSAPP_PROVIDER_TOKEN` ou
+  `WHATSAPP_PHONE_NUMBER_ID`. É intencional — antes ele subia e respondia só no log.
+- **`whatsapp_send_failed` subindo**: a Graph API recusou ou ficou inalcançável.
+  `429`/`5xx`/rede retentam; outros `4xx` (token expirado é o clássico) vão direto
+  para a DLQ, com o código da Meta no `errorMessage`.
+- **`jobs_reply_resumed`**: um retry que só reenviou a resposta já calculada.
+  Normal em instabilidade do WhatsApp; o job não é reprocessado.
+- **`dlq_user_notified`**: o usuário recebeu o aviso de que a mensagem falhou.
+  `dlq_user_notice_suppressed` é a janela `DLQ_USER_NOTICE_COOLDOWN_SECONDS`
+  segurando avisos repetidos; `dlq_user_notice_failed` quase sempre acompanha
+  `whatsapp_send_failed`.
+
+A primeira linha de log da subida (`Configuração efetiva: ...`) diz qual
+messenger está ativo, a `MAIN_API_URL` e o que está ou não configurado.
+
+### Rastrear uma mensagem salto a salto
+
+`scripts/trace_message.py` envia **um** webhook de texto no formato da Meta e narra
+cada etapa conforme acontece, com o tempo desde o envio. No fim, confere no Postgres
+a mensagem, a resposta registrada e o último lançamento. Sai com código 1 se a
+mensagem não chegar a `jobs_processed`.
+
+```bash
+cd apps/ai-agent
+.venv/Scripts/python.exe scripts/trace_message.py "gastei 42,90 na padaria"
+.venv/Scripts/python.exe scripts/trace_message.py "oi" --phone +5541977775555   # não vinculado
+```
+
+```
+[    203 ms] 1 WEBHOOK     HTTP 202 {"status":"accepted","published":1}
+[    219 ms] 2 INBOUND     consumer tirou o evento de whatsapp.inbound.v1
+[    313 ms] 2 INBOUND     mensagem persistida na API e gravada no agrupamento → ack
+               Redis: group:+5511999999999 com 1 mensagem(ns); flush em ~4.8s
+[   6719 ms] 3 FLUSHER     job publicado em whatsapp.processing.v1
+[   8078 ms] 4 PROCESSING  LLM classificou a intenção
+[   8172 ms] 4 PROCESSING  lançamento criado na API
+[   8172 ms] 5 RESPOSTA    resposta entregue ao messenger e job concluído
+```
+
+Cria um lançamento de verdade — use um telefone de teste e `WHATSAPP_PROVIDER=log`.
+Com `log`, a "entrega" é a linha `[WhatsApp -> +55...]` no log do agente.
 
 ---
 

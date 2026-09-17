@@ -27,7 +27,10 @@ def needs_confirmation(
     """Retorna ``(precisa_confirmar, pergunta)``."""
     threshold = settings.confidence_threshold
 
-    if intent.amount is None:
+    # Zero conta como ausente: sem valor na mensagem, o LLM costuma preencher
+    # `amount: 0` em vez de nulo. Antes o zero passava, a API recusava o
+    # lançamento e o usuário recebia um erro genérico em vez desta pergunta.
+    if intent.amount is None or intent.amount <= 0:
         return True, "Não identifiquei o valor. Qual foi o valor do lançamento?"
 
     if intent.transaction_type is None:

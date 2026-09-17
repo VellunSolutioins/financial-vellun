@@ -17,6 +17,9 @@ dependencies = [
     "aio-pika>=9.4.0",
     # Exposicao de metricas em formato Prometheus (/metrics).
     "prometheus-client>=0.21.0",
+    # Base IANA de fusos para o `zoneinfo` (services/clock.py). O Windows nao tem
+    # uma; sem ela, "hoje em Brasilia" nao e calculavel fora de Linux.
+    "tzdata>=2024.1",
 ]
 
 [project.optional-dependencies]

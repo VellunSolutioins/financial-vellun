@@ -6,6 +6,7 @@ from datetime import date
 
 from ..schemas.financial_intent import FinancialIntent
 from .api_client import api_client
+from .clock import today_local
 from .metrics import metrics
 
 logger = logging.getLogger(__name__)
@@ -59,7 +60,7 @@ class TransactionCreator:
             "type": intent.transaction_type.value if intent.transaction_type else "expense",
             "amount": intent.amount,
             "description": intent.description or raw_message,
-            "transactionDate": intent.transaction_date or date.today().isoformat(),
+            "transactionDate": intent.transaction_date or today_local().isoformat(),
             "status": "confirmed",
             "source": "whatsapp",
             "rawInput": raw_message,

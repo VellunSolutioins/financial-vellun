@@ -1,11 +1,11 @@
 import base64
 import logging
-from datetime import date
 
 from openai import AsyncOpenAI
 
 from ...config import settings
 from ...schemas.financial_intent import FinancialIntent
+from ..clock import today_local
 from .base import LlmProvider
 
 logger = logging.getLogger(__name__)
@@ -79,7 +79,7 @@ class OpenAiProvider(LlmProvider):
         self._model = settings.openai_model
 
     async def extract_intent(self, message: str, context: dict) -> FinancialIntent:
-        today = context.get("today") or date.today().isoformat()
+        today = context.get("today") or today_local().isoformat()
         categories = context.get("categories") or []
         accounts = context.get("accounts") or []
         recent_messages = context.get("recent_messages") or []
@@ -120,7 +120,7 @@ class OpenAiProvider(LlmProvider):
     async def extract_intent_from_image(
         self, image_bytes: bytes, mime: str, caption: str | None, context: dict
     ) -> FinancialIntent:
-        today = context.get("today") or date.today().isoformat()
+        today = context.get("today") or today_local().isoformat()
         categories = context.get("categories") or []
         accounts = context.get("accounts") or []
 

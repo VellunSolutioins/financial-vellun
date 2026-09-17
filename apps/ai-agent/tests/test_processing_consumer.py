@@ -17,8 +17,8 @@ import asyncio
 import pytest
 
 from src.consumers import MessageProcessingConsumer
-from src.consumers.processing_consumer import done_key, lock_key
-from src.messaging.base import ROUTE_PROCESSING
+from src.consumers.processing_consumer import done_key, lock_key, reply_key
+from src.messaging.base import ROUTE_PROCESSING, PermanentError, TransientError
 from src.messaging.contracts import ProcessingJobV1, derive_job_id
 from src.schemas.financial_intent import FinancialIntent, IntentType, TransactionTypeEnum
 from src.services.distributed_state import get_state_store
@@ -516,3 +516,139 @@ async def test_confirmacao_pendente_tambem_usa_a_chave_do_job(broker, consumer, 
 
     assert len(env.extractions) == 1
     assert env.extraction_duplicates == 1
+
+
+# ── Entrega da resposta ──────────────────────────────────────────────────────
+class FlakyMessenger:
+    """Falha nas primeiras `falhas` entregas, depois entrega."""
+
+    def __init__(self, rec: Recorder, falhas: int, erro: BaseException) -> None:
+        self.rec = rec
+        self.falhas = falhas
+        self.erro = erro
+        self.tentativas = 0
+
+    async def send(self, phone, text):
+        self.tentativas += 1
+        if self.tentativas <= self.falhas:
+            raise self.erro
+        self.rec.sent.append(text)
+
+
+async def test_falha_no_envio_retenta_so_a_entrega(broker, consumer, env, monkeypatch):
+    """O retry reenvia a resposta guardada: não classifica nem cria de novo."""
+    import src.services.message_processor as mp
+
+    monkeypatch.setattr(mp, "messenger", FlakyMessenger(env, 1, TransientError("rede")))
+    job = make_job()
+
+    await publish_job(broker, job)
+    await broker.drain()
+
+    assert env.calls.count("classify") == 1
+    assert env.calls.count("create") == 1
+    assert env.sent == ["Lançamento criado!"]
+    assert len(broker.retried) == 1
+    store = get_state_store()
+    assert await store.exists(done_key(job.job_id)) is True
+    assert await store.get(reply_key(job.job_id)) is None
+
+
+async def test_envio_recusado_nao_marca_o_job_como_concluido(broker, consumer, env, monkeypatch):
+    """Antes o job virava `done` sem entrega, e reprocessar era no-op por 24h."""
+    import src.services.message_processor as mp
+
+    erro = PermanentError("WhatsApp Cloud API recusou envio: HTTP 401")
+    monkeypatch.setattr(mp, "messenger", FlakyMessenger(env, 99, erro))
+    job = make_job()
+
+    await publish_job(broker, job)
+    await broker.drain()
+
+    assert len(broker.dlq) == 1
+    assert env.sent == []
+    store = get_state_store()
+    assert await store.exists(done_key(job.job_id)) is False
+    # A resposta calculada fica guardada: o reprocessamento pelo painel só entrega.
+    assert await store.get(reply_key(job.job_id)) == "Lançamento criado!"
+
+
+async def test_confirmacao_nao_e_reclassificada_quando_so_o_envio_falha(
+    broker, consumer, env, monkeypatch
+):
+    """O caso que tornava o retry do job inteiro inseguro.
+
+    Criar o lançamento consome a confirmação pendente. Reprocessar o "sim" depois
+    disso o classificaria do zero, sem a pergunta que ele responde.
+    """
+    import src.services.message_processor as mp
+
+    pergunta = make_job(
+        "comprovante (imagem)",
+        source_message_ids=["ai-1"],
+        pre_extracted_intent=FinancialIntent(
+            intent=IntentType.create_transaction,
+            transaction_type=TransactionTypeEnum.expense,
+            amount=99.9,
+            description="farmácia",
+            category_name="Mercado",
+            confidence=0.9,
+        ).model_dump(mode="json"),
+        force_confirm=True,
+        confirm_question="Confirma?",
+    )
+    await publish_job(broker, pergunta)
+    await broker.drain()
+    assert env.sent == ["Confirma?"]
+
+    monkeypatch.setattr(mp, "messenger", FlakyMessenger(env, 1, TransientError("rede")))
+    await publish_job(broker, make_job("sim", source_message_ids=["ai-2"]))
+    await broker.drain()
+
+    assert env.calls.count("classify") == 0
+    assert env.calls.count("create") == 1
+    assert env.sent == ["Confirma?", "Lançamento criado!"]
+
+
+# ── Valor ausente ────────────────────────────────────────────────────────────
+async def test_valor_zero_do_llm_vira_pergunta_e_a_resposta_cria_o_lancamento(
+    broker, consumer, env, monkeypatch
+):
+    """"comprei um presente": o LLM devolve `amount: 0` em vez de nulo.
+
+    Antes o zero seguia para a API, que recusava, e o usuário recebia um erro
+    genérico. Agora ele é perguntado, e a resposta completa o lançamento.
+    """
+    import src.services.message_processor as mp
+
+    class SemValor:
+        async def classify(self, message, context):
+            env.calls.append("classify")
+            return FinancialIntent(
+                intent=IntentType.create_transaction,
+                transaction_type=TransactionTypeEnum.expense,
+                amount=0,
+                description="presente",
+                category_name="Mercado",
+                confidence=0.8,
+            )
+
+        def classify_with_rules(self, message, context=None):
+            from src.services.intent_classifier import IntentClassifier
+
+            return IntentClassifier(provider=None).classify_with_rules(message)
+
+    monkeypatch.setattr(mp, "intent_classifier", SemValor())
+
+    await publish_job(broker, make_job("comprei um presente", source_message_ids=["ai-1"]))
+    await broker.drain()
+
+    assert env.calls.count("create") == 0
+    assert env.sent == ["Não identifiquei o valor. Qual foi o valor do lançamento?"]
+
+    await publish_job(broker, make_job("foi 150 reais", source_message_ids=["ai-2"]))
+    await broker.drain()
+
+    assert env.calls.count("create") == 1
+    assert list(env.created.values())[0]["amount"] == 150
+    assert env.sent[-1] == "Lançamento criado!"

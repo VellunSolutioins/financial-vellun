@@ -8,9 +8,10 @@ funcionando mesmo sem `OPENAI_API_KEY`.
 import logging
 import re
 import time
-from datetime import date, timedelta
+from datetime import timedelta
 
 from ..schemas.financial_intent import FinancialIntent, IntentType, TransactionTypeEnum
+from .clock import today_local
 from .llm.base import LlmProvider
 from .llm.factory import create_llm_provider
 from .metrics import metrics
@@ -183,7 +184,7 @@ class IntentClassifier:
             amount=amount,
             description=message.strip(),
             category_name=category_name,
-            transaction_date=transaction_date or date.today().isoformat(),
+            transaction_date=transaction_date or today_local().isoformat(),
         )
 
         intent.confidence = self._estimate_confidence(intent)
@@ -220,7 +221,7 @@ class IntentClassifier:
         return None
 
     def _detect_date(self, text: str) -> str | None:
-        today = date.today()
+        today = today_local()
         if "anteontem" in text:
             return (today - timedelta(days=2)).isoformat()
         if "ontem" in text:

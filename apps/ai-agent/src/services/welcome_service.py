@@ -13,6 +13,7 @@ import logging
 
 from .audit_service import audit_service
 from .messenger import messenger
+from .metrics import metrics
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +41,16 @@ class WelcomeService:
     async def send_welcome(self, phone: str, name: str | None = None) -> str:
         """Envia a mensagem de boas-vindas e a registra como outbound.
 
-        Não levanta exceção fatal: o ``messenger`` já trata falhas de entrega
-        internamente e a auditoria é best-effort.
+        Falha de entrega **levanta** (o outbound não é registrado, porque não
+        saiu); o router traduz em ``502``. A auditoria segue best-effort.
         """
         text = build_welcome_message(name)
-        await messenger.send(phone, text)
+        try:
+            await messenger.send(phone, text)
+        except Exception:
+            metrics.incr("whatsapp_send_failed")
+            logger.exception("Falha ao enviar boas-vindas pelo WhatsApp")
+            raise
         await audit_service.log_message(phone, "outbound", text)
         logger.info("Mensagem de boas-vindas enviada para %s", phone)
         return text

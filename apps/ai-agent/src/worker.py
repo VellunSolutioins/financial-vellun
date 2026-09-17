@@ -20,7 +20,7 @@ import asyncio
 import logging
 import signal
 
-from .bootstrap import pipeline
+from .bootstrap import log_runtime_config, pipeline
 from .observability.logging import configure_logging
 from .observability.worker_server import WorkerObservabilityServer
 
@@ -32,6 +32,7 @@ async def run() -> None:
     # o que permite perguntar "o consumo está com problema?" sem que as duas
     # metades se misturem numa consulta só.
     configure_logging(service="ai-agent-worker")
+    log_runtime_config()
     stop_event = asyncio.Event()
 
     loop = asyncio.get_running_loop()
