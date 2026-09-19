@@ -122,6 +122,8 @@ class MessageProcessor:
             return await self._respond(phone, NOT_LINKED_MESSAGE)
 
         user_id = contact["userId"]
+        # Membro do plano Duo: ``userId`` é o dono dos dados; o autor vem à parte.
+        created_by_user_id = contact.get("createdByUserId")
 
         # Bloqueia antes de qualquer operação paga (LLM/criação) se sem assinatura.
         allowed, block_message = await subscription_gate.evaluate(user_id)
@@ -158,6 +160,7 @@ class MessageProcessor:
             force_confirm=force_confirm,
             confirm_question=confirm_question,
             idempotency_key=idempotency_key,
+            created_by_user_id=created_by_user_id,
         )
 
     async def handle_intent(
@@ -172,6 +175,7 @@ class MessageProcessor:
         force_confirm: bool = False,
         confirm_question: str | None = None,
         idempotency_key: str | None = None,
+        created_by_user_id: str | None = None,
     ) -> str:
         """Trata um ``FinancialIntent`` já extraído (texto, áudio ou imagem).
 
@@ -232,6 +236,7 @@ class MessageProcessor:
             raw_message,
             ai_extracted_transaction_id=extraction_id,
             idempotency_key=idempotency_key,
+            created_by_user_id=created_by_user_id,
         )
         await conversation_manager.clear(phone)
 

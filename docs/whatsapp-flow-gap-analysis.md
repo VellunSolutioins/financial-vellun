@@ -122,6 +122,25 @@ consultável** e os quatro dashboards estão vazios. É por isso que a investiga
 - **Não existe teste end-to-end** webhook → fila → consumers → resposta. A cobertura é por
   camada, com dublês nas fronteiras — exatamente onde o defeito está.
 
+### G7 — Endpoints `from-ai` das novas funções ainda não são seguros para a fila
+
+A API expõe `POST /internal/<recurso>/from-ai` para recorrências, metas de gastos,
+caixinhas (e aportes), cartões, lembretes, agenda e anotações, mas o agente **ainda não os
+chama** — o classificador só roteia lançamentos. Antes de ligar esse roteamento:
+
+- **Idempotência (bloqueante).** O pipeline entrega *at least once* e o painel `/ops/falhas`
+  reprocessa jobs; sem chave, cada reentrega cria outro lembrete, nota, aporte etc. Os oito
+  endpoints precisam aceitar `idempotencyKey` (o `jobId`) no mesmo padrão de
+  `createTransactionFromAi`: busca pela chave antes de criar, tratamento do `P2002` na
+  corrida e `assertIdempotencyOwner` para recusar chave de outro usuário.
+- **Autoria.** `GET /internal/whatsapp/contacts/:phone` devolve `userId` (dono dos dados; o
+  dono do plano, quando o telefone é de um membro Duo) e `createdByUserId` (quem mandou).
+  Os lançamentos já repassam `createdByUserId`; recursos que ganharem autoria devem fazer o
+  mesmo.
+- **Contexto Pessoal/Negócio.** `listCategories` filtra pelo `profileType` do cadastro. Um
+  dono de plano Business que lança pelo WhatsApp só enxerga as categorias desse perfil;
+  decidir como o agente escolhe o contexto antes de rotear intenções de Negócio.
+
 ---
 
 ## Roteiro de diagnóstico

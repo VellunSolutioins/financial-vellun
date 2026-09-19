@@ -1,5 +1,6 @@
 import { ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+
 import { InternalService } from './internal.service';
 
 /** Cria um mock mínimo do PrismaService com as entidades usadas pelo serviço. */
@@ -91,6 +92,32 @@ describe('InternalService', () => {
       );
       expect(result.conversationId).toBe('conv1');
       expect(result.messages.map((m: any) => m.id)).toEqual(['m1', 'm2']);
+    });
+  });
+
+  describe('findContactByPhone', () => {
+    const contato = (user: Record<string, unknown>) => ({
+      phoneNumber: '+5511999999999',
+      isVerified: true,
+      user: { name: 'Fulano', profileType: 'individual', householdOwnerId: null, ...user },
+    });
+
+    it('devolve o próprio usuário como dono e autor', async () => {
+      prisma.whatsappContact.findUnique.mockResolvedValue(contato({ id: 'dono' }));
+
+      const result = await service.findContactByPhone('11999999999');
+
+      expect(result).toMatchObject({ userId: 'dono', createdByUserId: 'dono' });
+    });
+
+    it('membro do plano Duo escreve no escopo do dono, mas continua autor', async () => {
+      prisma.whatsappContact.findUnique.mockResolvedValue(
+        contato({ id: 'membro', householdOwnerId: 'dono' }),
+      );
+
+      const result = await service.findContactByPhone('11999999999');
+
+      expect(result).toMatchObject({ userId: 'dono', createdByUserId: 'membro' });
     });
   });
 
@@ -303,6 +330,38 @@ describe('InternalService', () => {
       );
 
       await expect(service.createTransactionFromAi(dto)).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    // Membro do plano Duo: `userId` é o dono dos dados e `createdByUserId` é quem
+    // mandou a mensagem. A coluna é NOT NULL, então sem o campo cai no dono.
+    it('grava o autor informado (membro) separado do dono dos dados', async () => {
+      prisma.transaction.findUnique.mockResolvedValue(null);
+      prisma.transaction.create.mockResolvedValue({ id: 't1', status: 'pending' });
+
+      await service.createTransactionFromAi({
+        ...dto,
+        status: 'pending',
+        createdByUserId: 'membro',
+      });
+
+      expect(prisma.transaction.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ userId: 'u1', createdByUserId: 'membro' }),
+        }),
+      );
+    });
+
+    it('atribui ao dono quando o autor não é informado', async () => {
+      prisma.transaction.findUnique.mockResolvedValue(null);
+      prisma.transaction.create.mockResolvedValue({ id: 't1', status: 'pending' });
+
+      await service.createTransactionFromAi({ ...dto, status: 'pending' });
+
+      expect(prisma.transaction.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ userId: 'u1', createdByUserId: 'u1' }),
+        }),
+      );
     });
 
     it('grava lançamento e extração na mesma transação de banco', async () => {

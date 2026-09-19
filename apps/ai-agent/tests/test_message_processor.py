@@ -274,3 +274,76 @@ def test_category_reply_matching_ignores_accents_and_allows_partial_match():
         )
         == "Serviços"
     )
+
+
+def _run_member_flow(contact: dict) -> dict:
+    """Roda o caminho feliz e devolve os kwargs recebidos por ``create_from_intent``."""
+    received: dict = {}
+
+    class FakeContact:
+        async def find_by_phone(self, phone):
+            return contact
+
+    class FakeClassifier:
+        async def classify(self, message, context):
+            return FinancialIntent(
+                intent=IntentType.create_transaction,
+                transaction_type=TransactionTypeEnum.expense,
+                amount=30,
+                transaction_date="2026-06-18",
+                confidence=0.95,
+            )
+
+    class FakeTxCreator:
+        async def create_from_intent(self, intent, user_id, raw, **kwargs):
+            received.update(kwargs, user_id=user_id)
+            return {"ok": True, "message": "ok"}
+
+    class FakeAudit:
+        async def log_message(self, *a, **k):
+            return "msg-id"
+
+        async def log_extraction(self, *a, **k):
+            return "ext-id"
+
+    class FakeMessenger:
+        async def send(self, phone, text):
+            pass
+
+    originals = _patch(
+        {
+            "contact_service": FakeContact(),
+            "intent_classifier": FakeClassifier(),
+            "transaction_creator": FakeTxCreator(),
+            "audit_service": FakeAudit(),
+            "messenger": FakeMessenger(),
+            "needs_confirmation": lambda intent, message: (False, ""),
+            "subscription_gate": _FakeGate(allowed=True),
+        }
+    )
+
+    async def fake_build_context(self, user_id, contact, phone):
+        return {"recent_messages": []}
+
+    orig_build = mp.MessageProcessor._build_context
+    mp.MessageProcessor._build_context = fake_build_context
+    try:
+        asyncio.run(mp.message_processor.process_buffered_message("+5511", "gastei 30", ["m1"]))
+    finally:
+        mp.MessageProcessor._build_context = orig_build
+        _restore(originals)
+    return received
+
+
+def test_duo_member_is_credited_as_author_but_writes_in_owner_scope():
+    received = _run_member_flow({"userId": "dono", "createdByUserId": "membro"})
+
+    assert received["user_id"] == "dono"
+    assert received["created_by_user_id"] == "membro"
+
+
+def test_contact_without_author_field_keeps_default_attribution():
+    received = _run_member_flow({"userId": "u1"})
+
+    assert received["user_id"] == "u1"
+    assert received["created_by_user_id"] is None

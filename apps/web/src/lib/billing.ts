@@ -20,6 +20,7 @@ export interface Plan {
   currency: string;
   interval: BillingInterval;
   isActive: boolean;
+  maxMembers: number;
   features?: Record<string, unknown> | null;
 }
 
@@ -53,6 +54,27 @@ export const createPaymentMethodSession = () =>
   apiClient.post<{ url: string }>('/billing/payment-method', {});
 
 export const cancelSubscription = () => apiClient.post<SubscriptionState>('/billing/cancel', {});
+
+// Planos que liberam a área Empresa. Inclui os códigos legados mantidos vivos
+// no seed (retiredPlanCodes) para não tirar o acesso de quem já assinava
+// antes da introdução dos planos Individual/Duo/Business.
+const BUSINESS_PLAN_CODES = new Set([
+  'vellun-business-mensal',
+  'vellun-business-anual',
+  'vellun-mensal',
+  'vellun-anual',
+  'vellun-family-mensal',
+  'vellun-family-anual',
+  // Plano de desenvolvimento local (seed só o cria fora de produção), para que
+  // a área Empresa possa ser testada com ele. Inerte em produção: o plano não
+  // existe lá e o usuário não escolhe o próprio `code`.
+  'vellun-local-dev',
+]);
+
+/** Deriva o acesso à área Empresa pelo `code` (imutável), não pelo `name` (texto de marketing). */
+export function hasBusinessArea(plan?: { code?: string | null } | null): boolean {
+  return !!plan?.code && BUSINESS_PLAN_CODES.has(plan.code);
+}
 
 /** Formata valor monetário em R$ (pt-BR). */
 export function formatBRL(value: string | number): string {

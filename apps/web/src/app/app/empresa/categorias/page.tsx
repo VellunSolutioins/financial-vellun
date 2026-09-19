@@ -1,5 +1,5 @@
 import { CategoriesView } from '@/components/categories/CategoriesView';
 
 export default function EmpresaCategoriasPage() {
-  return <CategoriesView showCostCenter />;
+  return <CategoriesView showCostCenter profileType="business" />;
 }

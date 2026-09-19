@@ -1,19 +1,24 @@
 'use client';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useState, Suspense } from 'react';
+import { ArrowLeftRight, Eye, Plus, TrendingDown, TrendingUp } from 'lucide-react';
+
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Dialog } from '@/components/ui/dialog';
 import { Pagination } from '@/components/ui/pagination';
-import { DataTable, type DataTableColumn } from '@/components/ui/table';
 import { TransactionForm } from '@/components/transactions/TransactionForm';
 import { useTransactions, type Transaction } from '@/hooks/useTransactions';
+import { useMembers } from '@/hooks/useMembers';
+import { useAuth } from '@/contexts/auth-context';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
 import { formatDateBR } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 
 function formatCurrency(v: number) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
@@ -32,12 +37,27 @@ const sourceLabels: Record<string, string> = {
   recurring: 'Recorrente',
 };
 
-/** Origens que recebem o selo de destaque: o que foi registrado pela IA. */
+const typeStyle = {
+  income: { icon: TrendingUp, tone: 'text-emerald-600 bg-emerald-50', sign: '+' },
+  expense: { icon: TrendingDown, tone: 'text-rose-600 bg-rose-50', sign: '-' },
+  transfer: { icon: ArrowLeftRight, tone: 'text-blue-600 bg-blue-50', sign: '' },
+} as const;
+
+/**
+ * Origens que recebem o selo de destaque: o que foi registrado pela IA. O
+ * pipeline do WhatsApp grava `whatsapp`, então checar só `ai` deixava esses
+ * lançamentos sem selo.
+ */
 const REGISTRADO_PELA_IA = new Set<string>(['ai', 'whatsapp']);
 
 function monthLabel(month: string) {
-  const [year, monthNumber] = month.split('-');
-  return `${monthNumber}/${year.slice(2)}`;
+  const [year, monthNumber] = month.split('-').map(Number);
+  const label = new Intl.DateTimeFormat('pt-BR', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(new Date(Date.UTC(year, monthNumber - 1, 1)));
+  return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 function currentMonth() {
@@ -60,8 +80,16 @@ function TransacoesContent() {
   const router = useRouter();
   const toast = useToast();
   const confirm = useConfirm();
+  const { user } = useAuth();
+  const { data: membersData } = useMembers();
+  const household = membersData
+    ? [membersData.owner, ...membersData.members]
+    : [];
+  const hasMembers = household.length > 1;
   const [modalOpen, setModalOpen] = useState(false);
   const [editingTx, setEditingTx] = useState<Transaction | undefined>();
+  const [viewingTx, setViewingTx] = useState<Transaction | undefined>();
+  const [newType, setNewType] = useState<'income' | 'expense'>('expense');
   const selectedMonth = searchParams.get('month') ?? currentMonth();
   const { start: monthStart, end: monthEnd } = monthRange(selectedMonth);
 
@@ -79,6 +107,7 @@ function TransacoesContent() {
     source: searchParams.get('source') ?? undefined,
     categoryId: searchParams.get('categoryId') ?? undefined,
     search: searchParams.get('search') ?? undefined,
+    authorId: searchParams.get('authorId') ?? undefined,
     periodStart: monthStart,
     periodEnd: monthEnd,
   };
@@ -93,8 +122,9 @@ function TransacoesContent() {
     router.push(`?${params.toString()}`);
   };
 
-  const openNew = () => {
+  const openNew = (type: 'income' | 'expense') => {
     setEditingTx(undefined);
+    setNewType(type);
     setModalOpen(true);
   };
   const openEdit = (tx: Transaction) => {
@@ -123,108 +153,14 @@ function TransacoesContent() {
     }
   };
 
-  const columns: DataTableColumn<Transaction>[] = [
-    {
-      key: 'transactionDate',
-      header: 'Data',
-      cellClassName: 'text-muted-foreground',
-      cell: (tx) => formatDateBR(tx.transactionDate),
-    },
-    {
-      key: 'description',
-      header: 'Descrição',
-      cellClassName: 'font-medium',
-      cell: (tx) => tx.description,
-    },
-    {
-      key: 'category',
-      header: 'Categoria',
-      cellClassName: 'text-muted-foreground',
-      cell: (tx) => tx.category?.name ?? '—',
-    },
-    {
-      key: 'account',
-      header: 'Conta',
-      cellClassName: 'text-muted-foreground',
-      cell: (tx) => tx.account?.name ?? '—',
-    },
-    {
-      key: 'source',
-      header: 'Origem',
-      // Manual não ganha selo: é o caso comum, e um selo em toda linha vira ruído.
-      // O destaque é para o que a IA registrou, venha como `ai` ou `whatsapp`: o
-      // pipeline do WhatsApp passou a gravar `whatsapp`, e checar só `ai` deixava
-      // esses lançamentos com o mesmo selo de uma importação.
-      cell: (tx) =>
-        tx.source === 'manual' ? null : (
-          <Badge variant={REGISTRADO_PELA_IA.has(tx.source) ? 'secondary' : 'outline'}>
-            {sourceLabels[tx.source]}
-          </Badge>
-        ),
-    },
-    {
-      key: 'status',
-      header: 'Status',
-      cell: (tx) => (
-        <Badge
-          variant={
-            tx.status === 'confirmed'
-              ? 'success'
-              : tx.status === 'pending'
-                ? 'warning'
-                : 'destructive'
-          }
-        >
-          {statusLabels[tx.status]}
-        </Badge>
-      ),
-    },
-    {
-      key: 'amount',
-      header: 'Valor',
-      align: 'right',
-      cellClassName: (tx) =>
-        `font-semibold ${
-          tx.type === 'income'
-            ? 'text-green-600'
-            : tx.type === 'expense'
-              ? 'text-red-600'
-              : 'text-gray-700'
-        }`,
-      cell: (tx) => (
-        <>
-          {tx.type === 'income' ? '+' : tx.type === 'expense' ? '-' : ''}
-          {formatCurrency(Number(tx.amount))}
-        </>
-      ),
-    },
-    {
-      key: 'acoes',
-      align: 'right',
-      cellClassName: 'whitespace-nowrap',
-      cell: (tx) => (
-        <>
-          <Button size="sm" variant="ghost" onClick={() => openEdit(tx)}>
-            Editar
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="text-destructive"
-            onClick={() => void handleDelete(tx)}
-          >
-            Excluir
-          </Button>
-        </>
-      ),
-    },
-  ];
-
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold">Lançamentos</h1>
-        <div className="flex items-center gap-2">
+        <div>
+          <h1 className="text-xl font-bold sm:text-2xl">Lançamentos</h1>
+          <p className="text-sm text-muted-foreground">Suas receitas e despesas do período.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
           <Select
             value={selectedMonth}
             onChange={(e) => setParam('month', e.target.value)}
@@ -236,58 +172,195 @@ function TransacoesContent() {
               </option>
             ))}
           </Select>
-          <Button onClick={openNew}>+ Novo lançamento</Button>
+          <Button
+            size="sm"
+            onClick={() => openNew('income')}
+            className="bg-emerald-600 text-white hover:bg-emerald-600/90"
+          >
+            <Plus className="mr-1 h-4 w-4" />
+            Entrada
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => openNew('expense')}
+            className="bg-rose-600 text-white hover:bg-rose-600/90"
+          >
+            <Plus className="mr-1 h-4 w-4" />
+            Saída
+          </Button>
         </div>
       </div>
 
       {/* Filters */}
-      <div className="bg-white rounded-lg border p-4 grid grid-cols-2 md:grid-cols-5 gap-3">
-        <Input
-          placeholder="Buscar descrição..."
-          defaultValue={filters.search}
-          onChange={(e) => setParam('search', e.target.value)}
-        />
-        <Select defaultValue={filters.type} onChange={(e) => setParam('type', e.target.value)}>
-          <option value="">Todos os tipos</option>
-          <option value="income">Receita</option>
-          <option value="expense">Despesa</option>
-          <option value="transfer">Transferência</option>
-        </Select>
-        <Select defaultValue={filters.status} onChange={(e) => setParam('status', e.target.value)}>
-          <option value="">Todos os status</option>
-          <option value="confirmed">Confirmado</option>
-          <option value="pending">Pendente</option>
-          <option value="cancelled">Cancelado</option>
-        </Select>
-        <Select
-          defaultValue={filters.categoryId}
-          onChange={(e) => setParam('categoryId', e.target.value)}
+      <Card className="rounded-2xl">
+        <CardContent
+          className={cn('grid grid-cols-2 gap-3 p-4', hasMembers ? 'md:grid-cols-6' : 'md:grid-cols-5')}
         >
-          <option value="">Todas categorias</option>
-          <option value="uncategorized">Sem categoria</option>
-        </Select>
-      </div>
+          <Input
+            placeholder="Buscar descrição..."
+            defaultValue={filters.search}
+            onChange={(e) => setParam('search', e.target.value)}
+            className="col-span-2 md:col-span-2"
+          />
+          <Select defaultValue={filters.type} onChange={(e) => setParam('type', e.target.value)}>
+            <option value="">Todos os tipos</option>
+            <option value="income">Receita</option>
+            <option value="expense">Despesa</option>
+            <option value="transfer">Transferência</option>
+          </Select>
+          <Select defaultValue={filters.status} onChange={(e) => setParam('status', e.target.value)}>
+            <option value="">Todos os status</option>
+            <option value="confirmed">Confirmado</option>
+            <option value="pending">Pendente</option>
+            <option value="cancelled">Cancelado</option>
+          </Select>
+          <Select
+            defaultValue={filters.categoryId}
+            onChange={(e) => setParam('categoryId', e.target.value)}
+          >
+            <option value="">Todas categorias</option>
+            <option value="uncategorized">Sem categoria</option>
+          </Select>
+          {hasMembers && (
+            <Select
+              defaultValue={filters.authorId}
+              onChange={(e) => setParam('authorId', e.target.value)}
+            >
+              <option value="">Todos os autores</option>
+              {household.map((person) => (
+                <option key={person.id} value={person.id}>
+                  {person.id === user?.id ? 'Você' : person.name}
+                </option>
+              ))}
+            </Select>
+          )}
+        </CardContent>
+      </Card>
 
-      {/* Table */}
-      <DataTable
-        columns={columns}
-        rows={data}
-        rowKey={(tx) => tx.id}
-        loading={loading}
-        minWidth={720}
-        empty="Nenhum lançamento encontrado."
-      />
+      {/* List */}
+      <Card className="rounded-2xl">
+        <CardContent className="overflow-x-auto p-0">
+          {loading ? (
+            <div className="p-10 text-center text-sm text-muted-foreground">Carregando...</div>
+          ) : data.length === 0 ? (
+            <div className="p-10 text-center text-sm text-muted-foreground">
+              Nenhum lançamento encontrado.
+            </div>
+          ) : (
+            <table className="w-full min-w-[620px] text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-xs font-medium text-muted-foreground">
+                  <th className="p-3">Descrição</th>
+                  <th className="p-3">Categoria</th>
+                  <th className="p-3 text-right">Valor</th>
+                  <th className="p-3" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {data.map((tx) => {
+                  const style = typeStyle[tx.type];
+                  const Icon = style.icon;
+                  return (
+                    <tr
+                      key={tx.id}
+                      onClick={() => openEdit(tx)}
+                      className="cursor-pointer transition-colors hover:bg-muted/40"
+                    >
+                      <td className="p-3">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span
+                            className={cn(
+                              'flex h-7 w-7 shrink-0 items-center justify-center rounded-full',
+                              style.tone,
+                            )}
+                          >
+                            <Icon className="h-3.5 w-3.5" />
+                          </span>
+                          <div className="min-w-0">
+                            <p className="truncate font-medium">{tx.description}</p>
+                            <div className="flex items-center gap-1.5">
+                              <p className="text-xs text-muted-foreground">
+                                {formatDateBR(tx.transactionDate)}
+                                {hasMembers && tx.createdBy && (
+                                  <>
+                                    {' · '}
+                                    {tx.createdBy.id === user?.id ? 'Você' : tx.createdBy.name}
+                                  </>
+                                )}
+                              </p>
+                              {REGISTRADO_PELA_IA.has(tx.source) && (
+                                <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
+                                  IA
+                                </Badge>
+                              )}
+                              {(tx.recurrenceType === 'parcelado' || tx.recurrenceType === 'fixo') && (
+                                <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+                                  {tx.recurrenceType === 'parcelado' && tx.installmentTotal
+                                    ? `${tx.installmentNumber}/${tx.installmentTotal}`
+                                    : 'Fixo'}
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="whitespace-nowrap p-3 text-muted-foreground">
+                        {tx.category?.name ?? '—'}
+                      </td>
+                      <td
+                        className={cn(
+                          'whitespace-nowrap p-3 text-right font-semibold',
+                          tx.type === 'income'
+                            ? 'text-emerald-600'
+                            : tx.type === 'expense'
+                              ? 'text-rose-600'
+                              : 'text-foreground',
+                        )}
+                      >
+                        {style.sign}
+                        {formatCurrency(Number(tx.amount))}
+                      </td>
+                      <td className="whitespace-nowrap p-3 text-right">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setViewingTx(tx);
+                          }}
+                          title="Ver detalhes"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleDelete(tx);
+                          }}
+                        >
+                          Excluir
+                        </Button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
 
-      <Pagination
-        page={meta.page}
-        totalPages={meta.total_pages}
-        onPageChange={(nova) => setParam('page', String(nova))}
-        summary={
-          meta.total > 0
-            ? `${meta.total} lançamento${meta.total === 1 ? '' : 's'} em ${monthLabel(selectedMonth)}`
-            : undefined
-        }
-      />
+      {meta.total > 0 && (
+        <Pagination
+          page={meta.page}
+          totalPages={meta.total_pages}
+          onPageChange={(nova) => setParam('page', String(nova))}
+          summary={`${meta.total} lançamento${meta.total === 1 ? '' : 's'} em ${monthLabel(selectedMonth)}`}
+        />
+      )}
 
       {/* Modal */}
       <Dialog
@@ -295,7 +368,68 @@ function TransacoesContent() {
         onClose={closeModal}
         title={editingTx ? 'Editar lançamento' : 'Novo lançamento'}
       >
-        <TransactionForm transaction={editingTx} onSuccess={handleSuccess} onCancel={closeModal} />
+        <TransactionForm
+          transaction={editingTx}
+          defaultType={newType}
+          onSuccess={handleSuccess}
+          onCancel={closeModal}
+        />
+        {editingTx && (
+          <div className="mt-2 flex justify-end">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="text-destructive"
+              onClick={() => {
+                closeModal();
+                void handleDelete(editingTx);
+              }}
+            >
+              Excluir lançamento
+            </Button>
+          </div>
+        )}
+      </Dialog>
+
+      {/* Detalhes (somente leitura) */}
+      <Dialog
+        open={!!viewingTx}
+        onClose={() => setViewingTx(undefined)}
+        title="Detalhes do lançamento"
+      >
+        {viewingTx && (
+          <dl className="space-y-3 text-sm">
+            {[
+              ['Descrição', viewingTx.description],
+              [
+                'Valor',
+                `${typeStyle[viewingTx.type].sign}${formatCurrency(Number(viewingTx.amount))}`,
+              ],
+              ['Data', formatDateBR(viewingTx.transactionDate)],
+              ...(hasMembers
+                ? [['Lançado por', viewingTx.createdBy?.id === user?.id ? 'Você' : (viewingTx.createdBy?.name ?? '—')]]
+                : []),
+              ['Categoria', viewingTx.category?.name ?? '—'],
+              ['Conta', viewingTx.account?.name ?? '—'],
+              ['Origem', sourceLabels[viewingTx.source]],
+              ['Status', statusLabels[viewingTx.status]],
+              [
+                'Recorrência',
+                viewingTx.recurrenceType === 'parcelado' && viewingTx.installmentTotal
+                  ? `Parcelado (${viewingTx.installmentNumber}/${viewingTx.installmentTotal})`
+                  : viewingTx.recurrenceType === 'fixo'
+                    ? 'Fixo (repete todo mês)'
+                    : 'Avulso',
+              ],
+            ].map(([label, value]) => (
+              <div key={label} className="flex items-center justify-between gap-4 border-b border-border pb-2 last:border-0 last:pb-0">
+                <dt className="text-muted-foreground">{label}</dt>
+                <dd className="text-right font-medium">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
       </Dialog>
     </div>
   );

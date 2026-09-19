@@ -113,7 +113,13 @@ def env(monkeypatch):
         fail_after_create = False
 
         async def create_from_intent(
-            self, intent, user_id, raw, ai_extracted_transaction_id=None, idempotency_key=None
+            self,
+            intent,
+            user_id,
+            raw,
+            ai_extracted_transaction_id=None,
+            idempotency_key=None,
+            created_by_user_id=None,
         ):
             rec.calls.append("create")
             rec.linked.append(ai_extracted_transaction_id)

@@ -13,28 +13,51 @@ import { useConfirm } from '@/components/ui/confirm';
 import type { Transaction } from '@/hooks/useTransactions';
 import { CURRENCY_REGEX, currencyToNumber, formatCurrencyInput, maskCurrency } from '@/lib/masks';
 
-const schema = z.object({
-  type: z.enum(['income', 'expense', 'transfer']),
-  amount: z
-    .string()
-    .min(1, 'Valor obrigatório')
-    .regex(CURRENCY_REGEX, 'Valor inválido')
-    .refine((v) => currencyToNumber(v) > 0, 'Valor deve ser positivo'),
-  description: z.string().min(1, 'Descrição obrigatória'),
-  accountId: z.string().min(1, 'Conta obrigatória'),
-  categoryId: z.string().optional(),
-  transactionDate: z.string().min(1, 'Data obrigatória'),
-  status: z.enum(['confirmed', 'pending']),
-});
+const schema = z
+  .object({
+    type: z.enum(['income', 'expense', 'transfer']),
+    amount: z
+      .string()
+      .min(1, 'Valor obrigatório')
+      .regex(CURRENCY_REGEX, 'Valor inválido')
+      .refine((v) => currencyToNumber(v) > 0, 'Valor deve ser positivo'),
+    description: z.string().min(1, 'Descrição obrigatória'),
+    accountId: z.string().min(1, 'Conta obrigatória'),
+    categoryId: z.string().optional(),
+    transactionDate: z.string().min(1, 'Data obrigatória'),
+    status: z.enum(['confirmed', 'pending']),
+    recurrenceType: z.enum(['avulso', 'fixo', 'parcelado']),
+    installments: z.string().optional(),
+    recurrenceMonths: z.string().optional(),
+  })
+  .refine(
+    (data) =>
+      data.recurrenceType !== 'parcelado' ||
+      (Number(data.installments) >= 2 && Number(data.installments) <= 72),
+    { message: 'Informe entre 2 e 72 parcelas', path: ['installments'] },
+  )
+  .refine(
+    (data) =>
+      data.recurrenceType !== 'fixo' ||
+      (Number(data.recurrenceMonths) >= 2 && Number(data.recurrenceMonths) <= 120),
+    { message: 'Informe entre 2 e 120 meses', path: ['recurrenceMonths'] },
+  );
 type FormData = z.infer<typeof schema>;
+
+const recurrenceLabels: Record<FormData['recurrenceType'], string> = {
+  avulso: 'Avulso',
+  fixo: 'Fixo (repete todo mês)',
+  parcelado: 'Parcelado',
+};
 
 interface Props {
   transaction?: Transaction;
+  defaultType?: 'income' | 'expense';
   onSuccess: () => void;
   onCancel: () => void;
 }
 
-export function TransactionForm({ transaction, onSuccess, onCancel }: Props) {
+export function TransactionForm({ transaction, defaultType, onSuccess, onCancel }: Props) {
   const [accounts, setAccounts] = useState<{ id: string; name: string }[]>([]);
   const [categories, setCategories] = useState<{ id: string; name: string; type: string }[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -50,7 +73,7 @@ export function TransactionForm({ transaction, onSuccess, onCancel }: Props) {
   } = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: {
-      type: transaction?.type ?? 'expense',
+      type: transaction?.type ?? defaultType ?? 'expense',
       amount: transaction ? formatCurrencyInput(Number(transaction.amount)) : '',
       description: transaction?.description ?? '',
       accountId: transaction?.accountId ?? '',
@@ -59,15 +82,44 @@ export function TransactionForm({ transaction, onSuccess, onCancel }: Props) {
         ? new Date(transaction.transactionDate).toISOString().slice(0, 10)
         : new Date().toISOString().slice(0, 10),
       status: (transaction?.status as 'confirmed' | 'pending') ?? 'confirmed',
+      recurrenceType: 'avulso',
+      installments: '',
+      recurrenceMonths: '',
     },
   });
 
   const selectedType = watch('type');
+  const selectedRecurrenceType = watch('recurrenceType');
+  const watchedAmount = watch('amount');
+  const watchedInstallments = watch('installments');
+
+  // Em "parcelado" o campo Valor é o TOTAL da compra e o backend reparte — a
+  // prévia existe pra ninguém digitar o valor da parcela por engano.
+  const isInstallment = !transaction && selectedRecurrenceType === 'parcelado';
+  const installmentPreview = (() => {
+    if (!isInstallment) return null;
+    const total = currencyToNumber(watchedAmount ?? '');
+    const count = Number(watchedInstallments);
+    if (!total || !Number.isInteger(count) || count < 2 || count > 72) return null;
+    // Espelha installmentAmounts() da API: base arredondada pra baixo, última
+    // parcela absorve a sobra de centavos.
+    const totalCents = Math.round(total * 100);
+    const baseCents = Math.floor(totalCents / count);
+    const lastCents = baseCents + (totalCents - baseCents * count);
+    const base = formatCurrencyInput(baseCents / 100);
+    const last = formatCurrencyInput(lastCents / 100);
+    return baseCents === lastCents
+      ? `${count}x de R$ ${base}`
+      : `${count - 1}x de R$ ${base} + última de R$ ${last}`;
+  })();
 
   useEffect(() => {
     Promise.all([
       apiClient.get<{ id: string; name: string }[]>('/accounts'),
-      apiClient.get<{ id: string; name: string; type: string }[]>('/categories'),
+      // Tela Pessoal — ver comentário em RecurringRuleForm sobre o filtro.
+      apiClient.get<{ id: string; name: string; type: string }[]>(
+        '/categories?profileType=individual',
+      ),
     ])
       .then(([acc, cat]) => {
         setAccounts(acc);
@@ -78,7 +130,16 @@ export function TransactionForm({ transaction, onSuccess, onCancel }: Props) {
 
   const onSubmit = async (data: FormData) => {
     setSubmitting(true);
-    const payload = { ...data, amount: currencyToNumber(data.amount) };
+    const { installments, recurrenceMonths, recurrenceType, ...rest } = data;
+    const payload = transaction
+      ? { ...rest, amount: currencyToNumber(data.amount) }
+      : {
+          ...rest,
+          recurrenceType,
+          amount: currencyToNumber(data.amount),
+          ...(recurrenceType === 'parcelado' && { installments: Number(installments) }),
+          ...(recurrenceType === 'fixo' && { recurrenceMonths: Number(recurrenceMonths) }),
+        };
     try {
       if (transaction) {
         await apiClient.patch(`/transactions/${transaction.id}`, payload);
@@ -139,7 +200,7 @@ export function TransactionForm({ transaction, onSuccess, onCancel }: Props) {
         </div>
       </div>
       <div className="space-y-1">
-        <Label>Valor (R$)</Label>
+        <Label>{isInstallment ? 'Valor total da compra (R$)' : 'Valor (R$)'}</Label>
         <Input
           inputMode="decimal"
           placeholder="0,00"
@@ -193,6 +254,49 @@ export function TransactionForm({ transaction, onSuccess, onCancel }: Props) {
           <p className="text-xs text-destructive">{errors.transactionDate.message}</p>
         )}
       </div>
+      {!transaction && (
+        <div className="space-y-1">
+          <Label>Tipo de lançamento</Label>
+          <Select {...register('recurrenceType')}>
+            {Object.entries(recurrenceLabels).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </Select>
+          {selectedRecurrenceType === 'parcelado' && (
+            <div className="pt-1">
+              <Input
+                type="number"
+                min={2}
+                max={72}
+                placeholder="Número de parcelas"
+                {...register('installments')}
+              />
+              {errors.installments && (
+                <p className="text-xs text-destructive">{errors.installments.message}</p>
+              )}
+              {!errors.installments && installmentPreview && (
+                <p className="pt-1 text-xs text-muted-foreground">{installmentPreview}</p>
+              )}
+            </div>
+          )}
+          {selectedRecurrenceType === 'fixo' && (
+            <div className="pt-1">
+              <Input
+                type="number"
+                min={2}
+                max={120}
+                placeholder="Repetir por quantos meses"
+                {...register('recurrenceMonths')}
+              />
+              {errors.recurrenceMonths && (
+                <p className="text-xs text-destructive">{errors.recurrenceMonths.message}</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       <div className="flex gap-2 pt-2">
         <Button type="submit" disabled={submitting} className="flex-1">
           {submitting ? 'Salvando...' : transaction ? 'Salvar alterações' : 'Criar lançamento'}

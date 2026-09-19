@@ -40,6 +40,12 @@ describe('CsrfGuard', () => {
     );
   });
 
+  it('libera aceite de convite mesmo quando o navegador ainda envia cookie de sessão antigo', () => {
+    expect(
+      guard.canActivate(context('POST', { access_token: 'jwt' }, {}, '/members/accept-invite')),
+    ).toBe(true);
+  });
+
   // ── Logout e refresh ─────────────────────────────────────────────────────
   // Eram isentos de CSRF por inteiro. Como agem sobre uma sessão que já existe,
   // uma página de terceiro conseguia forçar logout ou rotação de token com um

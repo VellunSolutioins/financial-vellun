@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
+
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -43,9 +44,11 @@ const typeLabels: Record<string, string> = {
 interface Props {
   /** Exibe o campo/coluna "Centro de custo" (apenas para perfis business) */
   showCostCenter?: boolean;
+  /** Contexto Pessoal/Negócio desta tela — filtra e marca as categorias independente do perfil cadastrado do usuário. */
+  profileType?: 'individual' | 'business';
 }
 
-export function CategoriesView({ showCostCenter = false }: Props) {
+export function CategoriesView({ showCostCenter = false, profileType }: Props) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
@@ -65,14 +68,15 @@ export function CategoriesView({ showCostCenter = false }: Props) {
 
   const load = () =>
     apiClient
-      .get<Category[]>('/categories')
+      .get<Category[]>(`/categories${profileType ? `?profileType=${profileType}` : ''}`)
       .then(setCategories)
       .catch(console.error)
       .finally(() => setLoading(false));
 
   useEffect(() => {
     void load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileType]);
 
   const openNew = () => {
     setEditing(null);
@@ -95,6 +99,7 @@ export function CategoriesView({ showCostCenter = false }: Props) {
     const payload = {
       ...data,
       costCenter: showCostCenter ? data.costCenter || undefined : undefined,
+      profileType: editing ? undefined : profileType,
     };
     try {
       if (editing) {

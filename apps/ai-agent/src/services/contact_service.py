@@ -11,7 +11,11 @@ class ContactService:
     """Resolve o usuário vinculado a um número de WhatsApp via API interna."""
 
     async def find_by_phone(self, phone: str) -> dict | None:
-        """Retorna ``{user_id, name, profile_type, is_verified}`` ou ``None``.
+        """Retorna ``{userId, createdByUserId, name, profileType, isVerified}`` ou ``None``.
+
+        ``userId`` é o dono dos dados — para um membro do plano Duo, o dono do
+        plano — e é o escopo de toda leitura e escrita. ``createdByUserId`` é o
+        usuário do telefone, usado só para atribuir a autoria do lançamento.
 
         ``None`` significa **só** "número não vinculado" (``404``). Não conseguir
         perguntar — rede, ``5xx``, ``401`` de ``INTERNAL_API_KEY`` divergente —

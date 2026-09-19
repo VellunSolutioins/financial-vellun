@@ -1,11 +1,19 @@
 import { Injectable } from '@nestjs/common';
+
 import { PrismaService } from '../prisma/prisma.service';
 import {
   startOfDayUtc,
   endOfDayUtc,
   startOfMonthUtc,
   endOfMonthUtc,
+  todaySaoPaulo,
 } from '../common/date.util';
+
+function todayStartUtc(): Date {
+  const today = todaySaoPaulo();
+  const iso = `${today.year}-${String(today.monthIndex + 1).padStart(2, '0')}-${String(today.day).padStart(2, '0')}`;
+  return startOfDayUtc(iso);
+}
 
 @Injectable()
 export class DashboardService {
@@ -20,9 +28,12 @@ export class DashboardService {
       ? endOfDayUtc(periodEnd)
       : endOfMonthUtc(now.getFullYear(), now.getMonth());
 
-    const [accounts, incomeAgg, expenseAgg, expensesByCategory, recentTransactions] =
+    const [accounts, incomeAgg, expenseAgg, expensesByCategory, recentTransactions, upcomingBills] =
       await Promise.all([
-        this.prisma.account.findMany({ where: { userId, isActive: true }, select: { currentBalance: true } }),
+        this.prisma.account.findMany({
+          where: { userId, isActive: true, type: { not: 'credit_card' } },
+          select: { currentBalance: true },
+        }),
         this.prisma.transaction.aggregate({
           where: { userId, type: 'income', status: 'confirmed', transactionDate: { gte: start, lte: end } },
           _sum: { amount: true },
@@ -41,6 +52,15 @@ export class DashboardService {
           where: { userId },
           include: { category: true, account: true },
           orderBy: { createdAt: 'desc' },
+          take: 5,
+        }),
+        this.prisma.transaction.findMany({
+          // gte hoje: sem esse piso, uma conta pendente antiga (nunca paga/
+          // cancelada) ocupa a vaga pra sempre e as próximas de verdade nunca
+          // aparecem no "take: 5".
+          where: { userId, type: 'expense', status: 'pending', transactionDate: { gte: todayStartUtc() } },
+          include: { category: true, account: true },
+          orderBy: { transactionDate: 'asc' },
           take: 5,
         }),
       ]);
@@ -74,6 +94,7 @@ export class DashboardService {
       netResult: totalIncome - totalExpense,
       expensesByCategory: expensesByCategoryResult,
       recentTransactions,
+      upcomingBills,
       monthlyComparison,
     };
   }
@@ -90,7 +111,7 @@ export class DashboardService {
     const [accounts, confirmedInPeriod, expensesByCategory, accountsReceivable, accountsPayable] =
       await Promise.all([
         this.prisma.account.findMany({
-          where: { userId, isActive: true },
+          where: { userId, isActive: true, type: { not: 'credit_card' } },
           select: { currentBalance: true },
         }),
         this.prisma.transaction.findMany({

@@ -10,32 +10,65 @@ import * as bcrypt from 'bcryptjs';
 const prisma = new PrismaClient();
 
 // Preços são placeholders até a definição comercial final (ver Prompt 0).
+// 3 planos por público-alvo (Individual/Duo/Business), mesmo preço e
+// recursos por enquanto — diferenciação por limites/recursos fica para depois.
+const commonFeatures = { web: true, whatsapp: true, ai: true };
 const plans = [
   {
-    code: 'vellun-mensal',
-    name: 'Vellun Mensal',
-    description: 'Plano mensal com acesso completo ao Financial Vellun.',
-    price: '49.90',
+    code: 'vellun-individual-mensal',
+    name: 'Individual',
+    description: 'Ideal para quem cuida das próprias finanças.',
+    price: '15.90',
     currency: 'BRL',
     interval: BillingInterval.monthly,
-    features: {
-      web: true,
-      whatsapp: true,
-      ai: true,
-    },
+    features: commonFeatures,
   },
   {
-    code: 'vellun-anual',
-    name: 'Vellun Anual',
-    description: 'Plano anual com acesso completo ao Financial Vellun.',
-    price: '499.00',
+    code: 'vellun-individual-anual',
+    name: 'Individual',
+    description: 'Ideal para quem cuida das próprias finanças.',
+    price: '120.00',
     currency: 'BRL',
     interval: BillingInterval.annual,
-    features: {
-      web: true,
-      whatsapp: true,
-      ai: true,
-    },
+    features: commonFeatures,
+  },
+  {
+    code: 'vellun-duo-mensal',
+    name: 'Duo',
+    description: 'Para casais organizarem as finanças juntos.',
+    price: '15.90',
+    currency: 'BRL',
+    interval: BillingInterval.monthly,
+    features: commonFeatures,
+    maxMembers: 2,
+  },
+  {
+    code: 'vellun-duo-anual',
+    name: 'Duo',
+    description: 'Para casais organizarem as finanças juntos.',
+    price: '120.00',
+    currency: 'BRL',
+    interval: BillingInterval.annual,
+    features: commonFeatures,
+    maxMembers: 2,
+  },
+  {
+    code: 'vellun-business-mensal',
+    name: 'Business',
+    description: 'Para pequenos negócios controlarem entradas e saídas.',
+    price: '15.90',
+    currency: 'BRL',
+    interval: BillingInterval.monthly,
+    features: commonFeatures,
+  },
+  {
+    code: 'vellun-business-anual',
+    name: 'Business',
+    description: 'Para pequenos negócios controlarem entradas e saídas.',
+    price: '120.00',
+    currency: 'BRL',
+    interval: BillingInterval.annual,
+    features: commonFeatures,
   },
 ];
 
@@ -44,6 +77,11 @@ const plans = [
  * passar pelo Asaas (que recusa cobranças abaixo de R$ 5,00 — ver
  * `activateFreeSubscription` em billing). Antes ele existia apenas como uma
  * linha inserida à mão no banco, então sumia a cada `prisma migrate reset`.
+ *
+ * `maxMembers: 2` para permitir testar o fluxo de convite/membros, e o código
+ * está em BUSINESS_PLAN_CODES (apps/web/src/lib/billing.ts) para liberar
+ * também a área Empresa. Só mensal: a tela de assinatura cai no plano mensal
+ * quando a aba "Anual" não encontra a versão anual do mesmo nome.
  */
 const localDevPlan = {
   code: 'vellun-local-dev',
@@ -52,12 +90,18 @@ const localDevPlan = {
   price: '0.00',
   currency: 'BRL',
   interval: BillingInterval.monthly,
-  features: {
-    web: true,
-    whatsapp: true,
-    ai: true,
-  },
+  features: commonFeatures,
+  maxMembers: 2,
 };
+
+// Planos antigos/descontinuados — desativados, não excluídos, para não quebrar
+// assinaturas históricas que ainda referenciem esses códigos.
+const retiredPlanCodes = [
+  'vellun-mensal',
+  'vellun-anual',
+  'vellun-family-mensal',
+  'vellun-family-anual',
+];
 
 const demoUser = {
   name: 'Vellun Solutions',
@@ -75,6 +119,9 @@ const individualCategories = [
   { name: 'Saúde', type: TransactionType.expense, color: '#DDA0DD', profileType: ProfileType.individual },
   { name: 'Educação', type: TransactionType.expense, color: '#F0E68C', profileType: ProfileType.individual },
   { name: 'Lazer', type: TransactionType.expense, color: '#87CEFA', profileType: ProfileType.individual },
+  { name: 'Assinaturas', type: TransactionType.expense, color: '#B388FF', profileType: ProfileType.individual },
+  { name: 'Bem-estar', type: TransactionType.expense, color: '#4FD1C5', profileType: ProfileType.individual },
+  { name: 'Pessoal', type: TransactionType.expense, color: '#F6AD55', profileType: ProfileType.individual },
   { name: 'Salário', type: TransactionType.income, color: '#90EE90', profileType: ProfileType.individual },
   { name: 'Investimentos', type: TransactionType.income, color: '#FFD700', profileType: ProfileType.individual },
   { name: 'Outros', type: TransactionType.expense, color: '#D3D3D3', profileType: ProfileType.individual },
@@ -145,6 +192,7 @@ async function main() {
         interval: plan.interval,
         isActive: true,
         features: plan.features,
+        maxMembers: plan.maxMembers ?? 1,
       },
       create: {
         code: plan.code,
@@ -155,11 +203,17 @@ async function main() {
         interval: plan.interval,
         isActive: true,
         features: plan.features,
+        maxMembers: plan.maxMembers ?? 1,
       },
     });
   }
 
   console.log(`${plans.length} planos de assinatura disponiveis.`);
+
+  await prisma.plan.updateMany({
+    where: { code: { in: retiredPlanCodes } },
+    data: { isActive: false },
+  });
 
   // Plano gratuito de desenvolvimento: criado fora de produção e, em produção,
   // desativado de forma ativa. A desativação é intencional — se a linha algum

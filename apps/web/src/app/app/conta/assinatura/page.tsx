@@ -1,5 +1,7 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
+import { CheckCircle2 } from 'lucide-react';
+
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -7,6 +9,7 @@ import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
 import { useAuth } from '@/contexts/auth-context';
 import { ApiClientError } from '@/lib/api-client';
+import { cn } from '@/lib/utils';
 import {
   type Plan,
   type SubscriptionState,
@@ -28,7 +31,8 @@ const MANAGED_STATUSES = ['active', 'trialing', 'past_due'];
 export default function AssinaturaPage() {
   const toast = useToast();
   const confirm = useConfirm();
-  const { refreshSubscriptionAccess } = useAuth();
+  const { user, refreshSubscriptionAccess } = useAuth();
+  const isOwner = !user?.householdOwnerId;
 
   const [state, setState] = useState<SubscriptionState | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -112,7 +116,7 @@ export default function AssinaturaPage() {
   const showPending = status === 'pending';
 
   return (
-    <div className="max-w-3xl space-y-6">
+    <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Assinatura</h1>
         <p className="text-sm text-muted-foreground mt-1">
@@ -120,19 +124,31 @@ export default function AssinaturaPage() {
         </p>
       </div>
 
-      <ReturnNotice status={returnStatus} />
+      <div className="max-w-3xl">
+        <ReturnNotice status={returnStatus} />
+      </div>
 
       {loading ? (
         <p className="text-muted-foreground">Carregando...</p>
       ) : showManagement ? (
-        <ManagementCard
-          state={state!}
-          busy={busy}
-          onUpdateCard={handleUpdateCard}
-          onCancel={handleCancel}
-        />
+        <div className="max-w-xl">
+          <ManagementCard
+            state={state!}
+            busy={busy}
+            isOwner={isOwner}
+            onUpdateCard={handleUpdateCard}
+            onCancel={handleCancel}
+          />
+        </div>
       ) : showPending ? (
-        <PendingCard busy={busy} onRefresh={load} />
+        <div className="max-w-xl">
+          <PendingCard busy={busy} onRefresh={load} />
+        </div>
+      ) : !isOwner ? (
+        <p className="text-sm text-muted-foreground">
+          Você faz parte de um plano compartilhado, mas ele não está ativo no momento. Peça para o
+          dono do plano regularizar a assinatura.
+        </p>
       ) : (
         <PlansList plans={plans} busy={busy} onSubscribe={handleSubscribe} />
       )}
@@ -169,11 +185,13 @@ function ReturnNotice({ status }: { status: ReturnStatus }) {
 function ManagementCard({
   state,
   busy,
+  isOwner,
   onUpdateCard,
   onCancel,
 }: {
   state: SubscriptionState;
   busy: boolean;
+  isOwner: boolean;
   onUpdateCard: () => void;
   onCancel: () => void;
 }) {
@@ -211,16 +229,22 @@ function ManagementCard({
           <Field label="Próxima cobrança" value={formatDate(state.currentPeriodEnd)} />
         </dl>
 
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Button variant="outline" onClick={onUpdateCard} disabled={busy}>
-            Atualizar cartão
-          </Button>
-          {!state.cancelAtPeriodEnd && (
-            <Button variant="destructive" onClick={onCancel} disabled={busy}>
-              Cancelar assinatura
+        {isOwner ? (
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button variant="outline" onClick={onUpdateCard} disabled={busy}>
+              Atualizar cartão
             </Button>
-          )}
-        </div>
+            {!state.cancelAtPeriodEnd && (
+              <Button variant="destructive" onClick={onCancel} disabled={busy}>
+                Cancelar assinatura
+              </Button>
+            )}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Só o dono do plano pode gerenciar pagamento e cancelamento.
+          </p>
+        )}
       </CardContent>
     </Card>
   );
@@ -245,6 +269,12 @@ function PendingCard({ busy, onRefresh }: { busy: boolean; onRefresh: () => void
   );
 }
 
+const FEATURE_LABELS: Record<string, string> = {
+  ai: 'Categorização e insights com IA',
+  web: 'Acesso completo pela web',
+  whatsapp: 'Lançamentos e lembretes pelo WhatsApp',
+};
+
 function PlansList({
   plans,
   busy,
@@ -254,36 +284,109 @@ function PlansList({
   busy: boolean;
   onSubscribe: (planId: string) => void;
 }) {
+  const [billingInterval, setBillingInterval] = useState<'monthly' | 'annual'>('monthly');
+
   if (plans.length === 0) {
     return <p className="text-muted-foreground">Nenhum plano disponível no momento.</p>;
   }
+
+  // Agrupa por nome (Individual/Duo/Family/Business), guardando a versão
+  // mensal e anual de cada — o toggle troca qual versão aparece nos cards.
+  const tiers = new Map<string, { monthly?: Plan; annual?: Plan }>();
+  for (const plan of plans) {
+    const entry = tiers.get(plan.name) ?? {};
+    if (plan.interval === 'annual') entry.annual = plan;
+    else entry.monthly = plan;
+    tiers.set(plan.name, entry);
+  }
+  const tierList = [...tiers.values()];
+
+  const anyMonthly = tierList.find((t) => t.monthly)?.monthly;
+  const anyAnnual = tierList.find((t) => t.annual)?.annual;
+  const savingsPct =
+    anyMonthly && anyAnnual
+      ? Math.round((1 - Number(anyAnnual.price) / (Number(anyMonthly.price) * 12)) * 100)
+      : null;
+
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-      {plans.map((plan) => (
-        <Card key={plan.id} className="flex flex-col">
-          <CardHeader>
-            <div className="flex items-center justify-between gap-2">
-              <CardTitle className="text-base">{plan.name}</CardTitle>
-              <Badge variant="secondary">{intervalLabel(plan.interval)}</Badge>
-            </div>
-            {plan.description && (
-              <p className="text-xs text-muted-foreground">{plan.description}</p>
-            )}
-          </CardHeader>
-          <CardContent className="flex flex-1 flex-col justify-between gap-4">
-            <p className="text-2xl font-bold">
-              {formatBRL(plan.price)}
-              <span className="text-sm font-normal text-muted-foreground">
-                {' '}
-                /{plan.interval === 'annual' ? 'ano' : 'mês'}
-              </span>
-            </p>
-            <Button onClick={() => onSubscribe(plan.id)} disabled={busy}>
-              Assinar
-            </Button>
-          </CardContent>
-        </Card>
-      ))}
+    <div className="space-y-6">
+      {anyMonthly && anyAnnual && (
+        <div className="flex justify-center">
+          <div className="inline-flex items-center rounded-full border bg-muted p-1">
+            {(['monthly', 'annual'] as const).map((opt) => (
+              <button
+                key={opt}
+                type="button"
+                onClick={() => setBillingInterval(opt)}
+                className={cn(
+                  'flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-medium transition-colors',
+                  billingInterval === opt
+                    ? 'bg-primary text-primary-foreground shadow'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {intervalLabel(opt)}
+                {opt === 'annual' && savingsPct !== null && savingsPct > 0 && (
+                  <span
+                    className={cn(
+                      'rounded-full px-1.5 py-0.5 text-[10px] font-semibold',
+                      billingInterval === 'annual'
+                        ? 'bg-white/20'
+                        : 'bg-emerald-100 text-emerald-700',
+                    )}
+                  >
+                    -{savingsPct}%
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
+        {tierList.map(({ monthly, annual }) => {
+          const plan = billingInterval === 'annual' ? (annual ?? monthly) : (monthly ?? annual);
+          if (!plan) return null;
+          const features = plan.features
+            ? Object.entries(plan.features)
+                .filter(([, enabled]) => enabled)
+                .map(([key]) => FEATURE_LABELS[key] ?? key)
+            : [];
+          return (
+            <Card key={plan.name} className="flex flex-col rounded-2xl">
+              <CardHeader className="text-center">
+                <CardTitle className="text-lg">{plan.name}</CardTitle>
+                {plan.description && (
+                  <p className="text-xs text-muted-foreground">{plan.description}</p>
+                )}
+              </CardHeader>
+              <CardContent className="flex flex-1 flex-col gap-4">
+                <div className="text-center">
+                  <span className="text-3xl font-bold">{formatBRL(plan.price)}</span>
+                  <span className="text-sm text-muted-foreground">
+                    {' '}
+                    /{plan.interval === 'annual' ? 'ano' : 'mês'}
+                  </span>
+                </div>
+                <Button onClick={() => onSubscribe(plan.id)} disabled={busy} className="w-full">
+                  Assinar
+                </Button>
+                {features.length > 0 && (
+                  <ul className="space-y-2 text-sm">
+                    {features.map((label) => (
+                      <li key={label} className="flex items-center gap-2">
+                        <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                        {label}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
     </div>
   );
 }

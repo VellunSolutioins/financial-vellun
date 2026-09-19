@@ -93,7 +93,13 @@ class MediaProcessor:
         intent = await intent_classifier.classify(transcript, context)
         prefix = f'Entendi: "{transcript}".\n'
         return await message_processor.handle_intent(
-            phone, user_id, intent, transcript, last_inbound_id, response_prefix=prefix
+            phone,
+            user_id,
+            intent,
+            transcript,
+            last_inbound_id,
+            response_prefix=prefix,
+            created_by_user_id=contact.get("createdByUserId"),
         )
 
     async def _process_image(
@@ -129,6 +135,7 @@ class MediaProcessor:
             last_inbound_id,
             force_confirm=True,
             confirm_question=question,
+            created_by_user_id=contact.get("createdByUserId"),
         )
 
     async def _log_inbound(

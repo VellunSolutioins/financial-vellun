@@ -6,14 +6,31 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountsService } from '../accounts/accounts.service';
 import { SubscriptionAccessService } from '../billing/services/subscription-access.service';
 import { SubscriptionRequiredException } from '../billing/subscription-required.exception';
-import { CreateAiTransactionDto } from './dto/create-ai-transaction.dto';
-import { AiEventDto } from './dto/ai-event.dto';
+import { RecurringRulesService } from '../recurring-rules/recurring-rules.service';
+import { SpendingGoalsService } from '../spending-goals/spending-goals.service';
+import { SavingsBoxesService } from '../savings-boxes/savings-boxes.service';
+import { CreditCardsService } from '../credit-cards/credit-cards.service';
+import { RemindersService } from '../reminders/reminders.service';
+import { AgendaEventsService } from '../agenda-events/agenda-events.service';
+import { NotesService } from '../notes/notes.service';
 import { normalizePhone } from '../common/phone.util';
 import { parseDateOnly } from '../common/date.util';
+
+import { CreateAiTransactionDto } from './dto/create-ai-transaction.dto';
+import { AiEventDto } from './dto/ai-event.dto';
+import { CreateRecurringRuleFromAiDto } from './dto/create-recurring-rule-from-ai.dto';
+import { CreateSpendingGoalFromAiDto } from './dto/create-spending-goal-from-ai.dto';
+import { CreateSavingsBoxFromAiDto } from './dto/create-savings-box-from-ai.dto';
+import { CreateSavingsContributionFromAiDto } from './dto/create-savings-contribution-from-ai.dto';
+import { CreateCreditCardFromAiDto } from './dto/create-credit-card-from-ai.dto';
+import { CreateReminderFromAiDto } from './dto/create-reminder-from-ai.dto';
+import { CreateAgendaEventFromAiDto } from './dto/create-agenda-event-from-ai.dto';
+import { CreateNoteFromAiDto } from './dto/create-note-from-ai.dto';
 
 @Injectable()
 export class InternalService {
@@ -23,6 +40,13 @@ export class InternalService {
     private prisma: PrismaService,
     private accountsService: AccountsService,
     private subscriptionAccess: SubscriptionAccessService,
+    private recurringRulesService: RecurringRulesService,
+    private spendingGoalsService: SpendingGoalsService,
+    private savingsBoxesService: SavingsBoxesService,
+    private creditCardsService: CreditCardsService,
+    private remindersService: RemindersService,
+    private agendaEventsService: AgendaEventsService,
+    private notesService: NotesService,
   ) {}
 
   /**
@@ -37,7 +61,13 @@ export class InternalService {
     }
   }
 
-  /** Busca um usuário pelo número de telefone vinculado no WhatsApp. */
+  /**
+   * Busca um usuário pelo número de telefone vinculado no WhatsApp.
+   * `userId` retornado já é o dono dos dados (household owner, se o telefone
+   * for de um membro do plano Duo) — usar sempre para escopo de leitura/
+   * escrita. `createdByUserId` é quem de fato mandou a mensagem, para
+   * atribuição do lançamento.
+   */
   async findContactByPhone(phone: string) {
     const contact = await this.prisma.whatsappContact.findUnique({
       where: { phoneNumber: normalizePhone(phone) },
@@ -49,7 +79,8 @@ export class InternalService {
     }
 
     return {
-      userId: contact.user.id,
+      userId: contact.user.householdOwnerId ?? contact.user.id,
+      createdByUserId: contact.user.id,
       name: contact.user.name,
       profileType: contact.user.profileType,
       isVerified: contact.isVerified,
@@ -208,6 +239,7 @@ export class InternalService {
       const transaction = await tx.transaction.create({
         data: {
           userId: dto.userId,
+          createdByUserId: dto.createdByUserId ?? dto.userId,
           accountId: dto.accountId,
           categoryId: dto.categoryId,
           type: dto.type,
@@ -466,5 +498,58 @@ export class InternalService {
 
     this.assertIdempotencyOwner(existing.userId, userId, 'extração');
     return { id: existing.id, duplicate: true as const };
+  }
+
+  // ── Criação via IA/WhatsApp para as demais funções ──────────────────────────
+  // Mesmo padrão de createTransactionFromAi: userId já resolvido pelo agente
+  // (via GET /internal/whatsapp/contacts/:phone) antes de chamar estes
+  // endpoints. Reaproveita o create() de cada módulo em vez de duplicar regra.
+
+  async createRecurringRuleFromAi(dto: CreateRecurringRuleFromAiDto) {
+    await this.assertCanUseProduct(dto.userId);
+    const { userId, ...rest } = dto;
+    return this.recurringRulesService.create(userId, rest);
+  }
+
+  async createSpendingGoalFromAi(dto: CreateSpendingGoalFromAiDto) {
+    await this.assertCanUseProduct(dto.userId);
+    const { userId, ...rest } = dto;
+    return this.spendingGoalsService.create(userId, rest);
+  }
+
+  async createSavingsBoxFromAi(dto: CreateSavingsBoxFromAiDto) {
+    await this.assertCanUseProduct(dto.userId);
+    const { userId, ...rest } = dto;
+    return this.savingsBoxesService.create(userId, rest);
+  }
+
+  async createSavingsContributionFromAi(dto: CreateSavingsContributionFromAiDto) {
+    await this.assertCanUseProduct(dto.userId);
+    const { userId, savingsBoxId, ...rest } = dto;
+    return this.savingsBoxesService.addContribution(userId, savingsBoxId, rest);
+  }
+
+  async createCreditCardFromAi(dto: CreateCreditCardFromAiDto) {
+    await this.assertCanUseProduct(dto.userId);
+    const { userId, ...rest } = dto;
+    return this.creditCardsService.create(userId, rest);
+  }
+
+  async createReminderFromAi(dto: CreateReminderFromAiDto) {
+    await this.assertCanUseProduct(dto.userId);
+    const { userId, ...rest } = dto;
+    return this.remindersService.create(userId, rest);
+  }
+
+  async createAgendaEventFromAi(dto: CreateAgendaEventFromAiDto) {
+    await this.assertCanUseProduct(dto.userId);
+    const { userId, ...rest } = dto;
+    return this.agendaEventsService.create(userId, rest);
+  }
+
+  async createNoteFromAi(dto: CreateNoteFromAiDto) {
+    await this.assertCanUseProduct(dto.userId);
+    const { userId, ...rest } = dto;
+    return this.notesService.create(userId, rest);
   }
 }

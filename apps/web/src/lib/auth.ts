@@ -17,6 +17,8 @@ export interface User extends Address {
   phone?: string | null;
   profileType: 'individual' | 'business';
   hasProfile: boolean;
+  /** Preenchido quando o usuário é um membro convidado (plano Duo) — nulo para o dono do plano. */
+  householdOwnerId?: string | null;
   createdAt: string;
   updatedAt: string;
 }

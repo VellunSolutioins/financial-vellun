@@ -44,6 +44,11 @@ export class ListTransactionsDto {
   @IsString()
   search?: string;
 
+  @ApiProperty({ required: false, description: 'Filtra por quem fez o lançamento (userId)' })
+  @IsOptional()
+  @IsString()
+  authorId?: string;
+
   @ApiProperty({ default: 1, required: false })
   @IsOptional()
   @Type(() => Number)

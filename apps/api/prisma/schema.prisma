@@ -34,6 +34,31 @@ enum TransactionSource {
   recurring
 }
 
+enum RecurrenceType {
+  avulso
+  fixo
+  parcelado
+}
+
+// ── Recorrências (despesas/receitas fixas) ────────────────────────────────────
+
+enum RecurringFrequency {
+  monthly
+  bimonthly
+  semiannual
+  annual
+}
+
+enum SavingsYieldPeriod {
+  monthly
+  annual
+}
+
+enum ReminderStatus {
+  pending
+  paid
+}
+
 enum AccountType {
   checking
   savings
@@ -159,6 +184,12 @@ model User {
   passwordHash String      @map("password_hash")
   profileType  ProfileType @map("profile_type")
 
+  /// Preenchido quando este usuário é um membro convidado (plano Duo) — os
+  /// dados financeiros (contas, lançamentos, etc.) passam a ser lidos/escritos
+  /// pelo escopo do dono (householdOwnerId), nunca pelo próprio id. Nulo para
+  /// o dono do plano (uso normal, comportamento inalterado).
+  householdOwnerId String? @map("household_owner_id")
+
   // Endereço de cobrança (usado pelo provedor de pagamentos). Nullable para não
   // quebrar usuários anteriores à introdução do campo; obrigatório em novos
   // cadastros via DTO. `city`/`state` são derivados do CEP pelo Asaas, mas
@@ -171,8 +202,8 @@ model User {
   city          String?
   state         String?
 
-  createdAt    DateTime    @default(now()) @map("created_at")
-  updatedAt    DateTime    @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   individualProfile       IndividualProfile?
   businessProfile         BusinessProfile?
@@ -185,8 +216,44 @@ model User {
   aiExtractedTransactions AiExtractedTransaction[]
   subscriptions           Subscription[]
   payments                Payment[]
+  recurringRules          RecurringRule[]
+  spendingGoals           SpendingGoal[]
+  savingsBoxes            SavingsBox[]
+  reminders               Reminder[]
+  agendaEvents            AgendaEvent[]
+  notes                   Note[]
+  createdTransactions     Transaction[]            @relation("TransactionCreatedBy")
+  memberInvites           MemberInvite[]
+
+  householdOwner   User?  @relation("HouseholdMembers", fields: [householdOwnerId], references: [id], onDelete: SetNull)
+  householdMembers User[] @relation("HouseholdMembers")
 
   @@map("users")
+}
+
+enum MemberInviteStatus {
+  pending
+  accepted
+  revoked
+  expired
+}
+
+/// Convite para um membro entrar no plano Duo do dono. O membro aceita
+/// criando login próprio (email/senha) — ver members.service.ts.
+model MemberInvite {
+  id         String             @id @default(uuid())
+  ownerId    String             @map("owner_id")
+  email      String
+  token      String             @unique
+  status     MemberInviteStatus @default(pending)
+  createdAt  DateTime           @default(now()) @map("created_at")
+  expiresAt  DateTime           @map("expires_at")
+  acceptedAt DateTime?          @map("accepted_at")
+
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId])
+  @@map("member_invites")
 }
 
 model IndividualProfile {
@@ -230,11 +297,88 @@ model Account {
   createdAt      DateTime    @default(now()) @map("created_at")
   updatedAt      DateTime    @updatedAt @map("updated_at")
 
-  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  transactions Transaction[]
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions   Transaction[]
+  recurringRules RecurringRule[]
+  creditCard     CreditCard?
 
   @@index([userId])
   @@map("accounts")
+}
+
+/// Extensão 1:1 de Account (type=credit_card). "Fatura atual" é derivada do
+/// próprio saldo da conta (currentBalance = initialBalance + income - expense,
+/// e cartão nunca recebe income, então currentBalance é sempre <= 0) — não há
+/// fechamento de fatura nem pagamento nesta versão, é só gestão/controle.
+model CreditCard {
+  id          String   @id @default(uuid())
+  accountId   String   @unique @map("account_id")
+  brand       String?
+  color       String?
+  creditLimit Decimal? @map("credit_limit") @db.Decimal(15, 2)
+  /// Dia do mês em que a fatura vence (1–28).
+  dueDay      Int      @map("due_day")
+  isPrimary   Boolean  @default(false) @map("is_primary")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@map("credit_cards")
+}
+
+/// Lembrete de conta a pagar. "Vencido" é derivado (pending && dueDate < hoje
+/// em America/Sao_Paulo), nunca persistido — ver reminders.service.ts.
+model Reminder {
+  id                String         @id @default(uuid())
+  userId            String         @map("user_id")
+  title             String
+  amount            Decimal?       @db.Decimal(15, 2)
+  dueDate           DateTime       @map("due_date") @db.Date
+  isRecurrent       Boolean        @default(false) @map("is_recurrent")
+  /// Só relevante quando isRecurrent=true. Sem ela, repete indefinidamente.
+  recurrenceEndDate DateTime?      @map("recurrence_end_date") @db.Date
+  status            ReminderStatus @default(pending)
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("reminders")
+}
+
+model AgendaEvent {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  title       String
+  description String?
+  eventDate   DateTime @map("event_date") @db.Date
+  /// Formato "HH:mm". Ausente = compromisso do dia todo.
+  eventTime   String?  @map("event_time")
+  color       String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("agenda_events")
+}
+
+model Note {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  title     String
+  content   String
+  isPinned  Boolean  @default(false) @map("is_pinned")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("notes")
 }
 
 model Category {
@@ -250,42 +394,57 @@ model Category {
   createdAt   DateTime        @default(now()) @map("created_at")
   updatedAt   DateTime        @updatedAt @map("updated_at")
 
-  user         User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  transactions Transaction[]
+  user           User?           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions   Transaction[]
+  recurringRules RecurringRule[]
+  spendingGoals  SpendingGoal[]
 
   @@index([userId])
   @@map("categories")
 }
 
 model Transaction {
-  id              String            @id @default(uuid())
-  userId          String            @map("user_id")
-  accountId       String            @map("account_id")
-  categoryId      String?           @map("category_id")
-  type            TransactionType
-  amount          Decimal           @db.Decimal(15, 2)
-  description     String
-  transactionDate DateTime          @map("transaction_date") @db.Date
-  status          TransactionStatus @default(confirmed)
-  source          TransactionSource @default(manual)
-  rawInput        String?           @map("raw_input")
+  id                String            @id @default(uuid())
+  userId            String            @map("user_id")
+  /// Quem de fato fez o lançamento (dono ou membro do plano Duo) — userId
+  /// continua sendo o dono dos dados (escopo de leitura/permissão).
+  createdByUserId   String            @map("created_by_user_id")
+  accountId         String            @map("account_id")
+  categoryId        String?           @map("category_id")
+  type              TransactionType
+  amount            Decimal           @db.Decimal(15, 2)
+  description       String
+  transactionDate   DateTime          @map("transaction_date") @db.Date
+  status            TransactionStatus @default(confirmed)
+  source            TransactionSource @default(manual)
+  rawInput          String?           @map("raw_input")
+  recurrenceType    RecurrenceType    @default(avulso) @map("recurrence_type")
+  seriesId          String?           @map("series_id")
+  installmentNumber Int?              @map("installment_number")
+  installmentTotal  Int?              @map("installment_total")
+  recurringRuleId   String?           @map("recurring_rule_id")
+  competenceMonth   String?           @map("competence_month")
   // Chave de idempotencia da origem (ex.: jobId do pipeline do WhatsApp).
   // Um retry apos timeout devolve o lancamento existente em vez de duplicar.
-  idempotencyKey  String?           @unique @map("idempotency_key")
-  createdAt       DateTime          @default(now()) @map("created_at")
-  updatedAt       DateTime          @updatedAt @map("updated_at")
+  idempotencyKey    String?           @unique @map("idempotency_key")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
 
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  account  Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  category Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdBy     User           @relation("TransactionCreatedBy", fields: [createdByUserId], references: [id], onDelete: Cascade)
+  account       Account        @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  category      Category?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  recurringRule RecurringRule? @relation(fields: [recurringRuleId], references: [id], onDelete: SetNull)
 
   aiExtractedTransactions AiExtractedTransaction[]
 
+  @@unique([recurringRuleId, competenceMonth])
   @@index([userId])
   @@index([transactionDate])
   @@index([type])
   @@index([categoryId])
   @@index([accountId])
+  @@index([seriesId])
   @@map("transactions")
 }
 
@@ -306,6 +465,101 @@ model Contact {
 
   @@index([userId])
   @@map("contacts")
+}
+
+/// Regra de receita/despesa fixa ("Despesas Fixas e Recorrências"). Um cron
+/// diário gera Transaction (source=recurring, status=pending) nos meses em
+/// que a regra vence, respeitando `frequency`. `amount` é o valor nominal da
+/// regra — usado no card "Comprometido com fixos" independente de já ter sido
+/// gerado o lançamento do mês corrente.
+model RecurringRule {
+  id              String             @id @default(uuid())
+  userId          String             @map("user_id")
+  accountId       String             @map("account_id")
+  categoryId      String?            @map("category_id")
+  type            TransactionType
+  description     String
+  amount          Decimal            @db.Decimal(15, 2)
+  frequency       RecurringFrequency @default(monthly)
+  /// Dia do mês em que vence (1–28, evita ambiguidade em meses curtos).
+  dueDay          Int                @map("due_day")
+  startDate       DateTime           @map("start_date") @db.Date
+  endDate         DateTime?          @map("end_date") @db.Date
+  isActive        Boolean            @default(true) @map("is_active")
+  /// Ultimo dia-calendario ja varrido pelo gerador de ocorrencias. Serve de
+  /// marca-d'agua para o backfill: dias <= este valor nunca sao reprocessados,
+  /// entao um lancamento que o usuario excluiu de vez nao volta na proxima
+  /// varredura. Null = regra nunca varrida (comeca do startDate).
+  lastGeneratedAt DateTime?          @map("last_generated_at") @db.Date
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account      Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  category     Category?     @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  transactions Transaction[]
+
+  @@index([userId])
+  @@index([isActive])
+  @@map("recurring_rules")
+}
+
+model SpendingGoal {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  categoryId String   @map("category_id")
+  amount     Decimal  @db.Decimal(15, 2)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, categoryId])
+  @@index([userId])
+  @@map("spending_goals")
+}
+
+/// Caixinha (earmarking virtual): meta e prazo são opcionais (pode ser só
+/// acumular sem alvo definido). Rendimento opcional é aplicado
+/// automaticamente pelo cron (ver savings-boxes.service.ts) como um aporte
+/// sintético — por isso `SavingsContribution.yieldCompetence` existe: chave
+/// "YYYY-MM" (mensal) ou "YYYY" (anual) com `@@unique` para não aplicar duas
+/// vezes no mesmo período (mesmo padrão de `RecurringRule`/`competenceMonth`).
+model SavingsBox {
+  id           String              @id @default(uuid())
+  userId       String              @map("user_id")
+  name         String
+  color        String?
+  targetAmount Decimal?            @map("target_amount") @db.Decimal(15, 2)
+  targetDate   DateTime?           @map("target_date") @db.Date
+  yieldRate    Decimal?            @map("yield_rate") @db.Decimal(6, 3)
+  yieldPeriod  SavingsYieldPeriod? @map("yield_period")
+  createdAt    DateTime            @default(now()) @map("created_at")
+  updatedAt    DateTime            @updatedAt @map("updated_at")
+
+  user          User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contributions SavingsContribution[]
+
+  @@index([userId])
+  @@map("savings_boxes")
+}
+
+model SavingsContribution {
+  id              String   @id @default(uuid())
+  savingsBoxId    String   @map("savings_box_id")
+  amount          Decimal  @db.Decimal(15, 2)
+  contributedAt   DateTime @map("contributed_at") @db.Date
+  note            String?
+  /// Preenchido só em aportes gerados automaticamente pelo rendimento (null em aportes manuais).
+  yieldCompetence String?  @map("yield_competence")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  savingsBox SavingsBox @relation(fields: [savingsBoxId], references: [id], onDelete: Cascade)
+
+  @@unique([savingsBoxId, yieldCompetence])
+  @@index([savingsBoxId])
+  @@map("savings_contributions")
 }
 
 // ── WhatsApp ──────────────────────────────────────────────────────────────────
@@ -396,6 +650,9 @@ model Plan {
   currency    String          @default("BRL")
   interval    BillingInterval
   isActive    Boolean         @default(true) @map("is_active")
+  /// Quantas pessoas podem usar o plano juntas (dono + membros convidados).
+  /// Individual/Business = 1 (sem convite); Duo = 2.
+  maxMembers  Int             @default(1) @map("max_members")
   features    Json?
   createdAt   DateTime        @default(now()) @map("created_at")
   updatedAt   DateTime        @updatedAt @map("updated_at")
@@ -421,8 +678,8 @@ model Subscription {
   createdAt              DateTime           @default(now()) @map("created_at")
   updatedAt              DateTime           @updatedAt @map("updated_at")
 
-  user     User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  plan     Plan                @relation(fields: [planId], references: [id])
+  user          User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan          Plan                  @relation(fields: [planId], references: [id])
   payments      Payment[]
   audits        SubscriptionAudit[]
   webhookEvents PaymentWebhookEvent[]
@@ -633,8 +890,8 @@ model OpsFailedMessage {
   retentionUntil DateTime @map("retention_until")
 
   /// Preenchidos pelo reprocessamento (Entrega 7).
-  reprocessedAt  DateTime? @map("reprocessed_at")
-  lastOperationId String?  @map("last_operation_id")
+  reprocessedAt   DateTime? @map("reprocessed_at")
+  lastOperationId String?   @map("last_operation_id")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

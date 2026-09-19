@@ -41,13 +41,15 @@ financial-vellun/
 ## Estrutura interna dos apps
 
 ```
-apps/api/src/        accounts/ auth/ billing/ categories/ contacts/ dashboard/
-                     internal/ notifications/ observability/ ops/ transactions/ users/
+apps/api/src/        accounts/ agenda-events/ auth/ billing/ categories/ contacts/
+                     credit-cards/ dashboard/ financial-analysis/ internal/ members/
+                     notes/ notifications/ observability/ ops/ recurring-rules/
+                     reminders/ savings-boxes/ spending-goals/ transactions/ users/
                      prisma/ (cada módulo: *.module/*.controller/*.service + dto/)
                      observability/ (métricas, health, correlação, log estruturado)
                      ops/ (auth GitHub OAuth, audit append-only, operators)
 apps/web/src/        app/ components/ contexts/ hooks/ lib/ middleware.ts
-                     app/(auth)/{login,cadastro}  app/app/{pessoal,empresa,conta}
+                     app/(auth)/{login,cadastro,convite}  app/app/{pessoal,empresa,conta}
                      app/ops/ (área de operações — sessão e cliente HTTP próprios)
 apps/ai-agent/src/   main.py worker.py bootstrap.py config.py
                      routers/ schemas/ services/
@@ -215,7 +217,7 @@ Em modo edição, converter o valor vindo da API para display antes de passar ao
 | **2 — Produto Pessoal** | ✅ Completo | Auth JWT, perfis, CRUD de contas/categorias/lançamentos, dashboard |
 | **3 — IA e WhatsApp** | ✅ Em andamento | Webhook, extração de intenção, integração LLM, pipeline durável (RabbitMQ + Redis) |
 | **4 — Pessoa Jurídica** | ✅ Em andamento | Dashboard empresarial, contas a pagar/receber, clientes/fornecedores, categorias |
-| **5 — Evolução (pós-MVP)** | 🔜 Pendente | Recorrência, metas, relatórios, importação de extratos |
+| **5 — Evolução (pós-MVP)** | ✅ Em andamento | Recorrências, metas de gastos, caixinhas, cartões, lembretes, agenda, anotações, membros (Duo), análise financeira; pendentes: relatórios e importação de extratos |
 
 ## Documentação
 

@@ -20,6 +20,8 @@ const SESSION_COOKIES = ['access_token', 'refresh_token', OPS_SESSION_COOKIE];
  * Rotas que **criam** sessão, e por isso não têm o que proteger: antes delas não
  * há sessão a sequestrar. A isenção vale mesmo quando o navegador ainda envia um
  * cookie antigo, que não pode impedir alguém de entrar de novo.
+ * `/members/accept-invite` entra pelo mesmo motivo: cria o login do membro e já
+ * emite a sessão, como o cadastro.
  *
  * `/auth/logout` e `/auth/refresh` ficam **fora** de propósito: elas agem sobre
  * uma sessão que já existe. Isentas, uma página de terceiro conseguia forçar
@@ -28,7 +30,7 @@ const SESSION_COOKIES = ['access_token', 'refresh_token', OPS_SESSION_COOKIE];
  * quando falta o token — e o navegador sempre envia `Origin` num POST
  * cross-origin.
  */
-const AUTH_CSRF_EXEMPT_PATHS = new Set(['/auth/login', '/auth/register']);
+const AUTH_CSRF_EXEMPT_PATHS = new Set(['/auth/login', '/auth/register', '/members/accept-invite']);
 
 /**
  * Proteção CSRF para requisições com sessão em cookie. Usa double-submit quando

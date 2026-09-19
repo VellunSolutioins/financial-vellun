@@ -37,12 +37,16 @@ class TransactionCreator:
         raw_message: str,
         ai_extracted_transaction_id: str | None = None,
         idempotency_key: str | None = None,
+        created_by_user_id: str | None = None,
     ) -> dict:
         """Retorna ``{ok: bool, message: str, transaction?: dict}``.
 
         ``idempotency_key`` (o ``jobId``) impede que um retry — inclusive um
         timeout ocorrido *depois* de o lancamento ter sido criado — gere um
         segundo lancamento: a API devolve o existente.
+
+        ``created_by_user_id`` e quem mandou a mensagem quando difere do dono dos
+        dados (membro do plano Duo). Sem ele, a API atribui ao ``user_id``.
         """
         account_id = await self._resolve_account(user_id, intent.account_name)
         if account_id is None:
@@ -69,6 +73,8 @@ class TransactionCreator:
             payload["aiExtractedTransactionId"] = ai_extracted_transaction_id
         if idempotency_key:
             payload["idempotencyKey"] = idempotency_key
+        if created_by_user_id:
+            payload["createdByUserId"] = created_by_user_id
 
         try:
             response = await api_client.post("/internal/transactions/from-ai", json=payload)
