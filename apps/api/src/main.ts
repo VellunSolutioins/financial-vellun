@@ -8,6 +8,8 @@ import helmet from 'helmet';
 
 import { AppModule } from './app.module';
 import { isAllowedWebOrigin } from './common/http-origin.util';
+import { CORRELATION_HEADER } from './observability/correlation';
+import { AppLoggerService } from './observability/app-logger.service';
 
 const isProduction = process.env.NODE_ENV === 'production';
 
@@ -19,7 +21,12 @@ process.env.TZ = process.env.TZ ?? 'America/Sao_Paulo';
 async function bootstrap() {
   // `rawBody: true` expõe `req.rawBody` (Buffer) para a validação de assinatura
   // do webhook do PSP, sem desabilitar o body parser usado pelo ValidationPipe.
-  const app = await NestFactory.create(AppModule, { rawBody: true });
+  const app = await NestFactory.create(AppModule, { rawBody: true, bufferLogs: true });
+
+  // Troca o logger do Nest pelo estruturado. `bufferLogs` acima retém o que for
+  // logado durante o bootstrap para que também saia no formato novo — sem isso,
+  // erros de inicialização (os mais difíceis de diagnosticar) ficariam de fora.
+  app.useLogger(app.get(AppLoggerService));
 
   // Headers de segurança (Helmet). CSP estrito só em produção; em dev fica
   // desabilitado para não bloquear o Swagger UI.
@@ -41,7 +48,16 @@ async function bootstrap() {
     },
     credentials: true,
     methods: ['GET', 'HEAD', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-CSRF-Token'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Requested-With',
+      'X-CSRF-Token',
+      CORRELATION_HEADER,
+    ],
+    // Sem expor o header, o browser não deixa o frontend ler o id da resposta —
+    // e é ele que permite levar um erro visto na tela direto para o Loki.
+    exposedHeaders: [CORRELATION_HEADER],
     optionsSuccessStatus: 204,
   });
 
@@ -76,7 +92,9 @@ async function bootstrap() {
     const nodeError = error as NodeJS.ErrnoException;
 
     if (nodeError.code === 'EADDRINUSE') {
-      console.error(`A porta ${port} ja esta em uso. Encerre o processo existente ou altere API_PORT.`);
+      console.error(
+        `A porta ${port} ja esta em uso. Encerre o processo existente ou altere API_PORT.`,
+      );
       process.exit(1);
     }
 

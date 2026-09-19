@@ -64,5 +64,43 @@
       "Read(//c/Users/Bruno Faboci/OneDrive/Documentos/projetos/floriu/Floriu/**)",
       "PowerShell(pnpm --filter @financial-vellun/web exec tsc --noEmit 2>&1)"
     ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/validate-bash.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Checando comandos perigosos..."
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/check-sensitive-data.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Checando dado sensivel..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/check-quality.mjs\"",
+            "timeout": 300,
+            "statusMessage": "Rodando lint, tipos e testes..."
+          }
+        ]
+      }
+    ]
   }
 }

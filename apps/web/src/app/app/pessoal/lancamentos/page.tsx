@@ -9,6 +9,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Dialog } from '@/components/ui/dialog';
+import { Pagination } from '@/components/ui/pagination';
 import { TransactionForm } from '@/components/transactions/TransactionForm';
 import { useTransactions, type Transaction } from '@/hooks/useTransactions';
 import { useMembers } from '@/hooks/useMembers';
@@ -41,6 +42,13 @@ const typeStyle = {
   expense: { icon: TrendingDown, tone: 'text-rose-600 bg-rose-50', sign: '-' },
   transfer: { icon: ArrowLeftRight, tone: 'text-blue-600 bg-blue-50', sign: '' },
 } as const;
+
+/**
+ * Origens que recebem o selo de destaque: o que foi registrado pela IA. O
+ * pipeline do WhatsApp grava `whatsapp`, então checar só `ai` deixava esses
+ * lançamentos sem selo.
+ */
+const REGISTRADO_PELA_IA = new Set<string>(['ai', 'whatsapp']);
 
 function monthLabel(month: string) {
   const [year, monthNumber] = month.split('-').map(Number);
@@ -280,6 +288,11 @@ function TransacoesContent() {
                                   </>
                                 )}
                               </p>
+                              {REGISTRADO_PELA_IA.has(tx.source) && (
+                                <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
+                                  IA
+                                </Badge>
+                              )}
                               {(tx.recurrenceType === 'parcelado' || tx.recurrenceType === 'fixo') && (
                                 <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
                                   {tx.recurrenceType === 'parcelado' && tx.installmentTotal
@@ -341,34 +354,12 @@ function TransacoesContent() {
       </Card>
 
       {meta.total > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm text-muted-foreground">
-            {meta.total} lançamento{meta.total === 1 ? '' : 's'} em {monthLabel(selectedMonth)}
-          </p>
-          {meta.total_pages > 1 && (
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={meta.page <= 1}
-                onClick={() => setParam('page', String(meta.page - 1))}
-              >
-                Anterior
-              </Button>
-              <span className="flex items-center px-3 text-sm text-muted-foreground">
-                {meta.page}/{meta.total_pages}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={meta.page >= meta.total_pages}
-                onClick={() => setParam('page', String(meta.page + 1))}
-              >
-                Próxima
-              </Button>
-            </div>
-          )}
-        </div>
+        <Pagination
+          page={meta.page}
+          totalPages={meta.total_pages}
+          onPageChange={(nova) => setParam('page', String(nova))}
+          summary={`${meta.total} lançamento${meta.total === 1 ? '' : 's'} em ${monthLabel(selectedMonth)}`}
+        />
       )}
 
       {/* Modal */}

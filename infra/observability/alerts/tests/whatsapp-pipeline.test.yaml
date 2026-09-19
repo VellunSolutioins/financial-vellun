@@ -1,0 +1,232 @@
+# Testes das regras de alerta do pipeline WhatsApp.
+#
+#   promtool test rules infra/observability/alerts/tests/*.test.yaml
+#
+# Cobrem os dois critérios de aceite da Entrega 3 — "derrubar o consumidor dispara
+# fila sem consumidor" e "forçar uma mensagem para a DLQ dispara nova entrada em
+# DLQ" — de forma **determinística**. Conferir Pending → Firing na UI prova uma
+# vez, num navegador; isto prova a cada execução, e pega a regressão de quem
+# ajustar um limiar sem perceber o efeito.
+#
+# Cada caso também verifica o **não disparo**, que é a metade esquecida: um alerta
+# que dispara sempre é indistinguível de um alerta quebrado.
+
+rule_files:
+  - ../whatsapp-pipeline.yaml
+
+evaluation_interval: 30s
+
+tests:
+  # ── Fila com mensagem e sem consumidor ───────────────────────────────────
+  - interval: 30s
+    name: fila com mensagem e consumidor no ar não alerta
+    input_series:
+      - series: 'rabbitmq_detailed_queue_messages_ready{queue="whatsapp.processing.v1",vhost="/"}'
+        values: '50+10x20'
+      - series: 'rabbitmq_detailed_queue_consumers{queue="whatsapp.processing.v1",vhost="/"}'
+        values: '3x20'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: FilaComMensagemESemConsumidor
+        exp_alerts: []
+
+  - interval: 30s
+    name: consumidor cai com mensagem na fila e o alerta dispara
+    input_series:
+      - series: 'rabbitmq_detailed_queue_messages_ready{queue="whatsapp.processing.v1",vhost="/"}'
+        values: '120x20'
+      # O worker morre no instante zero: nenhum consumidor a partir daí.
+      - series: 'rabbitmq_detailed_queue_consumers{queue="whatsapp.processing.v1",vhost="/"}'
+        values: '0x20'
+    alert_rule_test:
+      # Antes do `for: 2m` ainda não dispara — a tolerância existe para um deploy
+      # não acordar ninguém.
+      - eval_time: 1m
+        alertname: FilaComMensagemESemConsumidor
+        exp_alerts: []
+      - eval_time: 3m
+        alertname: FilaComMensagemESemConsumidor
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: ai-agent-worker
+              queue: whatsapp.processing.v1
+              vhost: /
+            exp_annotations:
+              summary: 'Fila whatsapp.processing.v1 tem mensagem e nenhum consumidor'
+              description: >-
+                120 mensagem(ns) pronta(s) em whatsapp.processing.v1 sem nenhum consumidor conectado há mais de 2 minutos. Nada está sendo processado.
+              dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
+              runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#backlog-crescendo'
+
+  - interval: 30s
+    name: fila vazia sem consumidor não alerta
+    input_series:
+      # É o estado normal de madrugada: ninguém mandou mensagem. Alertar aqui seria
+      # o caminho mais curto para o alerta ser ignorado.
+      - series: 'rabbitmq_detailed_queue_messages_ready{queue="whatsapp.processing.v1",vhost="/"}'
+        values: '0x20'
+      - series: 'rabbitmq_detailed_queue_consumers{queue="whatsapp.processing.v1",vhost="/"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: FilaComMensagemESemConsumidor
+        exp_alerts: []
+
+  - interval: 30s
+    name: fila de retry sem consumidor não alerta
+    input_series:
+      # Fila de retry não tem consumidor por construção: o TTL devolve a mensagem
+      # à fila principal. Incluí-la geraria alerta permanente.
+      - series: 'rabbitmq_detailed_queue_messages_ready{queue="whatsapp.processing.retry.60s",vhost="/"}'
+        values: '30x20'
+      - series: 'rabbitmq_detailed_queue_consumers{queue="whatsapp.processing.retry.60s",vhost="/"}'
+        values: '0x20'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: FilaComMensagemESemConsumidor
+        exp_alerts: []
+
+  # ── Nova entrada em DLQ, vista pelo catálogo ─────────────────────────────
+  - interval: 30s
+    name: falha catalogada dispara o alerta de nova entrada
+    input_series:
+      # O contador do catálogo é a fonte desde a Entrega 5. A profundidade da
+      # fila não serve mais: o consumer drena a DLQ em segundos e o valor volta a
+      # zero entre dois scrapes.
+      - series: 'vellun_agent_dlq_catalog_captured_total{job="ai-agent-worker"}'
+        values: '0x4 1x20'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: NovaEntradaEmDLQ
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: NovaEntradaEmDLQ
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: ai-agent-worker
+              job: ai-agent-worker
+            exp_annotations:
+              summary: 'Nova falha definitiva catalogada'
+              description: >-
+                1 mensagem(ns) entrou(entraram) no catálogo de falhas nos últimos 5 minutos. Investigue a causa ANTES de reprocessar.
+              dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
+              runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#mensagens-na-dlq'
+
+  - interval: 30s
+    name: catalogo parado no zero não alerta
+    input_series:
+      - series: 'vellun_agent_dlq_catalog_captured_total{job="ai-agent-worker"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: NovaEntradaEmDLQ
+        exp_alerts: []
+
+  - interval: 30s
+    name: DLQ drenada em segundos não dispara alerta de acumulo
+    input_series:
+      # O comportamento normal com o catálogo ligado: entra uma mensagem, o
+      # consumer a registra, a fila volta a zero.
+      - series: 'rabbitmq_detailed_queue_messages_ready{queue="whatsapp.processing.dlq",vhost="/"}'
+        values: '0x4 1 0x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: DlqNaoEstaSendoDrenada
+        exp_alerts: []
+
+  - interval: 30s
+    name: DLQ parada por 5 minutos indica catalogo fora
+    input_series:
+      - series: 'rabbitmq_detailed_queue_messages_ready{queue="whatsapp.processing.dlq",vhost="/"}'
+        values: '7x40'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: DlqNaoEstaSendoDrenada
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: DlqNaoEstaSendoDrenada
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: ai-agent-worker
+              queue: whatsapp.processing.dlq
+              vhost: /
+            exp_annotations:
+              summary: 'whatsapp.processing.dlq não está sendo drenada para o catálogo'
+              description: >-
+                7 mensagem(ns) parada(s) em whatsapp.processing.dlq há mais de 5 minutos. O consumer do catálogo deveria tê-las registrado em segundos. Nada se perdeu, mas o painel de operações está incompleto.
+              dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
+              runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#mensagens-na-dlq'
+
+  # ── Publicação e processamento ───────────────────────────────────────────
+  - interval: 30s
+    name: falha de publicação no webhook dispara alerta crítico
+    input_series:
+      - series: 'vellun_agent_publish_failed_total{job="ai-agent"}'
+        values: '0x4 1x20'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: WebhookRecusandoPublicacao
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: ai-agent
+              job: ai-agent
+            exp_annotations:
+              summary: 'Webhook do WhatsApp não está conseguindo publicar'
+              description: >-
+                1 falha(s) de publicação nos últimos 5 minutos. O webhook está devolvendo 503 e a Meta vai reenviar — com limite de tentativas.
+              dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
+              runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#webhook-devolvendo-503'
+
+  - interval: 30s
+    name: proporcao baixa de erro de processamento não alerta
+    input_series:
+      # 10 erros em 10.000 jobs é ruído; alertar por contagem absoluta confundiria
+      # isto com um incidente.
+      - series: 'vellun_agent_processing_error_total'
+        values: '0+0.01x40'
+      - series: 'vellun_agent_jobs_processed_total'
+        values: '0+10x40'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: TaxaDeErroDeProcessamentoAlta
+        exp_alerts: []
+
+  - interval: 30s
+    name: proporcao alta de erro de processamento alerta
+    input_series:
+      # 3 de cada 10 jobs falhando.
+      - series: 'vellun_agent_processing_error_total'
+        values: '0+3x60'
+      - series: 'vellun_agent_jobs_processed_total'
+        values: '0+10x60'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: TaxaDeErroDeProcessamentoAlta
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: ai-agent-worker
+            exp_annotations:
+              summary: 'Mais de 10% dos jobs falhando no processamento'
+              description: >-
+                30% dos jobs processados nos últimos 10 minutos terminaram em erro.
+              dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
+              runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#mensagens-na-dlq'
+
+  - interval: 30s
+    name: sem trafego nenhum não alerta por divisao por zero
+    input_series:
+      # A madrugada: nenhum job processado, nenhum erro. O denominador `> 0` na
+      # regra é o que evita um alerta permanente aqui.
+      - series: 'vellun_agent_processing_error_total'
+        values: '0x40'
+      - series: 'vellun_agent_jobs_processed_total'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: TaxaDeErroDeProcessamentoAlta
+        exp_alerts: []

@@ -75,10 +75,12 @@ class _FakeProcessor:
     async def handle_intent(
         self, phone, user_id, intent, raw, last_inbound_id=None,
         *, response_prefix="", force_confirm=False, confirm_question=None,
+        created_by_user_id=None,
     ):
         self.handle_calls.append(
             {
                 "raw": raw,
+                "created_by_user_id": created_by_user_id,
                 "response_prefix": response_prefix,
                 "force_confirm": force_confirm,
                 "confirm_question": confirm_question,
@@ -147,6 +149,18 @@ def test_audio_creates_and_echoes_transcription():
     assert call["raw"] == "gastei 100 no mercado"
     assert 'Entendi: "gastei 100 no mercado".' in call["response_prefix"]
     assert "Lançamento criado!" in reply
+
+
+def test_audio_from_duo_member_passes_author():
+    item = InboundMessage(phone="+5511", kind="audio", media_id="m1", message_id="wamid.M")
+    _, proc = _run(
+        contact={"userId": "dono", "createdByUserId": "membro"},
+        media=(b"audio-bytes", "audio/ogg"),
+        transcription=_FakeTranscription("gastei 100 no mercado"),
+        classifier=_FakeClassifier(intent=_expense_intent()),
+        item=item,
+    )
+    assert proc.handle_calls[0]["created_by_user_id"] == "membro"
 
 
 def test_image_asks_for_confirmation():

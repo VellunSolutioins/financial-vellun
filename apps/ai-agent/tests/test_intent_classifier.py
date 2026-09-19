@@ -5,9 +5,10 @@ serem determinísticos e independentes de `OPENAI_API_KEY`.
 """
 
 import asyncio
-from datetime import date, timedelta
+from datetime import timedelta
 
 from src.schemas.financial_intent import IntentType, TransactionTypeEnum
+from src.services.clock import today_local
 from src.services.intent_classifier import IntentClassifier
 
 classifier = IntentClassifier(provider=None)
@@ -60,7 +61,7 @@ def test_decimal_amount_and_relative_date():
     result = classify("gastei 47,50 no almoço ontem")
     assert result.amount == 47.5
     assert result.category_name == "Alimentação"
-    expected = (date.today() - timedelta(days=1)).isoformat()
+    expected = (today_local() - timedelta(days=1)).isoformat()
     assert result.transaction_date == expected
 
 

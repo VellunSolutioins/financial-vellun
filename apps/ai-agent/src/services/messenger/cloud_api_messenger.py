@@ -1,8 +1,16 @@
 """Messenger de produção via WhatsApp Cloud API (Meta/Graph).
 
 Envia mensagens de texto por ``POST {base}/{phone_number_id}/messages`` com
-``Authorization: Bearer <token>``. Falhas de entrega são logadas, não
-propagadas, para não derrubar o processamento da mensagem.
+``Authorization: Bearer <token>``.
+
+Falha de entrega **levanta**. Antes era só logada, e o consumer marcava o job
+como concluído sem o usuário receber resposta nenhuma — e o reprocessamento
+virava no-op pela janela de deduplicação. A classificação segue a política do
+broker:
+
+- rede, ``429`` e ``5xx`` → :class:`TransientError` (retry com backoff);
+- demais ``4xx`` (token inválido, número fora da janela, payload recusado) →
+  :class:`PermanentError` (DLQ direto: repetir não muda a resposta da Meta).
 """
 
 import logging
@@ -10,9 +18,21 @@ import logging
 import httpx
 
 from ...config import settings
+from ...messaging.base import PermanentError, TransientError
 from .base import Messenger
 
 logger = logging.getLogger(__name__)
+
+
+def _graph_error(response: httpx.Response) -> str:
+    """Resumo do erro da Graph API, sem o corpo inteiro (que ecoa o número)."""
+    try:
+        error = response.json().get("error") or {}
+    except ValueError:
+        return f"HTTP {response.status_code}"
+    code = error.get("code")
+    message = error.get("message") or ""
+    return f"HTTP {response.status_code} (code={code}): {message[:200]}"
 
 
 class WhatsappCloudApiMessenger(Messenger):
@@ -44,17 +64,20 @@ class WhatsappCloudApiMessenger(Messenger):
         }
         try:
             response = await self._client.post(self._url, json=payload)
-        except Exception:  # noqa: BLE001 — falha de rede não derruba o fluxo
-            logger.exception("Falha de rede ao enviar mensagem para %s", phone)
+        except httpx.HTTPError as exc:
+            raise TransientError(
+                f"falha de rede ao enviar pelo WhatsApp: {type(exc).__name__}"
+            ) from exc
+
+        if response.status_code in (200, 201):
             return
 
-        if response.status_code not in (200, 201):
-            # Nunca logar o token; apenas status/corpo da resposta da API.
-            logger.warning(
-                "WhatsApp Cloud API recusou envio (%s): %s",
-                response.status_code,
-                response.text,
-            )
+        # Nunca logar o token; apenas status e o erro resumido da Graph API.
+        detalhe = _graph_error(response)
+        logger.warning("WhatsApp Cloud API recusou envio: %s", detalhe)
+        if response.status_code == 429 or response.status_code >= 500:
+            raise TransientError(f"WhatsApp Cloud API indisponível: {detalhe}")
+        raise PermanentError(f"WhatsApp Cloud API recusou envio: {detalhe}")
 
     async def aclose(self) -> None:
         await self._client.aclose()

@@ -13,6 +13,7 @@ import { SubscriptionAuditService } from './services/subscription-audit.service'
 import { SubscriptionStateService } from './services/subscription-state.service';
 import { SubscriptionService } from './services/subscription.service';
 import { WebhookEventService } from './webhook/webhook-event.service';
+import { WebhookRetryService } from './webhook/webhook-retry.service';
 import { WebhookProcessor } from './webhook/webhook.processor';
 
 /**
@@ -30,6 +31,7 @@ import { WebhookProcessor } from './webhook/webhook.processor';
     PaymentService,
     WebhookEventService,
     WebhookProcessor,
+    WebhookRetryService,
     ReconciliationService,
     ActiveSubscriptionGuard,
     { provide: PAYMENT_PROVIDER, useClass: AsaasPaymentProvider },
@@ -41,6 +43,10 @@ import { WebhookProcessor } from './webhook/webhook.processor';
     SubscriptionService,
     ActiveSubscriptionGuard,
     PAYMENT_PROVIDER,
+    // Exportado para a area de operacoes: a recuperacao de um evento esgotado
+    // roda uma tentativa DE VERDADE, pelo mesmo caminho do webhook, em vez de
+    // so mexer no status.
+    WebhookProcessor,
   ],
 })
 export class BillingModule {}

@@ -3,16 +3,34 @@ import { timingSafeEqual } from 'node:crypto';
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
 import { Request } from 'express';
 
+import { OPS_SESSION_COOKIE } from '../../ops/ops.constants';
 import { CSRF_COOKIE, CSRF_HEADER } from '../csrf.util';
 import { isAllowedWebOrigin } from '../http-origin.util';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
-const AUTH_CSRF_EXEMPT_PATHS = new Set([
-  '/auth/login',
-  '/auth/register',
-  '/auth/logout',
-  '/auth/refresh',
-]);
+
+/**
+ * Cookies que caracterizam uma sessão. **Toda** sessão em cookie precisa constar
+ * aqui: o guard libera requisições sem sessão (não há o que forjar), então um
+ * cookie de sessão ausente desta lista significa mutações passando sem
+ * verificação de CSRF. Foi o que quase aconteceu ao introduzir `ops_session`.
+ */
+const SESSION_COOKIES = ['access_token', 'refresh_token', OPS_SESSION_COOKIE];
+/**
+ * Rotas que **criam** sessão, e por isso não têm o que proteger: antes delas não
+ * há sessão a sequestrar. A isenção vale mesmo quando o navegador ainda envia um
+ * cookie antigo, que não pode impedir alguém de entrar de novo.
+ * `/members/accept-invite` entra pelo mesmo motivo: cria o login do membro e já
+ * emite a sessão, como o cadastro.
+ *
+ * `/auth/logout` e `/auth/refresh` ficam **fora** de propósito: elas agem sobre
+ * uma sessão que já existe. Isentas, uma página de terceiro conseguia forçar
+ * logout ou rotação de token com um POST cross-site. Continuam funcionando para
+ * sessões anteriores ao cookie CSRF porque o guard aceita origem web permitida
+ * quando falta o token — e o navegador sempre envia `Origin` num POST
+ * cross-origin.
+ */
+const AUTH_CSRF_EXEMPT_PATHS = new Set(['/auth/login', '/auth/register', '/members/accept-invite']);
 
 /**
  * Proteção CSRF para requisições com sessão em cookie. Usa double-submit quando
@@ -28,13 +46,17 @@ export class CsrfGuard implements CanActivate {
     if (this.isAuthCsrfExemptPath(request)) return true;
 
     const cookies = (request.cookies ?? {}) as Record<string, string | undefined>;
-    const hasSession = Boolean(cookies['access_token'] || cookies['refresh_token']);
+    const hasSession = SESSION_COOKIES.some((name) => Boolean(cookies[name]));
     if (!hasSession) return true;
 
     const cookieToken = cookies[CSRF_COOKIE];
     const headerToken = request.headers[CSRF_HEADER];
 
-    if (cookieToken && typeof headerToken === 'string' && this.safeEqual(headerToken, cookieToken)) {
+    if (
+      cookieToken &&
+      typeof headerToken === 'string' &&
+      this.safeEqual(headerToken, cookieToken)
+    ) {
       return true;
     }
 

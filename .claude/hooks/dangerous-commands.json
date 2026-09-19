@@ -1,0 +1,12 @@
+[
+  { "name": "rm -rf na raiz ou no home", "pattern": "rm\\s+-rf\\s+(/|~|\\$HOME)(\\s|$|/\\*)" },
+  { "name": "DROP TABLE/DATABASE", "pattern": "DROP\\s+(TABLE|DATABASE)", "flags": "i" },
+  { "name": "TRUNCATE TABLE", "pattern": "TRUNCATE\\s+TABLE", "flags": "i" },
+  { "name": "fork bomb", "pattern": ":\\(\\)\\s*\\{\\s*:\\s*\\|\\s*:\\s*&\\s*\\}\\s*;\\s*:" },
+  { "name": "mkfs", "pattern": "\\bmkfs\\b" },
+  { "name": "dd sobre dispositivo", "pattern": "dd\\s+if=.*of=/dev/" },
+  { "name": "git push --force em main/master", "pattern": "git\\s+push.*--force.*\\b(main|master)\\b" },
+  { "name": "git push -f em main/master", "pattern": "git\\s+push.*-f\\b.*\\b(main|master)\\b" },
+  { "name": "git reset --hard origin/main", "pattern": "git\\s+reset\\s+--hard\\s+origin/(main|master)" },
+  { "name": "bypass de verificação em commit/push", "pattern": "git\\s+(commit|push).*(--no-verify|--no-gpg-sign)" }
+]

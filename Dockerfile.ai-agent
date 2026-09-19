@@ -11,4 +11,8 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 COPY apps/ai-agent/src ./src
 
+# Por padrao serve o webhook. Com RUN_CONSUMERS_IN_API=true (padrao) esta mesma
+# imagem tambem consome as filas; para separar os processos, suba uma segunda
+# instancia com RUN_CONSUMERS_IN_API=false na API e
+# `command: python -m src.worker` no container de worker.
 CMD ["sh", "-c", "uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8010}"]

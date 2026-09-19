@@ -1,0 +1,328 @@
+// Coleta de métricas e logs → Grafana Cloud.
+//
+// Um único Alloy no projeto do Railway: ele scrapa os serviços pela rede
+// privada, recebe os logs que as aplicações empurram, e é o **único lugar** com
+// credencial do Grafana Cloud. Nenhum serviço de aplicação conhece a chave.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+// Sobre os logs: o Railway NÃO tem log drain.
+//
+// O plano original previa receber um "log drain HTTP do Railway" aqui. Isso não
+// existe — a documentação do Railway é explícita ("Railway does not have a log
+// drain setting") e oferece dois caminhos: um forwarder que leia stdout, ou a
+// própria aplicação emitir os logs. Ler stdout de outro container é justamente o
+// acoplamento que queríamos evitar, então o fluxo é o outro: **as aplicações
+// empurram** para o `loki.source.api` abaixo, pela rede privada.
+//
+// A troca é honesta: o processo passa a conhecer o endereço do Alloy (não a
+// credencial do Grafana), e a exportação é best-effort — falhar em enviar log
+// nunca interrompe a aplicação. Em contrapartida, o log sai do processo já
+// estruturado e correlacionado, sem depender de parsear texto de stdout.
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Variáveis de ambiente esperadas (definidas nas variáveis do Railway, nunca
+// aqui):
+//
+//   GRAFANA_CLOUD_PROM_URL   endpoint remote_write do Prometheus
+//   GRAFANA_CLOUD_PROM_USER  id da instância (numérico)
+//   GRAFANA_CLOUD_LOKI_URL   endpoint push do Loki
+//   GRAFANA_CLOUD_LOKI_USER  id da instância (numérico)
+//   GRAFANA_CLOUD_TOKEN      token de acesso com escopo de escrita
+//   METRICS_TOKEN            bearer aceito por /metrics dos três serviços
+//   ENVIRONMENT              "production" | "staging" (vira label `env`)
+//
+// Validar a sintaxe antes de subir:
+//   alloy fmt infra/observability/alloy/config.alloy
+//   alloy validate infra/observability/alloy/config.alloy
+
+logging {
+  level  = "info"
+  format = "json"
+}
+
+// ── Destinos no Grafana Cloud ───────────────────────────────────────────────
+
+prometheus.remote_write "grafana_cloud" {
+  endpoint {
+    url = sys.env("GRAFANA_CLOUD_PROM_URL")
+
+    basic_auth {
+      username = sys.env("GRAFANA_CLOUD_PROM_USER")
+      password = sys.env("GRAFANA_CLOUD_TOKEN")
+    }
+
+    // Fila generosa: um blip de rede não deve descartar amostra. O WAL do Alloy
+    // segura o que não foi enviado, então o custo de esperar é disco, não dado.
+    queue_config {
+      capacity          = 10000
+      max_shards        = 4
+      max_samples_per_send = 2000
+      batch_send_deadline  = "5s"
+      retry_on_http_429 = true
+    }
+  }
+
+  // `external_labels` marca a origem em TODA série, então uma consulta consegue
+  // separar produção de staging sem depender de cada serviço lembrar de fazê-lo.
+  external_labels = {
+    env     = sys.env("ENVIRONMENT"),
+    cluster = "railway",
+  }
+}
+
+loki.write "grafana_cloud" {
+  endpoint {
+    url = sys.env("GRAFANA_CLOUD_LOKI_URL")
+
+    basic_auth {
+      username = sys.env("GRAFANA_CLOUD_LOKI_USER")
+      password = sys.env("GRAFANA_CLOUD_TOKEN")
+    }
+  }
+
+  external_labels = {
+    env     = sys.env("ENVIRONMENT"),
+    cluster = "railway",
+  }
+}
+
+// ── Recebimento dos logs das aplicações ─────────────────────────────────────
+//
+// As aplicações fazem POST em /loki/api/v1/push nesta porta, pela rede privada
+// do Railway. A porta NÃO deve ser exposta publicamente: qualquer um que a
+// alcance pode injetar linha de log.
+//
+// `::` e não `0.0.0.0`: a rede privada do Railway é IPv6 (só IPv6 em ambientes
+// criados antes de 2025-10-16, dual-stack nos novos). Ouvindo só em IPv4, o
+// push para `alloy.railway.internal:3100` falharia calado — e o transporte das
+// aplicações é best-effort, então ninguém veria erro, só log faltando. `::`
+// aceita os dois. O config.alloy.local continua em `0.0.0.0`, que é o certo no
+// compose.
+
+loki.source.api "aplicacoes" {
+  http {
+    listen_address = "::"
+    listen_port    = 3100
+  }
+
+  forward_to = [loki.process.sanitiza.receiver]
+
+  // `use_incoming_timestamp` porque o momento que interessa é quando o evento
+  // aconteceu no serviço, não quando o Alloy o recebeu — a diferença aparece
+  // exatamente durante um incidente, quando o envio atrasa.
+  use_incoming_timestamp = true
+}
+
+// Rede de segurança da sanitização.
+//
+// A redação acontece na aplicação (é lá que se sabe o que é sensível), mas um
+// campo novo esquecido chegaria aqui. Este estágio derruba a linha inteira se
+// vier algo com cara de credencial — perder uma linha de log é melhor que
+// persistir um segredo com 14 dias de retenção.
+loki.process "sanitiza" {
+  forward_to = [loki.write.grafana_cloud.receiver]
+
+  stage.drop {
+    expression = "(?i)(BEGIN (RSA |EC )?PRIVATE KEY|aws_secret_access_key|xoxb-[0-9A-Za-z-]{10,})"
+    drop_counter_reason = "possivel_segredo_no_log"
+  }
+}
+
+// ── Métricas dos serviços da aplicação ──────────────────────────────────────
+//
+// Os alvos são nomes internos do Railway (`<service>.railway.internal`), que só
+// resolvem dentro do projeto. Um `job` por serviço, e `instance` fica com o alvo
+// — é o par que o alerta `up == 0` usa.
+//
+// O nome interno é o nome do serviço no Railway: renomear o serviço lá quebra o
+// scrape aqui. As portas são fixas, então a API precisa de `PORT=3001` e o
+// agente de `PORT=8010` nas variáveis do Railway — sem isso o Railway pode
+// atribuir outra porta e o alvo fica `down`.
+
+prometheus.scrape "aplicacoes" {
+  targets = [
+    { __address__ = "financial-vellun-api.railway.internal:3001",       job = "api" },
+    { __address__ = "financial-vellun-ai-agent.railway.internal:8010",  job = "ai-agent" },
+    // Worker separado: só existe com `RUN_CONSUMERS_IN_API=false` e
+    // `python -m src.worker` num serviço próprio. Nesta topologia os consumers
+    // rodam no mesmo processo do webhook, e as métricas deles já saem em
+    // `job="ai-agent"`. Deixar o alvo ativo sem o serviço seria um `up == 0`
+    // permanente. Ao separar o worker, descomente com o nome real do serviço.
+    // { __address__ = "financial-vellun-ai-agent-worker.railway.internal:8011", job = "ai-agent-worker" },
+  ]
+
+  forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+  scrape_interval = "30s"
+  scrape_timeout  = "10s"
+
+  // Bearer exigido por /metrics dos três serviços. Sem ele o scrape recebe 401 —
+  // e é assim de propósito: /metrics revela nome de rota e volume de negócio.
+  bearer_token = sys.env("METRICS_TOKEN")
+}
+
+// ── Métricas da infraestrutura ──────────────────────────────────────────────
+//
+// O plugin nativo do RabbitMQ (porta 15692) e os dois exporters, rodando como
+// serviços pequenos no mesmo projeto. Intervalo maior que o das aplicações: são
+// gauges de estado, não contadores de requisição, e cada scrape extra custa
+// amostra no free tier sem informar mais nada.
+//
+// Passa por `prometheus.relabel.corta_ruido` antes do remote_write — ver abaixo
+// por que isso não é otimização prematura.
+
+prometheus.scrape "infraestrutura" {
+  targets = [
+    // Exige o plugin `rabbitmq_prometheus` habilitado no serviço do RabbitMQ, e
+    // que o serviço se chame `rabbitmq` no Railway. Sem um dos dois,
+    // `up{job="rabbitmq"}` fica 0 e `InfraestruturaIndisponivel` dispara.
+    { __address__ = "rabbitmq.railway.internal:15692",          job = "rabbitmq" },
+    // Os dois exporters ainda não existem como serviço no Railway. Com o alvo
+    // ativo, `up` existiria valendo 0 e `InfraestruturaIndisponivel` (critical)
+    // dispararia para sempre — e alerta que dispara sempre acaba silenciado.
+    // Comentados, o job simplesmente não existe. Ao criar os serviços (imagens
+    // pinadas em docker-compose.observability.yml), descomente.
+    // { __address__ = "postgres-exporter.railway.internal:9187",  job = "postgres" },
+    // { __address__ = "redis-exporter.railway.internal:9121",     job = "redis" },
+  ]
+
+  forward_to      = [prometheus.relabel.corta_ruido.receiver]
+  scrape_interval = "60s"
+  scrape_timeout  = "15s"
+}
+
+// Métricas de fila **por fila**, do RabbitMQ.
+//
+// Necessário porque a porta 15692 devolve, por padrão, métricas **agregadas**:
+// `rabbitmq_queue_messages_ready` vem sem o label `queue`, somando todas. Com
+// isso, os dois alertas centrais do plano — "fila com mensagem e zero
+// consumidores" e "nova entrada em DLQ" — seriam inexprimíveis: não há como
+// distinguir `whatsapp.processing.dlq` de `whatsapp.inbound.v1`.
+//
+// `/metrics/detailed` traz o label, com o prefixo `rabbitmq_detailed_`. Pedimos
+// **apenas duas famílias**: o endpoint inteiro traz milhares de séries, e este
+// par custa 77 (14 filas × algumas métricas). Pedir `family=` explicitamente é o
+// que separa "por fila" de "explode o free tier".
+prometheus.scrape "rabbitmq_por_fila" {
+  targets = [
+    {
+      __address__     = "rabbitmq.railway.internal:15692",
+      __metrics_path__ = "/metrics/detailed",
+      __param_family  = "queue_coarse_metrics",
+      job             = "rabbitmq",
+    },
+  ]
+
+  // O `__param_family` acima cobre uma família; a segunda vai na query string do
+  // próprio path, porque o parâmetro é repetido e não uma lista.
+  forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+  scrape_interval = "30s"
+  scrape_timeout  = "15s"
+}
+
+prometheus.scrape "rabbitmq_consumidores" {
+  targets = [
+    {
+      __address__      = "rabbitmq.railway.internal:15692",
+      __metrics_path__ = "/metrics/detailed",
+      __param_family   = "queue_consumer_count",
+      job              = "rabbitmq",
+    },
+  ]
+
+  forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+  scrape_interval = "30s"
+  scrape_timeout  = "15s"
+}
+
+// Descarte de famílias de métrica que não usamos.
+//
+// **Isto é necessário, não zelo excessivo.** O free tier do Grafana Cloud dá
+// 10.000 séries ativas, e a medição desta stack (2026-09-09, uma réplica de cada
+// serviço) mostrou 5.501 séries — com a API ainda morna. O detalhe importa:
+//
+//   rabbitmq  2.682, das quais 2.464 (91%) são `erlang_vm_*`
+//   postgres  1.116, das quais  551 são estatística por tabela
+//   redis       643, das quais  316 são percentil por comando
+//   alloy       623
+//   api         153 (só as rotas exercitadas; ~2.300 com as 55 rotas ativas)
+//
+// Sem cortar, duas réplicas da API estouram o teto — e o comportamento ao
+// estourar é a conta passar a cobrar ou o Grafana descartar série, em silêncio.
+// Cada regra abaixo diz o que perde e por que a perda é aceitável.
+prometheus.relabel "corta_ruido" {
+  forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+
+  // Internos da VM Erlang por escalonador e por alocador de memória. Diagnostica
+  // o broker em si, não o nosso pipeline; se um dia for preciso, o painel do
+  // RabbitMQ mostra ao vivo. Sozinho, este corte devolve ~2.370 séries.
+  //
+  // Atenção ao formato: `erlang_vm_allocators` é **um** nome de métrica com 1.744
+  // combinações de label (alocador × escalonador), sem sufixo — daí ele aparecer
+  // sozinho na alternância, sem `_.*`. Uma versão anterior desta regra exigia o
+  // underscore e cortava 678 séries em vez de 2.370.
+  rule {
+    source_labels = ["__name__"]
+    regex         = "erlang_vm_(allocators|msacc_.*|dist_.*|statistics_garbage_collection)"
+    action        = "drop"
+  }
+
+  // Percentis de latência por comando do Redis. Usamos o Redis para agrupamento
+  // e lock; o que interessa é `redis_up`, memória e conexões — não a distribuição
+  // de latência de cada um dos ~26 comandos.
+  rule {
+    source_labels = ["__name__"]
+    regex         = "redis_(latency_percentiles|commands_latencies)_.*"
+    action        = "drop"
+  }
+
+  // I/O por tabela do Postgres. Mantemos `pg_stat_user_tables_*` (linhas lidas,
+  // sequencial vs índice), que é o que responde "falta índice aqui?".
+  rule {
+    source_labels = ["__name__"]
+    regex         = "pg_statio_user_.*"
+    action        = "drop"
+  }
+
+  // NOTA: houve aqui uma regra descartando `pg_settings_.*` (255 séries de
+  // configuração do servidor, constantes entre scrapes). Ela foi **removida** de
+  // propósito: o alerta `ConexoesDoPostgresProximasDoLimite` precisa de
+  // `pg_settings_max_connections`, e a regex do Prometheus é RE2 — sem lookahead,
+  // "descarte `pg_settings_` exceto `max_connections`" só sairia como uma
+  // alternância longa e frágil, que quebraria calada na próxima versão do
+  // exporter. 255 séries (2,5% do teto) é preço justo por um alerta que funciona.
+}
+
+// ── Auto-observação ─────────────────────────────────────────────────────────
+//
+// Sem isto, o Alloy caindo seria invisível: as séries simplesmente param, o que
+// é indistinguível de "nada aconteceu". É o que dá sentido ao alerta de
+// `absent()` da Entrega 3.
+
+prometheus.exporter.self "alloy" {}
+
+prometheus.scrape "alloy" {
+  targets    = prometheus.exporter.self.alloy.targets
+  forward_to = [prometheus.relabel.corta_ruido_alloy.receiver]
+  // Intervalo folgado: aqui a pergunta é "o Alloy está de pé e conseguindo
+  // enviar?", que não precisa de resolução fina.
+  scrape_interval = "60s"
+}
+
+// O Alloy expõe ~620 séries sobre si mesmo, boa parte runtime do Go. Mantemos o
+// que responde às três perguntas que importam — está de pé, está conseguindo
+// enviar, está descartando algo — e cortamos o resto.
+prometheus.relabel "corta_ruido_alloy" {
+  forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+
+  rule {
+    source_labels = ["__name__"]
+    regex         = "go_(memstats|sched|gc)_.*"
+    action        = "drop"
+  }
+
+  rule {
+    source_labels = ["__name__"]
+    regex         = "promhttp_.*"
+    action        = "drop"
+  }
+}

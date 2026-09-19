@@ -6,6 +6,7 @@ Persiste mensagens e extrações via `POST /internal/ai-events`.
 import logging
 
 from .api_client import api_client
+from .metrics import metrics
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +57,15 @@ class AuditService:
         status: str,
         transaction_id: str | None = None,
         source_message_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> str | None:
-        """Registra uma extração de IA. Retorna o id do registro."""
+        """Registra uma extração de IA. Retorna o id do registro.
+
+        Com ``idempotency_key`` (o ``jobId``), o reprocessamento de um job
+        devolve **a mesma** extração em vez de criar uma segunda — que ficaria
+        órfã, já que a criação do lançamento é deduplicada antes e não chegaria
+        a vinculá-la.
+        """
         payload = {
             "eventType": "extraction",
             "userId": user_id,
@@ -68,7 +76,13 @@ class AuditService:
             "transactionId": transaction_id,
             "sourceMessageId": source_message_id,
         }
+        if idempotency_key:
+            payload["idempotencyKey"] = idempotency_key
+
         result = await self._post(payload)
+        if result and result.get("duplicate"):
+            metrics.incr("extractions_idempotent_hit")
+            logger.info("Extração já existia para esta chave de idempotência")
         return result.get("id") if result else None
 
     async def _post(self, payload: dict) -> dict | None:

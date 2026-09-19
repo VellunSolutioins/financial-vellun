@@ -19,6 +19,59 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  # Broker durável do pipeline WhatsApp (whatsapp.inbound.v1 / whatsapp.processing.v1).
+  # Painel de administração em http://localhost:15672 (guest/guest).
+  #
+  # `rabbitmq_prometheus` é habilitado via `enabled_plugins` montado abaixo, e
+  # expõe /metrics na 15692. Preferimos o plugin nativo a um exporter externo:
+  # ele lê o estado interno do broker sem passar pela API de gerenciamento, que
+  # é a mesma usada pelo painel e degrada sob carga.
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: financial-vellun-rabbitmq
+    environment:
+      TZ: America/Sao_Paulo
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    ports:
+      - '5672:5672'
+      - '15672:15672'
+      - '15692:15692'
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - ../observability/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # Estado distribuído: agrupamento por telefone, locks e estado de conversa.
+  # `appendonly` garante que confirmações pendentes sobrevivam a restart.
+  redis:
+    image: redis:7-alpine
+    container_name: financial-vellun-redis
+    command: ['redis-server', '--appendonly', 'yes']
+    environment:
+      TZ: America/Sao_Paulo
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
 volumes:
   postgres_data:
     name: financial-vellun-postgres
+  rabbitmq_data:
+    name: financial-vellun-rabbitmq
+  redis_data:
+    name: financial-vellun-redis

@@ -11,10 +11,16 @@ confirmar/criar o lançamento e responder ao usuário.
 
 import logging
 
-from ..schemas.financial_intent import FinancialIntent, TransactionTypeEnum
 from .audit_service import audit_service
 from .contact_service import contact_service
 from .intent_classifier import intent_classifier
+from .media_resolver import (
+    AUDIO_FALLBACK,
+    DOWNLOAD_FALLBACK,
+    IMAGE_FALLBACK,
+    UNSUPPORTED_MEDIA_MESSAGE,
+    build_confirmation_question,
+)
 from .message_processor import NOT_LINKED_MESSAGE, message_processor
 from .metrics import metrics
 from .subscription_gate import subscription_gate
@@ -24,24 +30,9 @@ from .whatsapp_media import whatsapp_media
 
 logger = logging.getLogger(__name__)
 
-UNSUPPORTED_MEDIA_MESSAGE = (
-    "Por enquanto só consigo processar texto, áudio e foto de comprovante 🙂. "
-    "Esse tipo de mensagem ainda não é suportado."
-)
-DOWNLOAD_FALLBACK = "Não consegui baixar sua mídia. Pode tentar enviar novamente?"
-AUDIO_FALLBACK = (
-    "Não consegui entender o áudio. Pode repetir mais devagar ou digitar o lançamento?"
-)
-IMAGE_FALLBACK = (
-    "Não consegui ler o comprovante. Pode enviar uma foto mais nítida ou digitar os dados?"
-)
-
-_TYPE_LABEL = {
-    TransactionTypeEnum.income: "receita",
-    TransactionTypeEnum.expense: "despesa",
-    TransactionTypeEnum.transfer: "transferência",
-}
-
+# Reexportados de ``media_resolver``: a resolucao de midia foi extraida para la,
+# para poder rodar no consumer de entrada (fora do request HTTP).
+__all__ = ["MediaProcessor", "media_processor"]
 
 class MediaProcessor:
     async def process(self, phone: str, item: InboundMessage) -> str:
@@ -102,7 +93,13 @@ class MediaProcessor:
         intent = await intent_classifier.classify(transcript, context)
         prefix = f'Entendi: "{transcript}".\n'
         return await message_processor.handle_intent(
-            phone, user_id, intent, transcript, last_inbound_id, response_prefix=prefix
+            phone,
+            user_id,
+            intent,
+            transcript,
+            last_inbound_id,
+            response_prefix=prefix,
+            created_by_user_id=contact.get("createdByUserId"),
         )
 
     async def _process_image(
@@ -129,7 +126,7 @@ class MediaProcessor:
         if intent is None or intent.amount is None:
             return await message_processor._respond(phone, IMAGE_FALLBACK)
 
-        question = self._build_confirmation_question(intent)
+        question = build_confirmation_question(intent)
         return await message_processor.handle_intent(
             phone,
             user_id,
@@ -138,6 +135,7 @@ class MediaProcessor:
             last_inbound_id,
             force_confirm=True,
             confirm_question=question,
+            created_by_user_id=contact.get("createdByUserId"),
         )
 
     async def _log_inbound(
@@ -161,20 +159,6 @@ class MediaProcessor:
             logger.info("Mídia duplicada ignorada (message_id=%s)", item.message_id)
             return False
         return result.get("id") if result else None
-
-    def _build_confirmation_question(self, intent: FinancialIntent) -> str:
-        parts: list[str] = []
-        if intent.transaction_type is not None:
-            parts.append(_TYPE_LABEL.get(intent.transaction_type, ""))
-        if intent.amount is not None:
-            parts.append(f"R$ {intent.amount:.2f}")
-        if intent.category_name:
-            parts.append(f"categoria {intent.category_name}")
-        if intent.transaction_date:
-            parts.append(f"em {intent.transaction_date}")
-        resumo = ", ".join(p for p in parts if p)
-        desc = f" ({intent.description})" if intent.description else ""
-        return f"Li o comprovante: {resumo}{desc}. Confirma o lançamento? (sim/não)"
 
 
 media_processor = MediaProcessor()

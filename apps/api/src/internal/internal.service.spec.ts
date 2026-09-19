@@ -1,10 +1,11 @@
+import { ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
 import { InternalService } from './internal.service';
 
 /** Cria um mock mínimo do PrismaService com as entidades usadas pelo serviço. */
 function createPrismaMock() {
-  return {
+  const mock: any = {
     whatsappContact: {
       findUnique: jest.fn(),
       upsert: jest.fn(),
@@ -22,9 +23,14 @@ function createPrismaMock() {
     user: { findUnique: jest.fn() },
     account: { findMany: jest.fn(), findUnique: jest.fn() },
     category: { findMany: jest.fn(), findUnique: jest.fn() },
-    transaction: { create: jest.fn() },
-    aiExtractedTransaction: { update: jest.fn() },
+    transaction: { create: jest.fn(), findUnique: jest.fn() },
+    aiExtractedTransaction: { update: jest.fn(), create: jest.fn(), findUnique: jest.fn() },
   };
+  // `$transaction(fn)` executa o callback com o próprio mock como client.
+  mock.$transaction = jest.fn(async (fn: any) => fn(mock));
+  // `SELECT ... FOR UPDATE` que serializa a criação da conversa por contato.
+  mock.$queryRaw = jest.fn().mockResolvedValue([]);
+  return mock;
 }
 
 describe('InternalService', () => {
@@ -89,6 +95,32 @@ describe('InternalService', () => {
     });
   });
 
+  describe('findContactByPhone', () => {
+    const contato = (user: Record<string, unknown>) => ({
+      phoneNumber: '+5511999999999',
+      isVerified: true,
+      user: { name: 'Fulano', profileType: 'individual', householdOwnerId: null, ...user },
+    });
+
+    it('devolve o próprio usuário como dono e autor', async () => {
+      prisma.whatsappContact.findUnique.mockResolvedValue(contato({ id: 'dono' }));
+
+      const result = await service.findContactByPhone('11999999999');
+
+      expect(result).toMatchObject({ userId: 'dono', createdByUserId: 'dono' });
+    });
+
+    it('membro do plano Duo escreve no escopo do dono, mas continua autor', async () => {
+      prisma.whatsappContact.findUnique.mockResolvedValue(
+        contato({ id: 'membro', householdOwnerId: 'dono' }),
+      );
+
+      const result = await service.findContactByPhone('11999999999');
+
+      expect(result).toMatchObject({ userId: 'dono', createdByUserId: 'membro' });
+    });
+  });
+
   describe('controle de assinatura', () => {
     it('listAccounts bloqueia usuário sem assinatura', async () => {
       access.canUseProduct.mockResolvedValue({ allowed: false });
@@ -137,6 +169,383 @@ describe('InternalService', () => {
         service.createTransactionFromAi({ userId: 'u1', accountId: 'a1' } as any),
       ).rejects.toThrow('Conta inválida para o usuário');
       expect(prisma.transaction.create).not.toHaveBeenCalled();
+    });
+
+    it('createTransactionFromAi rejeita categoria de outro usuário', async () => {
+      prisma.account.findUnique.mockResolvedValue({ id: 'a1', userId: 'u1' });
+      prisma.category.findUnique.mockResolvedValue({ id: 'cat1', userId: 'outro' });
+
+      await expect(
+        service.createTransactionFromAi({
+          userId: 'u1',
+          accountId: 'a1',
+          categoryId: 'cat1',
+        } as any),
+      ).rejects.toThrow('Categoria inválida para o usuário');
+      expect(prisma.transaction.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('createTransactionFromAi (idempotência)', () => {
+    const dto = {
+      userId: 'u1',
+      accountId: 'a1',
+      type: 'expense',
+      amount: 47.5,
+      description: 'mercado',
+      transactionDate: '2026-09-05',
+      source: 'whatsapp',
+      idempotencyKey: 'job-1',
+    } as any;
+
+    beforeEach(() => {
+      prisma.account.findUnique.mockResolvedValue({ id: 'a1', userId: 'u1' });
+    });
+
+    it('devolve o lançamento existente sem criar outro quando a chave já foi usada', async () => {
+      prisma.transaction.findUnique.mockResolvedValue({ id: 't1', userId: 'u1', amount: 47.5 });
+
+      const result = await service.createTransactionFromAi(dto);
+
+      expect(result).toMatchObject({ id: 't1', idempotent: true });
+      expect(prisma.transaction.create).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    // O cenário que a idempotência cobre: o commit passou e o processo morreu
+    // antes do recálculo. A reentrega caía no retorno antecipado, e o saldo
+    // ficava defasado até outro lançamento tocar a conta.
+    it('recalcula o saldo também quando devolve o lançamento já existente', async () => {
+      prisma.transaction.findUnique.mockResolvedValue({
+        id: 't1',
+        userId: 'u1',
+        accountId: 'a1',
+        status: 'confirmed',
+      });
+      const accounts = { recalculateBalance: jest.fn() };
+      service = new InternalService(prisma as any, accounts as any, access as any);
+
+      await service.createTransactionFromAi(dto);
+
+      expect(accounts.recalculateBalance).toHaveBeenCalledWith('a1');
+      expect(prisma.transaction.create).not.toHaveBeenCalled();
+    });
+
+    it('recalcula o saldo quando a corrida no unique devolve o lançamento do outro worker', async () => {
+      prisma.transaction.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 't1', userId: 'u1', accountId: 'a1', status: 'confirmed' });
+      prisma.transaction.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('unique', { code: 'P2002', clientVersion: '5' }),
+      );
+      const accounts = { recalculateBalance: jest.fn() };
+      service = new InternalService(prisma as any, accounts as any, access as any);
+
+      await service.createTransactionFromAi(dto);
+
+      expect(accounts.recalculateBalance).toHaveBeenCalledWith('a1');
+    });
+
+    it('não recalcula o saldo de lançamento existente que ainda não foi confirmado', async () => {
+      prisma.transaction.findUnique.mockResolvedValue({
+        id: 't1',
+        userId: 'u1',
+        accountId: 'a1',
+        status: 'pending',
+      });
+      const accounts = { recalculateBalance: jest.fn() };
+      service = new InternalService(prisma as any, accounts as any, access as any);
+
+      await service.createTransactionFromAi(dto);
+
+      expect(accounts.recalculateBalance).not.toHaveBeenCalled();
+    });
+
+    it('grava a chave e a origem whatsapp ao criar', async () => {
+      prisma.transaction.findUnique.mockResolvedValue(null);
+      prisma.transaction.create.mockResolvedValue({
+        id: 't1',
+        accountId: 'a1',
+        status: 'confirmed',
+      });
+
+      const accounts = { recalculateBalance: jest.fn() };
+      service = new InternalService(prisma as any, accounts as any, access as any);
+
+      const result = await service.createTransactionFromAi(dto);
+
+      expect(result).toEqual({ id: 't1', accountId: 'a1', status: 'confirmed' });
+      expect(prisma.transaction.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ idempotencyKey: 'job-1', source: 'whatsapp' }),
+        }),
+      );
+      expect(accounts.recalculateBalance).toHaveBeenCalledWith('a1');
+    });
+
+    it('trata corrida no unique (P2002) devolvendo o lançamento já criado', async () => {
+      prisma.transaction.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 't-existente', userId: 'u1' });
+      prisma.transaction.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('unique', {
+          code: 'P2002',
+          clientVersion: '5',
+        }),
+      );
+
+      const result = await service.createTransactionFromAi(dto);
+
+      expect(result).toMatchObject({ id: 't-existente', idempotent: true });
+    });
+
+    // A chave é única no banco inteiro, mas a busca não olhava o dono: numa
+    // colisão entre contas, o segundo usuário recebia o lançamento do primeiro.
+    it('recusa com 409 a chave que já pertence a outro usuário, sem devolver o lançamento', async () => {
+      prisma.transaction.findUnique.mockResolvedValue({
+        id: 't-de-outro',
+        userId: 'u2',
+        amount: 999,
+        description: 'lançamento de outra conta',
+      });
+
+      const tentativa = service.createTransactionFromAi(dto);
+
+      await expect(tentativa).rejects.toBeInstanceOf(ConflictException);
+      await expect(tentativa).rejects.toMatchObject({
+        response: expect.not.objectContaining({ id: 't-de-outro' }),
+      });
+      expect(prisma.transaction.create).not.toHaveBeenCalled();
+    });
+
+    it('recusa com 409 também quando a colisão aparece na corrida do unique', async () => {
+      prisma.transaction.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 't-de-outro', userId: 'u2' });
+      prisma.transaction.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('unique', {
+          code: 'P2002',
+          clientVersion: '5',
+        }),
+      );
+
+      await expect(service.createTransactionFromAi(dto)).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    // Membro do plano Duo: `userId` é o dono dos dados e `createdByUserId` é quem
+    // mandou a mensagem. A coluna é NOT NULL, então sem o campo cai no dono.
+    it('grava o autor informado (membro) separado do dono dos dados', async () => {
+      prisma.transaction.findUnique.mockResolvedValue(null);
+      prisma.transaction.create.mockResolvedValue({ id: 't1', status: 'pending' });
+
+      await service.createTransactionFromAi({
+        ...dto,
+        status: 'pending',
+        createdByUserId: 'membro',
+      });
+
+      expect(prisma.transaction.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ userId: 'u1', createdByUserId: 'membro' }),
+        }),
+      );
+    });
+
+    it('atribui ao dono quando o autor não é informado', async () => {
+      prisma.transaction.findUnique.mockResolvedValue(null);
+      prisma.transaction.create.mockResolvedValue({ id: 't1', status: 'pending' });
+
+      await service.createTransactionFromAi({ ...dto, status: 'pending' });
+
+      expect(prisma.transaction.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ userId: 'u1', createdByUserId: 'u1' }),
+        }),
+      );
+    });
+
+    it('grava lançamento e extração na mesma transação de banco', async () => {
+      prisma.transaction.findUnique.mockResolvedValue(null);
+      prisma.transaction.create.mockResolvedValue({ id: 't1', status: 'pending' });
+
+      await service.createTransactionFromAi({
+        ...dto,
+        status: 'pending',
+        aiExtractedTransactionId: 'ext1',
+      });
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.aiExtractedTransaction.update).toHaveBeenCalledWith({
+        where: { id: 'ext1' },
+        data: { transactionId: 't1', status: 'confirmed' },
+      });
+    });
+  });
+
+  describe('recordEvent (message) — concorrência', () => {
+    const dto = {
+      eventType: 'message',
+      phone: '+5541999999999',
+      direction: 'inbound',
+      content: 'gastei 50',
+    } as any;
+
+    it('trata corrida ao criar o contato (P2002) em vez de estourar 500', async () => {
+      // `upsert` não é atômico: duas primeiras mensagens do mesmo número
+      // chegando juntas faziam as duas tentarem o INSERT.
+      prisma.whatsappContact.upsert.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('unique', {
+          code: 'P2002',
+          clientVersion: '5',
+        }),
+      );
+      prisma.whatsappContact.findUnique.mockResolvedValue({ id: 'contact1', userId: 'u1' });
+      prisma.aiConversation.findFirst.mockResolvedValue({ id: 'conv1' });
+      prisma.aiConversation.update.mockResolvedValue({ id: 'conv1' });
+      prisma.aiMessage.create.mockResolvedValue({ id: 'msg1', conversationId: 'conv1' });
+
+      const result = await service.recordEvent(dto);
+
+      expect(result).toEqual({ id: 'msg1', conversationId: 'conv1' });
+      expect(prisma.whatsappContact.findUnique).toHaveBeenCalledWith({
+        where: { phoneNumber: '+5541999999999' },
+      });
+    });
+
+    it('propaga erro que não seja corrida no unique do contato', async () => {
+      prisma.whatsappContact.upsert.mockRejectedValue(new Error('banco fora'));
+
+      await expect(service.recordEvent(dto)).rejects.toThrow('banco fora');
+    });
+
+    it('resolve a conversa travando a linha do contato', async () => {
+      // Sem a trava, dois requests concorrentes criavam duas conversas ativas
+      // e o histórico da IA ficava partido entre elas.
+      prisma.whatsappContact.upsert.mockResolvedValue({ id: 'contact1', userId: 'u1' });
+      prisma.aiConversation.findFirst.mockResolvedValue(null);
+      prisma.aiConversation.create.mockResolvedValue({ id: 'conv1' });
+      prisma.aiMessage.create.mockResolvedValue({ id: 'msg1', conversationId: 'conv1' });
+
+      await service.recordEvent(dto);
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+      const [fragmentos, ...valores] = prisma.$queryRaw.mock.calls[0];
+      expect(fragmentos.join('?')).toContain('FOR UPDATE');
+      expect(valores).toEqual(['contact1']); // parametrizado, não interpolado
+    });
+
+    it('trava antes de decidir se cria a conversa', async () => {
+      const ordem: string[] = [];
+      prisma.whatsappContact.upsert.mockResolvedValue({ id: 'contact1', userId: 'u1' });
+      prisma.$queryRaw.mockImplementation(async () => {
+        ordem.push('lock');
+        return [];
+      });
+      prisma.aiConversation.findFirst.mockImplementation(async () => {
+        ordem.push('findFirst');
+        return null;
+      });
+      prisma.aiConversation.create.mockImplementation(async () => {
+        ordem.push('create');
+        return { id: 'conv1' };
+      });
+      prisma.aiMessage.create.mockResolvedValue({ id: 'msg1', conversationId: 'conv1' });
+
+      await service.recordEvent(dto);
+
+      expect(ordem).toEqual(['lock', 'findFirst', 'create']);
+    });
+  });
+
+  describe('recordEvent (extraction)', () => {
+    const dto = {
+      eventType: 'extraction',
+      userId: 'u1',
+      rawInput: 'gastei 47,50 no mercado',
+      extractedPayload: { amount: 47.5 },
+      confidence: 0.9,
+      status: 'confirmed',
+      sourceMessageId: 'ai-msg-1',
+      idempotencyKey: 'job-1',
+    } as any;
+
+    it('cria a extração e grava a chave de idempotência', async () => {
+      prisma.aiExtractedTransaction.findUnique.mockResolvedValue(null);
+      prisma.aiExtractedTransaction.create.mockResolvedValue({ id: 'ext1' });
+
+      const result = await service.recordEvent(dto);
+
+      expect(result).toEqual({ id: 'ext1' });
+      expect(prisma.aiExtractedTransaction.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ idempotencyKey: 'job-1', sourceMessageId: 'ai-msg-1' }),
+      });
+    });
+
+    it('devolve a extração existente sem criar outra quando a chave já foi usada', async () => {
+      prisma.aiExtractedTransaction.findUnique.mockResolvedValue({ id: 'ext1', userId: 'u1' });
+
+      const result = await service.recordEvent(dto);
+
+      expect(result).toEqual({ id: 'ext1', duplicate: true });
+      expect(prisma.aiExtractedTransaction.create).not.toHaveBeenCalled();
+    });
+
+    it('trata corrida no unique (P2002) devolvendo a extração já criada', async () => {
+      prisma.aiExtractedTransaction.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 'ext-existente', userId: 'u1' });
+      prisma.aiExtractedTransaction.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('unique', {
+          code: 'P2002',
+          clientVersion: '5',
+        }),
+      );
+
+      const result = await service.recordEvent(dto);
+
+      expect(result).toEqual({ id: 'ext-existente', duplicate: true });
+    });
+
+    it('recusa com 409 a extração de outro usuário, em vez de devolver o id dela', async () => {
+      // Devolver o id levaria o agente a vincular depois uma extração que não é
+      // do usuário dele.
+      prisma.aiExtractedTransaction.findUnique.mockResolvedValue({
+        id: 'ext-de-outro',
+        userId: 'u2',
+      });
+
+      await expect(service.recordEvent(dto)).rejects.toBeInstanceOf(ConflictException);
+      expect(prisma.aiExtractedTransaction.create).not.toHaveBeenCalled();
+    });
+
+    it('recusa com 409 a extração de outro usuário também na corrida do unique', async () => {
+      prisma.aiExtractedTransaction.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({ id: 'ext-de-outro', userId: 'u2' });
+      prisma.aiExtractedTransaction.create.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('unique', {
+          code: 'P2002',
+          clientVersion: '5',
+        }),
+      );
+
+      await expect(service.recordEvent(dto)).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('sem chave de idempotência, cria normalmente (modo legado)', async () => {
+      prisma.aiExtractedTransaction.create.mockResolvedValue({ id: 'ext2' });
+
+      const result = await service.recordEvent({ ...dto, idempotencyKey: undefined });
+
+      expect(result).toEqual({ id: 'ext2' });
+      expect(prisma.aiExtractedTransaction.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('exige os campos obrigatórios da extração', async () => {
+      await expect(
+        service.recordEvent({ eventType: 'extraction', userId: 'u1' } as any),
+      ).rejects.toThrow('userId, rawInput, extractedPayload e confidence');
     });
   });
 

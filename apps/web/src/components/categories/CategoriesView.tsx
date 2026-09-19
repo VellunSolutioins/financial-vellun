@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { Dialog } from '@/components/ui/dialog';
+import { DataTable, type DataTableColumn } from '@/components/ui/table';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
@@ -135,6 +136,64 @@ export function CategoriesView({ showCostCenter = false, profileType }: Props) {
   const defaults = categories.filter((c) => c.isDefault);
   const custom = categories.filter((c) => !c.isDefault);
 
+  /**
+   * Colunas comuns às duas tabelas. O centro de custo entra só no perfil que o
+   * usa — `showCostCenter` filtra a coluna inteira em vez de renderizar célula
+   * vazia, para o cabeçalho não prometer um dado que não existe ali.
+   */
+  const colunasBase: DataTableColumn<Category>[] = [
+    { key: 'name', header: 'Nome', cell: (c) => `${c.icon ?? ''} ${c.name}`.trim() },
+    {
+      key: 'type',
+      header: 'Tipo',
+      cell: (c) => <Badge variant="outline">{typeLabels[c.type]}</Badge>,
+    },
+    ...(showCostCenter
+      ? [
+          {
+            key: 'costCenter',
+            header: 'Centro de custo',
+            cellClassName: 'text-muted-foreground',
+            cell: (c: Category) => c.costCenter ?? '—',
+          },
+        ]
+      : []),
+  ];
+
+  const colunasPersonalizadas: DataTableColumn<Category>[] = [
+    { ...colunasBase[0], cellClassName: 'font-medium' },
+    ...colunasBase.slice(1),
+    {
+      key: 'acoes',
+      align: 'right',
+      cellClassName: 'whitespace-nowrap',
+      cell: (c) => (
+        <>
+          <Button size="sm" variant="ghost" onClick={() => openEdit(c)}>
+            Editar
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-destructive"
+            onClick={() => void remove(c.id)}
+          >
+            Excluir
+          </Button>
+        </>
+      ),
+    },
+  ];
+
+  const colunasPadrao: DataTableColumn<Category>[] = [
+    colunasBase[0],
+    {
+      ...colunasBase[1],
+      cell: (c) => <Badge variant="secondary">{typeLabels[c.type]}</Badge>,
+    },
+    ...colunasBase.slice(2),
+  ];
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -149,50 +208,13 @@ export function CategoriesView({ showCostCenter = false, profileType }: Props) {
           {custom.length > 0 && (
             <div>
               <h2 className="text-sm font-semibold text-muted-foreground mb-3">Personalizadas</h2>
-              <div className="bg-white rounded-lg border overflow-x-auto">
-                <table className="w-full min-w-[480px] text-sm">
-                  <thead className="bg-gray-50 border-b">
-                    <tr>
-                      <th className="text-left p-3 font-medium text-muted-foreground">Nome</th>
-                      <th className="text-left p-3 font-medium text-muted-foreground">Tipo</th>
-                      {showCostCenter && (
-                        <th className="text-left p-3 font-medium text-muted-foreground">
-                          Centro de custo
-                        </th>
-                      )}
-                      <th className="p-3"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {custom.map((c) => (
-                      <tr key={c.id} className="border-b last:border-0">
-                        <td className="p-3 font-medium">
-                          {c.icon} {c.name}
-                        </td>
-                        <td className="p-3">
-                          <Badge variant="outline">{typeLabels[c.type]}</Badge>
-                        </td>
-                        {showCostCenter && (
-                          <td className="p-3 text-muted-foreground">{c.costCenter ?? '—'}</td>
-                        )}
-                        <td className="p-3 flex gap-2 justify-end">
-                          <Button size="sm" variant="ghost" onClick={() => openEdit(c)}>
-                            Editar
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="text-destructive"
-                            onClick={() => void remove(c.id)}
-                          >
-                            Excluir
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                columns={colunasPersonalizadas}
+                rows={custom}
+                rowKey={(c) => c.id}
+                minWidth={480}
+                hoverable={false}
+              />
             </div>
           )}
 
@@ -200,36 +222,14 @@ export function CategoriesView({ showCostCenter = false, profileType }: Props) {
             <h2 className="text-sm font-semibold text-muted-foreground mb-3">
               Padrão ({defaults.length})
             </h2>
-            <div className="bg-white rounded-lg border overflow-x-auto">
-              <table className="w-full min-w-[480px] text-sm">
-                <thead className="bg-gray-50 border-b">
-                  <tr>
-                    <th className="text-left p-3 font-medium text-muted-foreground">Nome</th>
-                    <th className="text-left p-3 font-medium text-muted-foreground">Tipo</th>
-                    {showCostCenter && (
-                      <th className="text-left p-3 font-medium text-muted-foreground">
-                        Centro de custo
-                      </th>
-                    )}
-                  </tr>
-                </thead>
-                <tbody>
-                  {defaults.map((c) => (
-                    <tr key={c.id} className="border-b last:border-0">
-                      <td className="p-3">
-                        {c.icon} {c.name}
-                      </td>
-                      <td className="p-3">
-                        <Badge variant="secondary">{typeLabels[c.type]}</Badge>
-                      </td>
-                      {showCostCenter && (
-                        <td className="p-3 text-muted-foreground">{c.costCenter ?? '—'}</td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              columns={colunasPadrao}
+              rows={defaults}
+              rowKey={(c) => c.id}
+              minWidth={480}
+              hoverable={false}
+              empty="Nenhuma categoria padrão."
+            />
           </div>
         </>
       )}

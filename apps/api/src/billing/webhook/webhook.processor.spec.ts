@@ -13,9 +13,12 @@ function setup() {
     subscription: { findFirst: jest.fn() },
   };
   const events = {
-    markProcessing: jest.fn().mockResolvedValue({}),
+    // `markProcessing` devolve se reivindicou: `false` significa que outro
+    // processo levou o evento, e o processamento para aí.
+    markProcessing: jest.fn().mockResolvedValue(true),
     markProcessed: jest.fn().mockResolvedValue({}),
     markFailed: jest.fn().mockResolvedValue({}),
+    linkSubscription: jest.fn().mockResolvedValue(undefined),
   };
   const subscriptions = { transitionTo: jest.fn().mockResolvedValue({}) };
   const payments = { upsertFromProvider: jest.fn().mockResolvedValue({}) };

@@ -1,0 +1,204 @@
+{
+  "uid": "vellun-api",
+  "title": "Vellun — API",
+  "description": "Tráfego, erro e latência da API por rota. `route` é sempre o padrão da rota (/transactions/:id), nunca o path concreto — e `unmatched` agrupa o que não casou com rota nenhuma.",
+  "tags": ["vellun", "operacoes", "api"],
+  "timezone": "America/Sao_Paulo",
+  "editable": true,
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": { "from": "now-3h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "ds",
+        "label": "Métricas",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "env",
+        "label": "Ambiente",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${ds}" },
+        "query": "label_values(up, env)",
+        "refresh": 1,
+        "current": {},
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Requisições/s",
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(http_requests_total{env=\"$env\", job=\"api\"}[5m]))",
+          "instant": true
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 2 }, "overrides": [] }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Taxa de 5xx",
+      "description": "Só 5xx: 4xx é o cliente errando (validação, permissão) e não é incidente nosso.",
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(http_requests_total{env=\"$env\", job=\"api\", status=~\"5..\"}[5m])) / (sum(rate(http_requests_total{env=\"$env\", job=\"api\"}[5m])) > 0)",
+          "instant": true
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "noValue": "sem tráfego",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.01 },
+              { "color": "red", "value": 0.05 }
+            ]
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "p95 global",
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{env=\"$env\", job=\"api\"}[10m])))",
+          "instant": true
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 3 }, "overrides": [] }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Requisições sem rota (404)",
+      "description": "Agrupadas em `route=\"unmatched\"` de propósito: o path concreto como label criaria uma série por URL de varredura. Um salto aqui costuma ser scanner, não bug.",
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(http_requests_total{env=\"$env\", job=\"api\", route=\"unmatched\"}[5m]))",
+          "instant": true
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 2 }, "overrides": [] }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Requisições por status",
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (status) (rate(http_requests_total{env=\"$env\", job=\"api\"}[5m]))",
+          "legendFormat": "{{status}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": { "lineWidth": 1, "fillOpacity": 40, "stacking": { "mode": "normal" } }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "p95 por rota (10 mais lentas)",
+      "description": "Por rota, para dizer QUAL rota degradou. Sem o `by (route)`, uma rota lenta ficaria diluída na média de todas.",
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(10, histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket{env=\"$env\", job=\"api\"}[10m]))))",
+          "legendFormat": "{{route}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "lineWidth": 2 } }, "overrides": [] }
+    },
+    {
+      "id": 20,
+      "type": "table",
+      "title": "Erros 5xx por rota",
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 11 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (route, status) (increase(http_requests_total{env=\"$env\", job=\"api\", status=~\"5..\"}[1h]))",
+          "instant": true,
+          "format": "table"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": { "excludeByName": { "Time": true, "env": true, "job": true } }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "noValue": "nenhum erro 5xx na última hora" },
+        "overrides": []
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Readiness e recursos do processo",
+      "description": "Readiness em 503 significa API de pé mas sem Postgres — distinto de `up == 0`, que seria o processo fora.",
+      "datasource": { "type": "prometheus", "uid": "${ds}" },
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 11 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(http_requests_total{env=\"$env\", job=\"api\", route=\"/health/ready\", status=\"503\"}[5m]))",
+          "legendFormat": "readiness 503 (5m)"
+        },
+        {
+          "refId": "B",
+          "expr": "vellun_api_process_resident_memory_bytes{env=\"$env\"} / 1024 / 1024",
+          "legendFormat": "memória residente (MiB)"
+        },
+        {
+          "refId": "C",
+          "expr": "vellun_api_nodejs_eventloop_lag_p99_seconds{env=\"$env\"} * 1000",
+          "legendFormat": "lag do event loop p99 (ms)"
+        }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "lineWidth": 2 } }, "overrides": [] }
+    }
+  ]
+}

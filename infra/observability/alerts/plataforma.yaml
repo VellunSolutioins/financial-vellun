@@ -1,0 +1,239 @@
+# Alertas de disponibilidade, da API e de pagamentos.
+#
+# Ver o cabeçalho de `whatsapp-pipeline.yaml` para as convenções de label e
+# annotation, e para como carregar e testar.
+
+groups:
+  # ── Disponibilidade ──────────────────────────────────────────────────────
+  - name: disponibilidade
+    interval: 30s
+    rules:
+      - alert: ServicoIndisponivel
+        # `up == 0` significa que o scrape falhou: o processo caiu, a porta fechou,
+        # ou o token de métricas está errado. Dois minutos de tolerância porque um
+        # deploy derruba o alvo por alguns segundos, e acordar alguém a cada deploy
+        # é o caminho mais curto para o alerta ser silenciado.
+        #
+        # `ai-agent-worker` fica na alternância de propósito, mesmo sem serviço de
+        # worker nesta topologia (os consumers rodam dentro do `ai-agent`): `up == 0`
+        # só dispara se a série EXISTIR, então hoje ele é inerte, e se o worker
+        # virar serviço próprio já nasce coberto. Quem não pode citá-lo é o
+        # `absent()` abaixo.
+        expr: up{job=~"api|ai-agent|ai-agent-worker"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: '{{ $labels.job }} não responde ao scrape'
+          description: >-
+            O alvo {{ $labels.instance }} ({{ $labels.job }}) está inalcançável há
+            mais de 2 minutos.
+          dashboard: 'DASHBOARD_BASE/d/vellun-overview/visao-geral'
+          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#saúde'
+
+      - alert: InfraestruturaIndisponivel
+        expr: up{job=~"rabbitmq|postgres|redis"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: '{{ $labels.job }} não responde ao scrape'
+          description: 'O alvo {{ $labels.instance }} está inalcançável há mais de 2 minutos.'
+          dashboard: 'DASHBOARD_BASE/d/vellun-overview/visao-geral'
+          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#saúde'
+
+      - alert: AusenciaInesperadaDeDados
+        # O alerta mais fácil de esquecer, e o que mais importa: `up == 0` só
+        # dispara se a série **existir**. Se o Alloy cair, ou se um serviço nunca
+        # for registrado no scrape, não há `up` nenhum — e o painel fica verde
+        # porque não há nada vermelho. `absent()` é o que cobre esse silêncio.
+        #
+        # Só entram jobs que existem na topologia do Railway. `absent()` dispara
+        # justamente quando a série nunca aparece, então citar um serviço que não
+        # existe (o `ai-agent-worker`, com os consumers dentro do `ai-agent`) é um
+        # critical permanente. Ao criar um serviço novo, inclua-o aqui junto.
+        expr: |
+          absent(up{job="api"})
+            or absent(up{job="ai-agent"})
+            or absent(up{job="rabbitmq"})
+        for: 10m
+        labels:
+          severity: critical
+          service: alloy
+        annotations:
+          summary: 'Parou de chegar métrica de pelo menos um serviço'
+          description: >-
+            Nenhuma série `up` para um dos serviços há 10 minutos. Isso não é o
+            serviço fora — é a **coleta** fora (Alloy caído, alvo removido da
+            config, ou credencial do remote_write inválida). O painel parece
+            saudável porque não há dado, e é justamente o pior caso.
+          dashboard: 'DASHBOARD_BASE/d/vellun-overview/visao-geral'
+          runbook: 'RUNBOOK_BASE/observability.md#verificação-local'
+
+  # ── Recursos ─────────────────────────────────────────────────────────────
+  - name: recursos
+    interval: 60s
+    rules:
+      - alert: RabbitMqSobAlarmeDeRecurso
+        # O próprio RabbitMQ expõe seus alarmes. Quando um dispara, o broker
+        # **bloqueia publicações** — o webhook começa a devolver 503 e o cliente
+        # perde o lançamento. Vale mais que qualquer limiar que inventássemos.
+        expr: |
+          rabbitmq_alarms_free_disk_space_watermark == 1
+            or rabbitmq_alarms_memory_used_watermark == 1
+            or rabbitmq_alarms_file_descriptor_limit == 1
+        for: 1m
+        labels:
+          severity: critical
+          service: rabbitmq
+        annotations:
+          summary: 'RabbitMQ em alarme de recurso — publicações bloqueadas'
+          description: >-
+            Um alarme de disco, memória ou descritores está ativo. Nesse estado o
+            broker bloqueia publicação, e o webhook passa a devolver 503.
+          dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
+          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#webhook-devolvendo-503'
+
+      - alert: DiscoDoRabbitMqAcabando
+        # Antecede o alarme acima: avisa enquanto ainda há tempo de agir.
+        expr: |
+          rabbitmq_disk_space_available_bytes
+            < (rabbitmq_disk_space_available_limit_bytes * 3)
+        for: 10m
+        labels:
+          severity: warning
+          service: rabbitmq
+        annotations:
+          summary: 'Disco do RabbitMQ perto do limite'
+          description: >-
+            Restam {{ $value | humanize1024 }}B, menos de três vezes o limite que
+            dispara o bloqueio de publicação.
+          dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
+          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#webhook-devolvendo-503'
+
+      - alert: MemoriaDoRedisAcabando
+        # O Redis guarda o agrupamento e as confirmações pendentes. Sem memória, o
+        # agrupamento falha e a mensagem volta para a fila — o pipeline degrada em
+        # vez de parar, o que é pior de diagnosticar.
+        expr: |
+          redis_memory_used_bytes / redis_memory_max_bytes > 0.85
+            and redis_memory_max_bytes > 0
+        for: 10m
+        labels:
+          severity: warning
+          service: redis
+        annotations:
+          summary: 'Redis acima de 85% da memória'
+          description: '{{ $value | humanizePercentage }} da memória máxima em uso.'
+          dashboard: 'DASHBOARD_BASE/d/vellun-overview/visao-geral'
+          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#confirmações-pendentes-travadas'
+
+      - alert: ConexoesDoPostgresProximasDoLimite
+        expr: |
+          sum(pg_stat_activity_count) / max(pg_settings_max_connections) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+          service: postgres
+        annotations:
+          summary: 'Postgres acima de 80% das conexões'
+          description: '{{ $value | humanizePercentage }} do limite de conexões em uso.'
+          dashboard: 'DASHBOARD_BASE/d/vellun-overview/visao-geral'
+          runbook: 'RUNBOOK_BASE/observability.md'
+
+  # ── API ──────────────────────────────────────────────────────────────────
+  - name: api
+    interval: 30s
+    rules:
+      - alert: ApiComTaxaDeErro5xxAlta
+        # Só 5xx: 4xx é o cliente errando (validação, permissão) e não é incidente.
+        # Proporção com denominador `> 0` para não disparar na madrugada sem tráfego.
+        expr: |
+          (
+            sum(rate(http_requests_total{job="api",status=~"5.."}[5m]))
+              /
+            sum(rate(http_requests_total{job="api"}[5m])) > 0
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          service: api
+        annotations:
+          summary: 'API com mais de 5% de erro 5xx'
+          description: '{{ $value | humanizePercentage }} das requisições nos últimos 5 minutos.'
+          dashboard: 'DASHBOARD_BASE/d/vellun-api/api'
+          runbook: 'RUNBOOK_BASE/observability.md'
+
+      - alert: ApiComLatenciaAlta
+        # p95 por rota, para o alerta dizer **qual** rota degradou. Sem o `by`, uma
+        # rota lenta ficaria diluída na média de todas.
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, route) (rate(http_request_duration_seconds_bucket{job="api"}[10m]))
+          ) > 3
+        for: 10m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: 'p95 de {{ $labels.route }} acima de 3s'
+          description: 'O percentil 95 de {{ $labels.route }} está em {{ $value | humanizeDuration }}.'
+          dashboard: 'DASHBOARD_BASE/d/vellun-api/api'
+          runbook: 'RUNBOOK_BASE/observability.md'
+
+      - alert: BancoDeDadosNaoPronto
+        # `/health/ready` respondendo 503: a API está de pé mas não consegue falar
+        # com o Postgres. Distinto de `up == 0`, que seria o processo fora.
+        expr: |
+          increase(http_requests_total{job="api",route="/health/ready",status="503"}[5m]) > 0
+        for: 2m
+        labels:
+          severity: critical
+          service: api
+        annotations:
+          summary: 'Readiness da API falhando — Postgres inalcançável'
+          description: >-
+            A API está no ar mas o readiness responde 503, o que significa que o
+            `SELECT 1` no Postgres está falhando.
+          dashboard: 'DASHBOARD_BASE/d/vellun-api/api'
+          runbook: 'RUNBOOK_BASE/observability.md'
+
+  # ── Pagamentos ───────────────────────────────────────────────────────────
+  - name: pagamentos
+    interval: 60s
+    rules:
+      - alert: WebhookDePagamentoEsgotouTentativas
+        # Falha **definitiva** de um evento do PSP: alguém pagou e o acesso pode
+        # não ter sido concedido. É dinheiro, então é `critical` mesmo sendo um só.
+        #
+        # Depende da Entrega 8 (o estado `exhausted` e a métrica). `unless absent()`
+        # mantém a regra inerte até a métrica existir, em vez de disparar em falso.
+        expr: |
+          increase(vellun_api_payment_webhook_exhausted_total[10m]) > 0
+          unless absent(vellun_api_payment_webhook_exhausted_total)
+        for: 0m
+        labels:
+          severity: critical
+          service: api
+        annotations:
+          summary: 'Evento de pagamento esgotou as tentativas'
+          description: >-
+            {{ $value }} evento(s) de webhook do PSP esgotou(esgotaram) o retry nos
+            últimos 10 minutos. Pode haver pagamento confirmado sem acesso concedido.
+          dashboard: 'DASHBOARD_BASE/d/vellun-payments/pagamentos'
+          runbook: 'RUNBOOK_BASE/observability.md'
+
+      - alert: EventosDePagamentoAcumulandoParaRetry
+        expr: |
+          vellun_api_payment_webhook_pending_retry > 10
+          unless absent(vellun_api_payment_webhook_pending_retry)
+        for: 15m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: 'Fila de retry de webhook de pagamento crescendo'
+          description: '{{ $value }} eventos aguardando nova tentativa.'
+          dashboard: 'DASHBOARD_BASE/d/vellun-payments/pagamentos'
+          runbook: 'RUNBOOK_BASE/observability.md'

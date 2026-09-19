@@ -226,7 +226,9 @@ async function main() {
       data: { isActive: false },
     });
     if (count > 0) {
-      console.warn(`ATENCAO: plano ${localDevPlan.code} estava ativo em producao e foi desativado.`);
+      console.warn(
+        `ATENCAO: plano ${localDevPlan.code} estava ativo em producao e foi desativado.`,
+      );
     }
   } else {
     const { code, ...planData } = localDevPlan;
@@ -235,7 +237,9 @@ async function main() {
       update: { ...planData, isActive: true },
       create: { code, ...planData, isActive: true },
     });
-    console.log(`Plano de desenvolvimento "${localDevPlan.name}" disponivel (NODE_ENV != production).`);
+    console.log(
+      `Plano de desenvolvimento "${localDevPlan.name}" disponivel (NODE_ENV != production).`,
+    );
   }
 
   console.log('Criando usuario demo...');

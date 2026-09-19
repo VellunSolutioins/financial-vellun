@@ -3,23 +3,39 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from .bootstrap import log_runtime_config, pipeline
 from .config import settings
+from .observability.logging import configure_logging
+from .observability.middleware import CorrelationIdMiddleware
 from .routers import health, internal, metrics, webhook
-from .services.message_buffer import message_buffer
 
-# Uvicorn só configura seus próprios loggers (uvicorn*), deixando o logger raiz
-# sem handler — o que faz o Python descartar todo log de nível INFO da aplicação
-# (ex.: o envio do LogMessenger). Configuramos o raiz aqui para tornar esses
-# logs visíveis no console em desenvolvimento.
-logging.basicConfig(
-    level=getattr(logging, settings.log_level.upper(), logging.INFO),
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
+configure_logging()
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Inicia o worker do buffer (no-op no backend em memória).
+    log_runtime_config()
+    if settings.is_broker_pipeline:
+        # O publisher e obrigatorio: sem ele o webhook nao consegue responder 202.
+        await pipeline.start_publisher()
+        if settings.run_consumers_in_api:
+            await pipeline.start_consumers()
+        else:
+            logger.info(
+                "Consumers desabilitados nesta instancia (RUN_CONSUMERS_IN_API=false)"
+            )
+        try:
+            yield
+        finally:
+            await pipeline.stop()
+        return
+
+    # Modo legado: buffer em processo, sem broker.
+    logger.warning("MESSAGE_PIPELINE=legacy: usando o buffer em processo")
+    from .services.message_buffer import message_buffer
+
     await message_buffer.start()
     try:
         yield
@@ -33,6 +49,10 @@ app = FastAPI(
     version="0.0.1",
     lifespan=lifespan,
 )
+
+# Primeiro middleware da cadeia: nenhum log de requisicao deve sair sem
+# `correlationId`, inclusive o de um erro em outro middleware.
+app.add_middleware(CorrelationIdMiddleware)
 
 app.include_router(health.router)
 app.include_router(metrics.router)

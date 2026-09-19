@@ -1,5 +1,15 @@
 # Requisitos: Processamento Assíncrono de Mensagens WhatsApp com Contexto de IA
 
+> **Atualização (2026-09-05).** As seções 8.2 e 16.1 previam migrar o buffer em
+> memória para Redis antes de produção. Isso foi superado por uma arquitetura de
+> mensageria durável com RabbitMQ: o webhook apenas valida, normaliza e publica
+> (respondendo `202` após o *publisher confirm*), e todo o processamento roda em
+> consumers com ack manual, retry por buckets e DLQ.
+>
+> - Visão geral e variáveis: [README](../README.md#arquitetura-de-processamento-de-mensagens-whatsapp--ia)
+> - Operação (DLQ, retries, reprocesso): [whatsapp-messaging-runbook.md](whatsapp-messaging-runbook.md)
+> - Decisões e por quê: [docs/adrs/](adrs/README.md)
+
 ## 1. Objetivo
 
 Implementar uma camada robusta de ingestão, agrupamento, persistência e processamento assíncrono de mensagens recebidas via WhatsApp, permitindo que o agente de IA:
