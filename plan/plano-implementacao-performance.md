@@ -16,6 +16,65 @@ Decisões já tomadas:
   A boas-vindas passa a ser a resposta a essa mensagem e segue o mesmo caminho outbound das demais
   respostas. O endpoint `/internal/notifications/welcome`, chamado no cadastro, deixa de ser usado.
 
+> ## Status (22/09/2026): P1–P6 implementados na branch `feat/seguranca-s1`
+>
+> Decisões e ajustes tomados na implementação, que corrigem o texto abaixo:
+>
+> - **P1 — readiness do Redis na API não reprova.** O contrato C8 ("dependência
+>   indisponível → 503") está certo para o Postgres e errado para o Redis aqui:
+>   a API degrada sem ele de propósito (rate limit em memória, cache
+>   recalculado) e **todas** as réplicas olham a mesma instância. Falhar o
+>   readiness tiraria todas do balanceador de uma vez, trocando uma degradação
+>   planejada por um apagão. O estado real vai no corpo, em `state`
+>   (`disabled | up | degraded`), que é o que o alerta lê. No worker do agente é
+>   o oposto e continua assim: sem Redis não há lock nem agrupamento.
+> - **P1 — `httpx` do `CloudApiMessenger`:** além de fechar no shutdown, o pool
+>   passou a ser criado sob demanda; criá-lo na importação do singleton o
+>   prendia a um event loop que ainda não existia.
+> - **P2 — EXPLAIN pendente.** Script e formato do registro estão prontos
+>   (`infra/database/explain-hot-queries.sql`,
+>   `docs/explain-consultas-quentes.md`), mas a medição precisa de um Postgres
+>   com volume representativo. **Os índices foram criados sem ela**, com a
+>   justificativa de cada um na migration; o índice `[userId, createdAt]` é o de
+>   argumento mais fraco e deve ser removido se o EXPLAIN não o justificar.
+> - **P2 — contas a pagar/receber:** além do `take`, os totais passaram a vir de
+>   uma agregação à parte. Só pôr `take` teria feito o card somar cinco itens e
+>   exibir o resultado como total em aberto.
+> - **P2 — `limit` ganhou teto** (`@Max(500)`): o parâmetro é público, e sem teto
+>   `?limit=1000000` é uma varredura da tabela por request. 500 preserva a tela
+>   de pendentes, que é quem pede mais hoje.
+> - **P3 — aviso de DLQ não realimenta a fila.** Uma falha vinda de
+>   `whatsapp.outbound.dlq` **não** gera aviso ao usuário: o aviso é uma mensagem
+>   de WhatsApp entregue pela mesma fila que acabou de falhar. O cooldown por
+>   telefone atrasaria o ciclo, não o impediria.
+> - **P3 — `OpsFailureSource` ganhou `whatsapp_outbound`** (migration própria),
+>   senão falhas de entrega seriam catalogadas como falhas de entrada — o que
+>   muda o destino do reprocessamento.
+> - **P3 — `userId`/`contactId` podem vir vazios** numa retomada: o texto
+>   guardado em `job:reply:{jobId}` não carrega identidade, e reconsultá-la por
+>   entrega seria uma chamada à API para preencher um campo de log.
+> - **P4 — `internal_api_seconds` usa allowlist de rotas**, não uma heurística
+>   que limpa o caminho: telefone e uuid aparecem no meio da rota, e errar
+>   colocaria o número de alguém dentro de um **nome** de métrica — pior que
+>   label livre, porque nome não se filtra depois.
+> - **P4 — o contador de DLQ virou `dlq`**, incrementado na política de ack
+>   (`dispatch`), que cobre os dois drivers. `dlq_messages` nunca existiu.
+> - **P4 — idade da fila exigiu duas coisas a mais:** o publisher passou a
+>   definir a propriedade AMQP `timestamp` (sem ela o plugin reporta 0) e o
+>   Alloy passou a coletar a família `queue_metrics`.
+> - **P5 — seed de carga é pré-requisito, não conveniência.** Sem contatos
+>   verificados, toda mensagem da carga para em "número não vinculado" e o teste
+>   mede o caminho errado. `apps/api/prisma/seed-loadtest.ts` cria os contatos, e
+>   recusa rodar em produção ou contra banco não-local.
+> - **P5 — execução pendente:** os perfis existem (`--profile 10/min` …
+>   `1000/min`) e o runbook tem a tabela do capacity review, mas os números
+>   ainda não foram coletados.
+> - **P6 — PgBouncer entrou como perfil opcional** do compose
+>   (`--profile pooler`), para exercitar o transaction mode localmente sem mudar
+>   o `pnpm db:up` do dia a dia.
+> - **P6 — timeout da OpenAI** era o padrão do SDK: 600s. Dez minutos segurando
+>   um slot de concorrência e o lock do telefone. Agora 30s (60s para mídia).
+
 ## Estado atual na `main`
 
 **Agente e pipeline**
