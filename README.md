@@ -7,31 +7,46 @@ Aplicação de controle financeiro para pessoa física e jurídica, com lançame
 ```
 financial-vellun/
   apps/
-    web/        # Frontend — Next.js 14 + Tailwind CSS + shadcn/ui
-    api/        # API principal — NestJS + Prisma + PostgreSQL
-    ai-agent/   # Agente de IA — Python + FastAPI
+    web/            # Frontend — Next.js 14 + Tailwind CSS + shadcn/ui
+    api/            # API principal — NestJS + Prisma + PostgreSQL
+    ai-agent/       # Agente de IA — Python + FastAPI (venv própria)
   packages/
-    shared/     # Tipos, enums e schemas Zod compartilhados
-    config/     # Configurações de TS, ESLint e Prettier
+    shared/         # Tipos, enums e schemas Zod compartilhados
+    config/         # Configurações de TS, ESLint e Prettier
   infra/
-    docker/     # Docker Compose com PostgreSQL
-  docs/
-    technical-requirements.md
-    implementation-prompts.md
+    docker/         # Docker Compose: PostgreSQL + RabbitMQ + Redis
+    observability/  # Alloy, alertas, dashboards (ver infra/observability/README.md)
+  docs/             # requisitos, runbook, observabilidade e ADRs (docs/adrs/)
+  plan/             # planos de implementação
+  Dockerfile.ai-agent  # imagem do agente (produção)
+  Dockerfile.alloy     # imagem do Alloy no Railway
 ```
 
 ## Pré-requisitos
 
-| Ferramenta    | Versão mínima | Verificar                  |
-| ------------- | ------------- | -------------------------- |
-| Node.js       | 20            | `node -v`                  |
-| pnpm          | 9             | `pnpm -v`                  |
-| Python        | 3.11          | `python --version`         |
-| Docker Desktop| qualquer      | `docker -v`                |
+| Ferramenta     | Versão                                   | Verificar                |
+| -------------- | ---------------------------------------- | ------------------------ |
+| Node.js        | ≥ 20 (`.nvmrc` fixa `22.13.1`)           | `node -v`                |
+| pnpm           | ≥ 9 (`corepack enable` usa a do projeto) | `pnpm -v`                |
+| Python         | ≥ 3.11 (`.python-version` do agente: `3.12`) | `python --version`   |
+| Docker Desktop | com Compose v2                           | `docker compose version` |
 
 ---
 
 ## Configuração inicial (primeira vez)
+
+Resumo da ordem — cada passo está detalhado abaixo:
+
+```bash
+pnpm install                                   # 1. dependências Node
+# 2. copiar os quatro .env.example (infra/docker, api, web, ai-agent)
+pnpm db:up                                     # 3. PostgreSQL + RabbitMQ + Redis
+pnpm prisma:generate                           # 4. client do Prisma
+pnpm --filter @financial-vellun/api exec prisma migrate deploy
+pnpm prisma:seed
+# 5. venv do agente de IA + dependências
+pnpm dev                                       # 6. API + Web + agente
+```
 
 ### 1. Instalar dependências Node
 
@@ -41,48 +56,81 @@ pnpm install
 
 ### 2. Configurar variáveis de ambiente
 
-Copie os arquivos de exemplo e preencha os valores:
+São **quatro** arquivos. Copie os exemplos (os valores padrão já funcionam para
+desenvolvimento local, exceto onde indicado):
 
-**API** (`apps/api/`):
 ```bash
-cp apps/api/.env.example apps/api/.env
+cp infra/docker/.env.example     infra/docker/.env
+cp apps/api/.env.example         apps/api/.env
+cp apps/web/.env.local.example   apps/web/.env.local
+cp apps/ai-agent/.env.example    apps/ai-agent/.env
 ```
 
-| Variável              | Descrição                                         |
-| --------------------- | ------------------------------------------------- |
-| `DATABASE_URL`        | URL de conexão com o PostgreSQL                   |
-| `JWT_SECRET`          | Segredo para assinar os access tokens (≥ 32 chars)|
-| `JWT_REFRESH_SECRET`  | Segredo para os refresh tokens (≥ 32 chars)       |
-| `API_PORT`            | Porta da API (padrão: `3001`)                     |
-| `INTERNAL_API_KEY`    | Chave compartilhada entre API e agente de IA      |
+> No PowerShell, troque `cp` por `Copy-Item`.
 
-**Web** (`apps/web/`):
-```bash
-cp apps/web/.env.local.example apps/web/.env.local
-```
+**Infraestrutura** (`infra/docker/.env`) — **obrigatório**: o `docker-compose.yml`
+lê este arquivo (`env_file`) e o `pnpm db:up` falha sem ele.
+
+| Variável                                           | Descrição                                                              |
+| -------------------------------------------------- | ---------------------------------------------------------------------- |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Credenciais do Postgres. Precisam bater com o `DATABASE_URL` da API |
+| `RABBITMQ_USER` / `RABBITMQ_PASSWORD`              | Usuário do broker (padrão `guest`/`guest`). Precisam bater com `RABBITMQ_URL` do agente |
+| `GRAFANA_CLOUD_*`                                  | Só para `pnpm obs:up` (Alloy local). Podem ficar vazios               |
+
+> As credenciais do Postgres só valem na **primeira** subida do volume. Se trocar
+> depois, rode `pnpm db:down` e remova o volume `financial-vellun-postgres`.
+
+**API** (`apps/api/.env`):
+
+| Variável                     | Descrição                                                                      |
+| ---------------------------- | ------------------------------------------------------------------------------ |
+| `DATABASE_URL`               | Conexão com o PostgreSQL. **Porta `5433`** no host (o compose mapeia `5433:5432`) |
+| `JWT_SECRET`                 | Segredo dos access tokens (≥ 32 chars)                                         |
+| `JWT_REFRESH_SECRET`         | Segredo dos refresh tokens (≥ 32 chars)                                        |
+| `API_PORT`                   | Porta da API (padrão `3001`; `PORT` tem precedência, usado no Railway)          |
+| `INTERNAL_API_KEY`           | Chave compartilhada com o agente de IA — **idêntica** nos dois `.env`          |
+| `WEB_URL`                    | Origem do frontend (CORS e links). Local: `http://localhost:3000`             |
+| `AI_AGENT_URL`               | Base do agente (boas-vindas por WhatsApp no cadastro)                          |
+| `BILLING_ENFORCEMENT_ENABLED`| `false` = não bloqueia usuários sem assinatura (útil em dev)                   |
+| `ASAAS_API_URL` / `ASAAS_API_KEY` / `ASAAS_WEBHOOK_TOKEN` | Gateway de pagamento (sandbox em dev)             |
+| `BILLING_CALLBACK_BASE_URL`  | URL pública para o retorno do checkout (o Asaas recusa `localhost`)            |
+| `METRICS_TOKEN`              | Bearer do `/metrics` — mesmo valor no agente. Sem ele o endpoint fica fechado  |
+| `LOKI_PUSH_URL`              | Envio de logs ao Alloy. Vazio em dev (sem Alloy)                               |
+| `OPS_JWT_SECRET`             | Sessão do painel `/ops`. **Precisa ser diferente** de `JWT_SECRET`             |
+| `OPS_GITHUB_ORG` / `OPS_GITHUB_CLIENT_ID` / `OPS_GITHUB_CLIENT_SECRET` | OAuth App do GitHub para login de operadores |
+| `OPS_GITHUB_CALLBACK_URL` / `API_URL` | Callback do OAuth (vazio → `API_URL` + `/ops/auth/github/callback`)   |
+| `OPS_BOOTSTRAP_ADMIN_GITHUB_LOGIN` | Login GitHub do **primeiro** `ops_admin` (ver [Painel de operações](#painel-de-operações-ops)) |
+| `OPS_GRAFANA_URL` / `OPS_GRAFANA_LOKI_DATASOURCE_UID` | Links do painel para o Grafana. Vazios desligam a seção      |
+
+O produto (web + WhatsApp) funciona sem Asaas, OAuth do GitHub e Grafana
+configurados; só o checkout e o painel `/ops` dependem deles.
+
+**Web** (`apps/web/.env.local`):
 
 | Variável              | Descrição                              |
 | --------------------- | -------------------------------------- |
 | `NEXT_PUBLIC_API_URL` | URL da API (padrão: `http://localhost:3001`) |
 
-**AI Agent** (`apps/ai-agent/`):
-```bash
-cp apps/ai-agent/.env.example apps/ai-agent/.env
-```
+**AI Agent** (`apps/ai-agent/.env`):
 
 Núcleo:
 
-| Variável                  | Padrão                     | Descrição                                                        |
-| ------------------------- | -------------------------- | ---------------------------------------------------------------- |
-| `AI_AGENT_PORT`           | `8010`                     | Porta do agente                                                  |
-| `ENVIRONMENT`             | `development`              | `development` \| `production` (ver [Produção](#rodando-em-produção)) |
-| `MAIN_API_URL`            | `http://localhost:3001`    | URL da API principal                                             |
-| `INTERNAL_API_KEY`        | —                          | Mesma chave configurada na API (header `x-internal-api-key`)     |
-| `LLM_PROVIDER`            | `rules`                    | `rules` (sem LLM) \| `openai`                                    |
-| `OPENAI_API_KEY`          | —                          | Chave da OpenAI (necessária quando `LLM_PROVIDER=openai`)        |
-| `OPENAI_MODEL`            | `gpt-4o-mini`              | Modelo usado na extração de intenção                             |
-| `CONFIDENCE_THRESHOLD`    | `0.7`                      | Abaixo disso, o lançamento exige confirmação do usuário          |
-| `CONVERSATION_TTL_MINUTES`| `30`                       | TTL do estado de confirmação em memória                          |
+| Variável                    | Padrão                     | Descrição                                                        |
+| --------------------------- | -------------------------- | ---------------------------------------------------------------- |
+| `AI_AGENT_PORT`             | `8010`                     | Porta do agente                                                  |
+| `ENVIRONMENT`               | `development`              | `development` \| `production` (ver [Produção](#rodando-em-produção)) |
+| `LOG_LEVEL`                 | `INFO`                     | `DEBUG` \| `INFO` \| `WARNING` \| `ERROR`                        |
+| `MAIN_API_URL`              | `http://localhost:3001`    | URL da API principal                                             |
+| `WEB_URL`                   | `http://localhost:3000`    | Base do link de regularização da assinatura (em produção, a URL pública do web) |
+| `INTERNAL_API_KEY`          | —                          | Mesma chave configurada na API (header `x-internal-api-key`)     |
+| `LLM_PROVIDER`              | `rules`                    | `rules` (sem LLM) \| `openai`                                    |
+| `OPENAI_API_KEY`            | —                          | Chave da OpenAI (necessária quando `LLM_PROVIDER=openai`)        |
+| `OPENAI_MODEL`              | `gpt-4o-mini`              | Modelo usado na extração de intenção                             |
+| `OPENAI_VISION_MODEL`       | —                          | Modelo para comprovantes/imagens (vazio → `OPENAI_MODEL`)        |
+| `OPENAI_TRANSCRIPTION_MODEL`| `whisper-1`                | Transcrição de áudio                                             |
+| `MEDIA_MAX_BYTES`           | `16777216`                 | Limite de download de mídia (16 MB)                              |
+| `CONFIDENCE_THRESHOLD`      | `0.7`                      | Abaixo disso, o lançamento exige confirmação do usuário          |
+| `CONVERSATION_TTL_MINUTES`  | `30`                       | TTL do estado de confirmação em memória                          |
 
 Messenger (resposta ao usuário — ver [factory](apps/ai-agent/src/services/messenger/factory.py)):
 
@@ -92,7 +140,11 @@ Messenger (resposta ao usuário — ver [factory](apps/ai-agent/src/services/mes
 | `WHATSAPP_PROVIDER_TOKEN`  | —                                   | Token do WhatsApp Cloud API (obrigatório em `cloud-api`)        |
 | `WHATSAPP_PHONE_NUMBER_ID` | —                                   | ID do número no WhatsApp Cloud API (obrigatório em `cloud-api`) |
 | `WHATSAPP_API_BASE_URL`    | `https://graph.facebook.com/v18.0`  | Base da Graph API da Meta                                       |
-| `WHATSAPP_WEBHOOK_SECRET`  | —                                   | Segredo HMAC-SHA256 para validar webhooks (**obrigatório em produção**) |
+| `WHATSAPP_WEBHOOK_SECRET`  | —                                   | App Secret da Meta; valida `X-Hub-Signature-256` (**obrigatório em produção**) |
+| `WHATSAPP_VERIFY_TOKEN`    | —                                   | Token do handshake `GET` de verificação (igual ao "Verify token" do painel da Meta) |
+
+> Com `ENVIRONMENT=production`, `WHATSAPP_PROVIDER=log` (ou `cloud-api` sem
+> token/phone id) impede a subida do agente.
 
 Pipeline de mensageria (broker durável):
 
@@ -111,6 +163,9 @@ Pipeline de mensageria (broker durável):
 | `MESSAGE_RETRY_MAX_SECONDS`       | `300.0`                                | Teto do backoff                                                            |
 | `RUN_CONSUMERS_IN_API`            | `true`                                 | `false` = a API só publica; consumo em `pnpm agent:worker`                 |
 | `SHUTDOWN_DRAIN_SECONDS`          | `20.0`                                 | Espera pelo que está em voo antes de devolver à fila no shutdown           |
+| `RUN_DLQ_CATALOG_CONSUMER`        | `true`                                 | Drena as DLQs para o catálogo de falhas no Postgres (painel `/ops`)        |
+| `DLQ_CATALOG_PREFETCH`            | `5`                                    | Prefetch do consumer do catálogo                                           |
+| `DLQ_USER_NOTICE_COOLDOWN_SECONDS`| `600`                                  | Janela do aviso ao usuário de mensagem não processada (`0` desliga)        |
 
 Estado distribuído (Redis) — agrupamento, locks e estado de conversa:
 
@@ -144,10 +199,18 @@ Somente para `MESSAGE_PIPELINE=legacy` (buffer em processo, será removido):
 | `MESSAGE_BUFFER_MAX_RETRIES`        | `3`      | Tentativas antes de ir para a DLQ do buffer antigo |
 | `MESSAGE_BUFFER_RETRY_BASE_SECONDS` | `1.0`    | Base do backoff do buffer antigo                   |
 
+Observabilidade:
+
+| Variável              | Padrão                    | Descrição                                                              |
+| --------------------- | ------------------------- | ---------------------------------------------------------------------- |
+| `METRICS_TOKEN`       | `local-dev-metrics-token` | Bearer do `/metrics` e `/metrics.json` — mesmo valor da API            |
+| `WORKER_METRICS_PORT` | `8011`                    | Porta do HTTP mínimo do worker (`/metrics`, `/health/*`)               |
+| `LOKI_PUSH_URL`       | —                         | Envio de logs ao Alloy (só o endereço base). Vazio em dev              |
+
 ### 3. Iniciar a infraestrutura local
 
 ```bash
-pnpm db:up   # PostgreSQL + RabbitMQ + Redis
+pnpm db:up   # PostgreSQL (porta 5433) + RabbitMQ (5672/15672/15692) + Redis (6379)
 ```
 
 Aguarde os três containers ficarem saudáveis:
@@ -164,17 +227,22 @@ onde você inspeciona filas, retries e DLQ. Usuário e senha vêm de
 `RABBITMQ_USER`/`RABBITMQ_PASSWORD` em `infra/docker/.env`.
 
 
-### 4. Criar as tabelas e popular dados iniciais
+### 4. Gerar o client do Prisma, criar as tabelas e popular dados iniciais
 
 ```bash
+# Gerar o Prisma Client (o `pnpm install` na raiz não encontra o schema e
+# deixa o client sem gerar — sem isto a API falha com
+# "@prisma/client did not initialize yet")
+pnpm prisma:generate
+
 # Rodar as migrations
 pnpm --filter @financial-vellun/api exec prisma migrate deploy
 
-# Popular categorias padrão (individual + business)
-pnpm --filter @financial-vellun/api db:seed
+# Popular categorias padrão (individual + business) e o usuário demo
+pnpm prisma:seed
 ```
 
-O seed tambem cria um usuario demo para desenvolvimento:
+O seed também cria um usuário demo para desenvolvimento:
 
 ```txt
 Email: vellunsolutions2026@gmail.com
@@ -211,14 +279,20 @@ Instalar dependencias usando o Python da propria venv:
 .venv/bin/python -m pip install -e .
 ```
 
-Em produção com backend Redis, instale também o extra:
+Redis e RabbitMQ (`redis`, `aio-pika`) já fazem parte das dependências
+obrigatórias — o extra `[redis]` existe só por compatibilidade.
+
+Para rodar os testes, instale também o grupo `dev` (pytest). O `--group` exige
+pip ≥ 25.1, por isso a atualização do pip antes:
 
 ```bash
 # Windows
-.venv\Scripts\python.exe -m pip install -e .[redis]
+.venv\Scripts\python.exe -m pip install --upgrade pip
+.venv\Scripts\python.exe -m pip install --group dev
 
 # Linux/macOS
-.venv/bin/python -m pip install -e '.[redis]'
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install --group dev
 ```
 
 A ativacao manual da venv e opcional. Ela so e necessaria quando voce quiser executar comandos Python diretamente dentro de `apps/ai-agent`, como `pytest`, `python` ou `pip`.
@@ -231,13 +305,19 @@ A ativacao manual da venv e opcional. Ela so e necessaria quando voce quiser exe
 source .venv/bin/activate
 ```
 
-Para iniciar o agente pelo monorepo, nao precisa ativar a venv manualmente. O script `pnpm agent:dev` cuida disso (no Windows usa `.venv\Scripts\python.exe`; no Linux/macOS, `.venv/bin/python`).
+Para iniciar o agente pelo monorepo, nao precisa ativar a venv manualmente. Os scripts `pnpm agent:dev`, `pnpm agent:worker` e `pnpm test:agent` usam [run-python.mjs](apps/ai-agent/scripts/run-python.mjs), que escolhe `.venv\Scripts\python.exe` (Windows) ou `.venv/bin/python` (Linux/macOS) e avisa se a venv não existir.
 
 ---
 
 ## Rodando o projeto
 
-Abra um terminal para cada serviço:
+Tudo de uma vez (sobe a infra e os três serviços em paralelo):
+
+```bash
+pnpm dev
+```
+
+Ou um terminal para cada serviço:
 
 ```bash
 # Terminal 1 — API (porta 3001)
@@ -253,16 +333,57 @@ pnpm agent:dev
 | Serviço            | URL                                 |
 | ------------------ | ----------------------------------- |
 | Web                | http://localhost:3000               |
+| Painel de operações| http://localhost:3000/ops           |
 | API                | http://localhost:3001               |
 | Swagger            | http://localhost:3001/api/docs      |
 | AI Agent           | http://localhost:8010               |
-| Liveness           | http://localhost:8010/health/live   |
-| Readiness          | http://localhost:8010/health/ready  |
-| Métricas           | http://localhost:8010/metrics       |
 | Painel do RabbitMQ | http://localhost:15672 (guest/guest) |
 
-> O `pnpm dev` sobe os consumers junto com a API (`RUN_CONSUMERS_IN_API=true`).
-> Para escalar o processamento separadamente, use `pnpm agent:worker`.
+Health e métricas — o mesmo trio nos três processos. `/metrics` exige o header
+`Authorization` com o `METRICS_TOKEN` configurado nos `.env`:
+
+| Serviço           | Liveness / Readiness                        | Métricas                          |
+| ----------------- | ------------------------------------------- | --------------------------------- |
+| API               | `:3001/health/live` · `:3001/health/ready`  | `:3001/metrics`                   |
+| AI Agent          | `:8010/health/live` · `:8010/health/ready`  | `:8010/metrics` · `/metrics.json` |
+| AI Agent (worker) | `:8011/health/live` · `:8011/health/ready`  | `:8011/metrics` · `/metrics.json` |
+
+```bash
+curl -H "Authorization: Bearer $METRICS_TOKEN" http://localhost:3001/metrics
+```
+
+> O `pnpm dev` sobe os consumers junto com o agente (`RUN_CONSUMERS_IN_API=true`).
+> Para escalar o processamento separadamente, use `RUN_CONSUMERS_IN_API=false` e
+> `pnpm agent:worker`.
+
+Login no app com o usuário demo do seed (credenciais acima). Para não esbarrar
+na exigência de assinatura em dev, use `BILLING_ENFORCEMENT_ENABLED=false` em
+`apps/api/.env`.
+
+### Painel de operações (`/ops`)
+
+O `/ops` usa identidade própria (GitHub OAuth + pertencer a `OPS_GITHUB_ORG`),
+separada dos usuários do produto. Para usá-lo num ambiente novo:
+
+1. Crie um OAuth App no GitHub (Settings → Developer settings → OAuth Apps) com
+   callback `http://localhost:3001/ops/auth/github/callback` e preencha
+   `OPS_GITHUB_CLIENT_ID` / `OPS_GITHUB_CLIENT_SECRET`.
+2. Defina `OPS_JWT_SECRET` com um valor **diferente** de `JWT_SECRET`.
+3. Todo primeiro login nasce `viewer` inativo. Para criar o primeiro
+   `ops_admin`, defina `OPS_BOOTSTRAP_ADMIN_GITHUB_LOGIN=<seu-login>` antes do
+   primeiro login — só tem efeito com a tabela `ops_operators` vazia; depois pode
+   ser removida.
+
+### Observabilidade local (opcional)
+
+```bash
+pnpm obs:up      # infra + Alloy + exporters de Postgres e Redis
+pnpm obs:check   # valida configs do Alloy, regras de alerta e PromQL dos dashboards
+```
+
+Detalhes (usuário de monitoramento do Postgres, alvos, envio ao Grafana Cloud)
+em [infra/observability/README.md](infra/observability/README.md) e
+[docs/observability.md](docs/observability.md#verificação-local).
 
 ---
 
@@ -393,6 +514,10 @@ Serve como rede de segurança por uma release; ver
 ### 1. Variáveis de ambiente
 
 ```bash
+# API — além das variáveis de apps/api/.env.example com valores reais
+NODE_ENV=production            # cookies seguros e log JSON estruturado
+PORT=3001
+
 # AI Agent
 ENVIRONMENT=production
 WHATSAPP_WEBHOOK_SECRET=<segredo-forte>
@@ -495,21 +620,22 @@ O passo a passo, as variáveis e as armadilhas (IPv6, alvos comentados) estão e
 ## Testes
 
 ```bash
+# Tudo (API + agente)
+pnpm test
+
 # API (Jest + ts-jest)
 pnpm --filter @financial-vellun/api test
 
-# Agente de IA (pytest) — a partir de apps/ai-agent
-# Testes de integração (RabbitMQ + Redis reais) ficam de fora por padrão;
-# rode-os com `-m integration` depois de `pnpm db:up`.
-# Windows
-cd apps/ai-agent && .venv\Scripts\python.exe -m pytest -q
-# Linux/macOS
-cd apps/ai-agent && .venv/bin/python -m pytest -q
-```
+# Agente de IA (pytest) — exige o grupo `dev` instalado (ver passo 5)
+pnpm test:agent
 
-Cobertura atual: buffer/debounce, ordem de chamada do processor, serviço de
-histórico, classificador com contexto (agent); histórico ordenado/limitado/
-normalizado e idempotência de `recordMessage` (API).
+# Testes de integração do agente (RabbitMQ + Redis reais) ficam de fora por
+# padrão; rode-os depois de `pnpm db:up`, a partir de apps/ai-agent:
+# Windows
+cd apps/ai-agent && .venv\Scripts\python.exe -m pytest -m integration -q
+# Linux/macOS
+cd apps/ai-agent && .venv/bin/python -m pytest -m integration -q
+```
 
 ---
 
@@ -517,18 +643,27 @@ normalizado e idempotência de `recordMessage` (API).
 
 | Comando              | Descrição                                    |
 | -------------------- | -------------------------------------------- |
-| `pnpm db:up`         | Inicia o PostgreSQL via Docker               |
-| `pnpm db:down`       | Para o container do banco                    |
+| `pnpm dev`           | Sobe a infra + API + Web + agente em paralelo |
+| `pnpm db:up` / `pnpm infra:up`     | Sobe PostgreSQL + RabbitMQ + Redis via Docker |
+| `pnpm db:down` / `pnpm infra:down` | Para os containers de infraestrutura          |
 | `pnpm api:dev`       | Inicia a API em modo desenvolvimento         |
 | `pnpm web:dev`       | Inicia o frontend em modo desenvolvimento    |
-| `pnpm agent:dev`     | Inicia o agente de IA em modo desenvolvimento|
-| `pnpm dev`           | Sobe banco + API + Web + agente em paralelo  |
-| `pnpm lint`          | Lint em todos os workspaces                  |
+| `pnpm agent:dev`     | Inicia o agente de IA (HTTP, porta 8010)     |
+| `pnpm agent:worker`  | Só os consumers das filas (sem HTTP)         |
+| `pnpm prisma:generate` | Gera o Prisma Client                       |
+| `pnpm prisma:migrate`  | `prisma migrate dev` (cria migration em dev) |
+| `pnpm prisma:seed`     | Categorias padrão + usuário demo           |
+| `pnpm prisma:studio`   | Abre o Prisma Studio                       |
+| `pnpm test`          | Testes da API (Jest) + agente (pytest)       |
+| `pnpm test:agent`    | Só os testes do agente                       |
+| `pnpm typecheck`     | `tsc --noEmit` na API                        |
+| `pnpm lint`          | ESLint em todo o repo                        |
 | `pnpm format`        | Formata todos os arquivos com Prettier       |
 | `pnpm format:check`  | Verifica a formatação sem alterar arquivos   |
-| `pnpm --filter @financial-vellun/api test` | Testes unitários da API (Jest) |
+| `pnpm obs:up` / `pnpm obs:down` | Infra + stack local de observabilidade |
+| `pnpm obs:check`     | Valida Alloy, regras de alerta e dashboards  |
 
-> **Banco/Prisma:** aplicar migrations com `pnpm --filter @financial-vellun/api exec prisma migrate deploy`; resetar em dev com `... prisma migrate reset`; gerar o client com `... prisma generate`.
+> **Banco/Prisma:** aplicar migrations com `pnpm --filter @financial-vellun/api exec prisma migrate deploy`; resetar em dev com `pnpm --filter @financial-vellun/api exec prisma migrate reset`.
 
 ---
 
@@ -581,6 +716,20 @@ Outros `400` na criação do cliente costumam ser dados recusados pelo Asaas
 (ex.: *"O CPF/CNPJ informado é inválido."*): o cadastro agora valida o dígito
 verificador, e a mensagem do Asaas é repassada ao usuário.
 
+### `pnpm db:up` falha com `env file ... infra/docker/.env not found`
+
+Falta o `.env` da infraestrutura: `cp infra/docker/.env.example infra/docker/.env`.
+
+### API falha com `@prisma/client did not initialize yet`
+
+O Prisma Client não foi gerado. Rode `pnpm prisma:generate` (com a API parada,
+ver o item de `EPERM` abaixo).
+
+### `No module named pytest` ao rodar os testes do agente
+
+O grupo `dev` não foi instalado: `python -m pip install --upgrade pip` e depois
+`python -m pip install --group dev`, usando o Python da venv (passo 5).
+
 ### Porta da API em uso
 
 Se `pnpm dev` falhar com `EADDRINUSE` na porta `3001`, ja existe outro processo usando a porta da API. No Windows, encontre e encerre o processo:
@@ -603,8 +752,10 @@ Node que estejam usando o client.
 ### Webhook do agente retorna `401`
 
 Em `ENVIRONMENT=production`, o `WHATSAPP_WEBHOOK_SECRET` é obrigatório e a
-requisição precisa do header `x-webhook-signature` (HMAC-SHA256 do corpo). Em
-desenvolvimento, sem o secret configurado, o webhook aceita sem assinatura.
+requisição precisa do header `X-Hub-Signature-256: sha256=<hex>` (HMAC-SHA256 do
+corpo; `X-Webhook-Signature` também é aceito, por compatibilidade com o formato
+simulado). Em desenvolvimento, sem o secret configurado, o webhook aceita sem
+assinatura.
 
 ---
 
@@ -614,14 +765,18 @@ desenvolvimento, sem o secret configurado, o webhook aceita sem assinatura.
 | ---- | ------ | ------ |
 | **1 — Fundação** | ✅ Completo | Monorepo, schema Prisma, bootstrap apps, Docker |
 | **2 — Produto Pessoal** | ✅ Completo | Auth JWT, perfis, CRUD de contas/categorias/lançamentos, dashboard |
-| **3 — IA e WhatsApp** | 🚧 Em andamento | Webhook, extração de intenção, integração LLM; ingestão assíncrona com buffer/debounce, contexto conversacional, idempotência e backend Redis (ver [arquitetura](#arquitetura-de-processamento-de-mensagens-whatsapp--ia)) |
+| **3 — IA e WhatsApp** | 🚧 Em andamento | Webhook, extração de intenção, integração LLM, pipeline durável (RabbitMQ + Redis) (ver [arquitetura](#arquitetura-de-processamento-de-mensagens-whatsapp--ia)) |
 | **4 — Pessoa Jurídica** | 🚧 Em andamento | Dashboard empresarial, contas a pagar/receber, clientes/fornecedores, categorias |
-| **5 — Evolução (pós-MVP)** | 🔜 Pendente | Recorrência, metas, relatórios, importação de extratos |
+| **5 — Evolução (pós-MVP)** | 🚧 Em andamento | Recorrências, metas de gastos, caixinhas, cartões, lembretes, agenda, anotações, membros (Duo), análise financeira; pendentes: relatórios e importação de extratos |
 
 ---
 
 ## Documentação
 
+- [ADRs — decisões arquiteturais](docs/adrs/README.md)
+- [Runbook do pipeline WhatsApp](docs/whatsapp-messaging-runbook.md)
+- [Observabilidade](docs/observability.md) · [arquivos versionados](infra/observability/README.md)
+- [Rollout do billing](docs/billing-rollout.md)
 - [Requisitos técnicos](docs/technical-requirements.md)
 - [Prompts de implementação](docs/implementation-prompts.md)
 - [Requisitos — processamento assíncrono WhatsApp/IA](docs/whatsapp-ai-async-processing-requirements.md)
