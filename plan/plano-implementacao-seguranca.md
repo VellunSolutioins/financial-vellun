@@ -308,6 +308,30 @@ Decisões já tomadas:
 
 ## S4 — Contínuo: privacidade e governança
 
+> **Status (22/09/2026): implementado na branch `feat/seguranca-s1`**, migration
+> `20260922180000_add_user_security_events`. Decisões:
+>
+> - **Retenção:** job diário (4h, em lotes de 500) substitui `ai_messages.content` e
+>   `ai_extracted_transactions.raw_input` por um marcador depois de
+>   `AI_CONTENT_RETENTION_DAYS` (90; 0 desliga). **Apaga o texto e mantém a linha**: a
+>   idempotência por `providerMessageId`, o encadeamento das conversas e as métricas de
+>   volume continuam de pé. `raw_input` é obrigatório no schema, por isso recebe o marcador
+>   em vez de `NULL`.
+> - **Trilha de identidade:** nova `user_security_events` (append-only por trigger, como
+>   `ops_audit_log`), gravada em troca de senha, troca de e-mail, verificação de telefone e
+>   "encerrar todos os dispositivos", com ip e user agent. E-mails entram mascarados
+>   (`j***@example.com`); nenhuma credencial em claro.
+>   - O trigger recusa `UPDATE` e `TRUNCATE`, mas **permite `DELETE`**: a exclusão de conta
+>     (LGPD) apaga em cascata a partir de `users`, e a aplicação não tem caminho que apague
+>     essas linhas. O que o trigger impede é reescrever o passado para esconder uma tomada
+>     de conta.
+> - **Backups:** procedimento e o que sai do sistema documentados em
+>   [docs/retencao-e-backups.md](../docs/retencao-e-backups.md). **O ensaio de restauração
+>   continua pendente** — depende de acesso ao Railway.
+> - **Medição da retenção:** a varredura filtra por `created_at`, sem índice próprio. No
+>   volume atual é irrelevante (roda de madrugada); se passar a doer, o índice entra pelo
+>   plano de performance, que é o dono dessa decisão (C6).
+
 - Retenção de `AiMessage.content` e `AiExtractedTransaction.rawInput` (ex.: 90 dias) por job em lotes (C14).
 - Documentar backups e testar restauração.
 - Registrar mudanças de identidade (e-mail, telefone, senha) no log append-only.

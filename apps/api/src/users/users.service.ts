@@ -13,12 +13,18 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdatePasswordDto } from './dto/update-password.dto';
 import { normalizeEmail } from '../common/email.util';
 import { SessionService } from '../auth/session.service';
+import {
+  RequestContext,
+  SecurityEventsService,
+  maskEmail,
+} from '../security-events/security-events.service';
 
 @Injectable()
 export class UsersService {
   constructor(
     private prisma: PrismaService,
     private sessions: SessionService,
+    private securityEvents: SecurityEventsService,
   ) {}
 
   async getProfile(userId: string) {
@@ -84,7 +90,12 @@ export class UsersService {
    * Troca a senha e encerra as demais sessões do usuário: quem tinha um token
    * roubado perde o acesso. A sessão que fez a troca continua ativa.
    */
-  async updatePassword(userId: string, currentSessionId: string, dto: UpdatePasswordDto) {
+  async updatePassword(
+    userId: string,
+    currentSessionId: string,
+    dto: UpdatePasswordDto,
+    context: RequestContext = {},
+  ) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('Usuário não encontrado');
 
@@ -93,7 +104,11 @@ export class UsersService {
 
     const passwordHash = await bcrypt.hash(dto.newPassword, 12);
     await this.prisma.user.update({ where: { id: userId }, data: { passwordHash } });
-    await this.sessions.revokeAllForUser(userId, currentSessionId);
+    const encerradas = await this.sessions.revokeAllForUser(userId, currentSessionId);
+    await this.securityEvents.record(userId, 'password_changed', {
+      ...context,
+      metadata: { sessoesEncerradas: encerradas },
+    });
 
     return { message: 'Senha atualizada com sucesso' };
   }
@@ -103,8 +118,9 @@ export class UsersService {
    * telefone não muda por aqui: ele só é gravado quando o número novo é
    * verificado (`/users/me/phone/verification`).
    */
-  async updateUser(userId: string, dto: UpdateUserDto) {
+  async updateUser(userId: string, dto: UpdateUserDto, context: RequestContext = {}) {
     const email = dto.email !== undefined ? normalizeEmail(dto.email) : undefined;
+    let emailAnterior: string | null = null;
 
     if (email !== undefined) {
       const current = await this.prisma.user.findUnique({ where: { id: userId } });
@@ -120,10 +136,11 @@ export class UsersService {
           where: { email: { equals: email, mode: 'insensitive' }, id: { not: userId } },
         });
         if (emailOwner) throw new ConflictException('Email já cadastrado');
+        emailAnterior = current.email;
       }
     }
 
-    return this.prisma.user.update({
+    const atualizado = await this.prisma.user.update({
       where: { id: userId },
       data: {
         name: dto.name,
@@ -153,5 +170,15 @@ export class UsersService {
         updatedAt: true,
       },
     });
+
+    if (emailAnterior) {
+      // Só o mascarado: a trilha diz o que mudou sem virar uma lista de e-mails.
+      await this.securityEvents.record(userId, 'email_changed', {
+        ...context,
+        metadata: { de: maskEmail(emailAnterior), para: maskEmail(atualizado.email) },
+      });
+    }
+
+    return atualizado;
   }
 }

@@ -14,12 +14,13 @@ async function createService() {
         passwordHash: await bcrypt.hash(TEST_PASSWORD, 4),
       }),
       findFirst: jest.fn().mockResolvedValue(null),
-      update: jest.fn().mockResolvedValue({ id: 'user-1' }),
+      update: jest.fn().mockResolvedValue({ id: 'user-1', email: 'novo@example.com' }),
     },
   };
   const sessions = { revokeAllForUser: jest.fn().mockResolvedValue(2) };
-  const service = new UsersService(prisma as any, sessions as any);
-  return { prisma, sessions, service };
+  const securityEvents = { record: jest.fn().mockResolvedValue(undefined) };
+  const service = new UsersService(prisma as any, sessions as any, securityEvents as any);
+  return { prisma, sessions, securityEvents, service };
 }
 
 describe('UsersService', () => {
@@ -33,6 +34,23 @@ describe('UsersService', () => {
       });
 
       expect(sessions.revokeAllForUser).toHaveBeenCalledWith('user-1', 'session-atual');
+    });
+
+    it('registra a troca na trilha da conta, com a origem da requisição', async () => {
+      const { securityEvents, service } = await createService();
+
+      await service.updatePassword(
+        'user-1',
+        'session-atual',
+        { currentPassword: TEST_PASSWORD, newPassword: 'n'.repeat(12) },
+        { ip: '203.0.113.10', userAgent: 'jest' },
+      );
+
+      expect(securityEvents.record).toHaveBeenCalledWith('user-1', 'password_changed', {
+        ip: '203.0.113.10',
+        userAgent: 'jest',
+        metadata: { sessoesEncerradas: 2 },
+      });
     });
 
     it('senha atual errada não troca nem revoga', async () => {
@@ -70,6 +88,19 @@ describe('UsersService', () => {
       expect(prisma.user.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ email: 'novo@example.com' }) }),
       );
+    });
+
+    it('registra a troca de e-mail mascarado na trilha', async () => {
+      const { securityEvents, service } = await createService();
+
+      await service.updateUser('user-1', {
+        email: 'novo@example.com',
+        currentPassword: TEST_PASSWORD,
+      });
+
+      expect(securityEvents.record).toHaveBeenCalledWith('user-1', 'email_changed', {
+        metadata: { de: 'j***@example.com', para: 'n***@example.com' },
+      });
     });
 
     it('reenviar o mesmo e-mail (com outra caixa) não pede senha', async () => {

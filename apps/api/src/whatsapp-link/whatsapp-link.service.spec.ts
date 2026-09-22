@@ -37,7 +37,12 @@ function createPrismaMock() {
 function createService(botNumber = '5511900000000') {
   const prisma = createPrismaMock();
   const config = { get: (key: string) => (key === 'WHATSAPP_BOT_NUMBER' ? botNumber : undefined) };
-  return { prisma, service: new WhatsappLinkService(prisma, config as any) };
+  const securityEvents = { record: jest.fn().mockResolvedValue(undefined) };
+  return {
+    prisma,
+    securityEvents,
+    service: new WhatsappLinkService(prisma, securityEvents as any, config as any),
+  };
 }
 
 function verification(overrides: Record<string, unknown> = {}) {
@@ -182,7 +187,7 @@ describe('WhatsappLinkService', () => {
     });
 
     it('código certo vincula o número de origem e revoga os anteriores', async () => {
-      const { prisma, service } = createService();
+      const { prisma, securityEvents, service } = createService();
       // O usuário digitou com nono dígito; a Meta entregou sem.
       prisma.phoneVerification.findMany.mockResolvedValue([verification()]);
       prisma.whatsappContact.findUniqueOrThrow.mockResolvedValue({
@@ -235,6 +240,14 @@ describe('WhatsappLinkService', () => {
         where: { id: 'user-1' },
         data: { phone: '(19) 99999-9999' },
       });
+      // A verificação entra na trilha da conta (S4).
+      expect(securityEvents.record).toHaveBeenCalledWith(
+        'user-1',
+        'phone_verified',
+        expect.objectContaining({
+          metadata: { origem: 'whatsapp', telefone: '(19) 99999-9999' },
+        }),
+      );
     });
 
     it('perder a corrida de consumo não vincula nada', async () => {

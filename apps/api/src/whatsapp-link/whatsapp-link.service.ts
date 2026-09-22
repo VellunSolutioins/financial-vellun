@@ -14,6 +14,7 @@ import * as bcrypt from 'bcryptjs';
 import { randomNumericCode, safeEqual, sha256Hex } from '../common/crypto.util';
 import { normalizePhone, phoneVariants } from '../common/phone.util';
 import { PrismaService } from '../prisma/prisma.service';
+import { SecurityEventsService } from '../security-events/security-events.service';
 
 /** Validade do código exibido na tela. */
 export const VERIFICATION_TTL_MS = 10 * 60 * 1000;
@@ -64,6 +65,7 @@ export class WhatsappLinkService {
 
   constructor(
     private readonly prisma: PrismaService,
+    private readonly securityEvents: SecurityEventsService,
     config: ConfigService,
   ) {
     const digits = (config.get<string>('WHATSAPP_BOT_NUMBER') ?? '').replace(/\D/g, '');
@@ -198,6 +200,10 @@ export class WhatsappLinkService {
     if (!user) return { status: 'expired' };
 
     this.logger.log(`WhatsApp verificado para o usuário ${user.id}`);
+    // A origem é o próprio WhatsApp: o ip aqui seria o do agente, não o do usuário.
+    await this.securityEvents.record(user.id, 'phone_verified', {
+      metadata: { origem: 'whatsapp', telefone: match.displayPhone },
+    });
     return { status: 'verified', userId: user.id, name: user.name, profileType: user.profileType };
   }
 

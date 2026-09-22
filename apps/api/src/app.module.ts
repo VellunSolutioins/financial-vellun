@@ -11,6 +11,7 @@ import { CsrfGuard } from './common/guards/csrf.guard';
 import { AppThrottlerGuard } from './common/throttling/app-throttler.guard';
 import { ResilientThrottlerStorage } from './common/throttling/resilient-throttler.storage';
 import { RedisModule } from './redis/redis.module';
+import { SecurityEventsModule } from './security-events/security-events.module';
 import { RedisService } from './redis/redis.service';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
@@ -33,6 +34,7 @@ import { OpsModule } from './ops/ops.module';
     }),
     ScheduleModule.forRoot(),
     RedisModule,
+    SecurityEventsModule,
     // Rate limiting global: 120 req/min por usuário (ou IP, sem login); rotas
     // sensíveis sobrescrevem. Contado no Redis, compartilhado entre réplicas.
     ThrottlerModule.forRootAsync({

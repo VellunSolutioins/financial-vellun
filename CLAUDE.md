@@ -221,6 +221,7 @@ Em modo edição, converter o valor vindo da API para display antes de passar ao
 
 - [ADRs — decisões arquiteturais](docs/adrs/README.md)
 - [Runbook do pipeline WhatsApp](docs/whatsapp-messaging-runbook.md)
+- [Retenção de dados e backups](docs/retencao-e-backups.md)
 - [Requisitos técnicos](docs/technical-requirements.md)
 - [Prompts de implementação](docs/implementation-prompts.md)
 - [README](README.md) — setup detalhado, variáveis de ambiente e troubleshooting

@@ -186,6 +186,7 @@ model User {
   subscriptions           Subscription[]
   payments                Payment[]
   sessions                UserSession[]
+  securityEvents          UserSecurityEvent[]
   phoneVerifications      PhoneVerification[]
 
   @@map("users")
@@ -214,6 +215,28 @@ model UserSession {
 
   @@index([userId])
   @@map("user_sessions")
+}
+
+/// Trilha das mudanças de identidade da conta: senha, e-mail, telefone e
+/// encerramento de sessões. Append-only no banco (trigger, como
+/// `ops_audit_log`): serve para o usuário e o suporte reconstruírem o que
+/// aconteceu, e uma sessão roubada não pode apagar o próprio rastro.
+///
+/// Nunca guarda credencial em claro; e-mails ficam mascarados.
+model UserSecurityEvent {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  /// `password_changed`, `email_changed`, `phone_verified`, `sessions_revoked`.
+  type      String
+  ip        String?
+  userAgent String?  @map("user_agent")
+  metadata  Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("user_security_events")
 }
 
 // Desafio de posse do número de WhatsApp (reverse OTP): o usuário envia o

@@ -8,6 +8,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { AuthenticatedUser, REFRESH_COOKIE, SessionService } from './session.service';
+import { SecurityEventsService } from '../security-events/security-events.service';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -15,6 +16,7 @@ export class AuthController {
   constructor(
     private authService: AuthService,
     private sessions: SessionService,
+    private securityEvents: SecurityEventsService,
   ) {}
 
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
@@ -53,7 +55,12 @@ export class AuthController {
   @Post('logout-all')
   async logoutAll(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const user = req.user as AuthenticatedUser;
-    await this.sessions.revokeAllForUser(user.id);
+    const encerradas = await this.sessions.revokeAllForUser(user.id);
+    await this.securityEvents.record(user.id, 'sessions_revoked', {
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+      metadata: { sessoesEncerradas: encerradas },
+    });
     this.sessions.clearAuthCookies(res);
     return { message: 'Todas as sessões foram encerradas' };
   }
