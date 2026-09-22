@@ -89,7 +89,8 @@ lê este arquivo (`env_file`) e o `pnpm db:up` falha sem ele.
 | `JWT_SECRET`                 | Segredo dos access tokens (≥ 32 chars)                                         |
 | `JWT_REFRESH_SECRET`         | Segredo dos refresh tokens (≥ 32 chars)                                        |
 | `API_PORT`                   | Porta da API (padrão `3001`; `PORT` tem precedência, usado no Railway)          |
-| `INTERNAL_API_KEY`           | Chave compartilhada com o agente de IA — **idêntica** nos dois `.env`          |
+| `INTERNAL_API_KEY`           | Chave antiga compartilhada com o agente — **idêntica** nos dois `.env`; substituída pelas chaves por direção |
+| `INTERNAL_API_KEY_AGENT_TO_API` / `INTERNAL_API_KEY_API_TO_AGENT` | Uma chave por direção da comunicação interna — **idênticas** nos dois `.env` |
 | `WEB_URL`                    | Origem do frontend (CORS e links). Local: `http://localhost:3000`             |
 | `AI_AGENT_URL`               | Base do agente (boas-vindas por WhatsApp no cadastro)                          |
 | `BILLING_ENFORCEMENT_ENABLED`| `false` = não bloqueia usuários sem assinatura (útil em dev)                   |
@@ -123,7 +124,8 @@ Núcleo:
 | `LOG_LEVEL`                 | `INFO`                     | `DEBUG` \| `INFO` \| `WARNING` \| `ERROR`                        |
 | `MAIN_API_URL`              | `http://localhost:3001`    | URL da API principal                                             |
 | `WEB_URL`                   | `http://localhost:3000`    | Base do link de regularização da assinatura (em produção, a URL pública do web) |
-| `INTERNAL_API_KEY`          | —                          | Mesma chave configurada na API (header `x-internal-api-key`)     |
+| `INTERNAL_API_KEY`          | —                          | Chave antiga, igual à da API (aceita durante a migração)         |
+| `INTERNAL_API_KEY_AGENT_TO_API` / `INTERNAL_API_KEY_API_TO_AGENT` | — | Chaves por direção, iguais às da API (header `x-internal-api-key`) |
 | `LLM_PROVIDER`              | `rules`                    | `rules` (sem LLM) \| `openai`                                    |
 | `OPENAI_API_KEY`            | —                          | Chave da OpenAI (necessária quando `LLM_PROVIDER=openai`)        |
 | `OPENAI_MODEL`              | `gpt-4o-mini`              | Modelo usado na extração de intenção                             |

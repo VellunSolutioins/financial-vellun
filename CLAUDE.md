@@ -126,7 +126,7 @@ python -m venv .venv                          # apenas na primeira vez
   `schemaVersion` e aliases camelCase
 - O webhook do WhatsApp só valida, normaliza e publica: nada de chamada à API principal,
   banco, OpenAI ou download de mídia dentro do request HTTP
-- Variáveis sensíveis sempre em `.env` (nunca commitar); `INTERNAL_API_KEY` deve ser idêntica entre API e agente de IA
+- Variáveis sensíveis sempre em `.env` (nunca commitar); as chaves internas (`INTERNAL_API_KEY_AGENT_TO_API` e `INTERNAL_API_KEY_API_TO_AGENT`, ou a antiga `INTERNAL_API_KEY` durante a migração) devem ser idênticas entre API e agente de IA
 
 ## Obrigatório
 

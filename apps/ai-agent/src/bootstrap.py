@@ -133,8 +133,10 @@ class Pipeline:
 
         from .services.api_client import api_client
         from .services.redis_client import redis_provider
+        from .services.whatsapp_media import whatsapp_media
 
         await api_client.aclose()
+        await whatsapp_media.aclose()
         await redis_provider.close()
         logger.info("Pipeline encerrado")
 

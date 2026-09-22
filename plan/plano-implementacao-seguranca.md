@@ -217,6 +217,32 @@ Decisões já tomadas:
 
 ## S2 — Alto: origens, limites, Redis/rate limit, ops
 
+> **Status (22/09/2026): implementado na branch `feat/seguranca-s1`**, sem migration.
+> Decisões tomadas na implementação:
+>
+> - **Origens:** em produção só `WEB_URL`, `WEB_ALLOWED_ORIGINS` e o domínio de produção do
+>   frontend. Previews da Vercel e localhost só fora de produção; um preview que precise da
+>   API de produção entra por `WEB_ALLOWED_ORIGINS`, com a origem exata. Login e cadastro
+>   continuam sem token CSRF, mas recusam `Origin` desconhecido.
+> - **Corpo do webhook:** limite de 1 MB (`WEBHOOK_MAX_BODY_BYTES`) aplicado na própria
+>   rota, lendo em stream; `Content-Length` acima do limite recusa sem ler.
+> - **Mídia:** client único, download em stream interrompido no limite, redirecionamento
+>   manual só para hosts da Meta (e o da própria API), token nunca enviado a outro host.
+> - **Rate limit:** `@nest-lab/throttler-storage-redis` embrulhado num storage que cai para a
+>   contagem em memória se o Redis falhar (a API não devolve 500 por causa do contador).
+>   Sem `REDIS_URL`, conta em memória com aviso. Chave por usuário quando o access token é
+>   válido (assinatura verificada no próprio guard), senão por IP; prefixo `rl:`.
+>   `TRUST_PROXY` padrão 1 em produção.
+> - **Custo de IA:** `AI_DAILY_MESSAGE_LIMIT` (200/telefone/dia; 0 desliga), contado antes de
+>   LLM, transcrição e visão. Comprovante conta uma vez só.
+> - **Painel de ops:** prazo absoluto de 12 h desde o login (claim `auth`, preservada nas
+>   renovações; sessões antigas sem ela são recusadas). A organização no GitHub é revalidada
+>   a cada renovação com `OPS_GITHUB_ORG_TOKEN` (opcional); só "não é membro" explícito
+>   derruba — sem token ou sem resposta, vale o prazo absoluto. MFA na organização é
+>   configuração do GitHub, fora do código.
+> - **Chaves internas:** `INTERNAL_API_KEY_AGENT_TO_API` e `INTERNAL_API_KEY_API_TO_AGENT`;
+>   a `INTERNAL_API_KEY` antiga segue aceita e é o fallback de envio até ser removida.
+
 - **CORS/CSRF (§5):**
   - `http-origin.util.ts` com allowlist exata por ambiente (`WEB_ALLOWED_ORIGINS`);
   - regex de preview e localhost só fora de produção;

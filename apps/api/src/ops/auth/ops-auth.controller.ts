@@ -79,6 +79,7 @@ export class OpsAuthController {
         login: outcome.operator.githubLogin,
         role: outcome.operator.role,
         cvs: outcome.operator.canViewSensitive,
+        auth: Math.floor(Date.now() / 1000),
       });
       res.redirect(this.panelUrl());
     } catch (error) {

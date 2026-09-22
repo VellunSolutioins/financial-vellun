@@ -57,6 +57,7 @@ KNOWN_COUNTERS = (
     "webhook_received",
     "webhook_ignored",
     "webhook_invalid_signature",
+    "webhook_body_too_large",
     "webhook_text_too_long",
     "webhook_invalid_item",
     "publish_confirmed",
@@ -77,6 +78,7 @@ KNOWN_COUNTERS = (
     "pending_discarded_link_changed",
     "message_too_long",
     "subscription_blocked",
+    "ai_daily_limit_reached",
     # Mídia
     "media_audio",
     "media_image",

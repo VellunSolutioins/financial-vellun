@@ -8,6 +8,7 @@ import { issueCsrfCookie } from '../../common/csrf.util';
 import {
   OPS_OAUTH_STATE_COOKIE,
   OPS_OAUTH_STATE_TTL_SECONDS,
+  OPS_SESSION_ABSOLUTE_TTL_SECONDS,
   OPS_SESSION_COOKIE,
   OPS_SESSION_TTL_SECONDS,
   OPS_TOKEN_TYPE,
@@ -34,6 +35,11 @@ export interface OpsSessionPayload {
   role: OpsRole;
   /** `canViewSensitive`, abreviado para manter o token pequeno. */
   cvs: boolean;
+  /**
+   * Momento do login (epoch em segundos). Preservado nas renovações: é dele que
+   * se conta o prazo absoluto da sessão.
+   */
+  auth: number;
   /** Marca o token como de operações. Ver {@link OpsSessionService.verify}. */
   typ: typeof OPS_TOKEN_TYPE;
 }
@@ -71,8 +77,15 @@ export class OpsSessionService {
   async sign(payload: Omit<OpsSessionPayload, 'typ'>): Promise<string> {
     return this.jwt.signAsync(
       { ...payload, typ: OPS_TOKEN_TYPE },
-      { secret: this.secret(), expiresIn: OPS_SESSION_TTL_SECONDS },
+      { secret: this.secret(), expiresIn: this.ttlFor(payload.auth) },
     );
+  }
+
+  /** TTL deslizante, sem passar do prazo absoluto contado a partir do login. */
+  private ttlFor(authenticatedAt: number): number {
+    const absoluteLeft =
+      authenticatedAt + OPS_SESSION_ABSOLUTE_TTL_SECONDS - Math.floor(Date.now() / 1000);
+    return Math.max(1, Math.min(OPS_SESSION_TTL_SECONDS, absoluteLeft));
   }
 
   /** Devolve o payload, ou `null` se o token é inválido, expirado ou de outro tipo. */
@@ -98,7 +111,7 @@ export class OpsSessionService {
     const token = await this.sign(payload);
     res.cookie(OPS_SESSION_COOKIE, token, {
       ...COOKIE_OPTIONS,
-      maxAge: OPS_SESSION_TTL_SECONDS * 1000,
+      maxAge: this.ttlFor(payload.auth) * 1000,
     });
     issueCsrfCookie(res, COOKIE_OPTIONS);
   }

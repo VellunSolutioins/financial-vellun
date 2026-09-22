@@ -2,6 +2,7 @@ import 'reflect-metadata';
 
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
@@ -18,10 +19,29 @@ const isProduction = process.env.NODE_ENV === 'production';
 // o horário de Brasília.
 process.env.TZ = process.env.TZ ?? 'America/Sao_Paulo';
 
+/**
+ * `TRUST_PROXY`: quantos proxies confiáveis há na frente da API (ou `true`/
+ * `false`). Padrão: 1 em produção (o proxy da plataforma), nenhum fora dela.
+ */
+function trustProxySetting(): boolean | number | string {
+  const raw = process.env.TRUST_PROXY?.trim();
+  if (!raw) return isProduction ? 1 : false;
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  return /^\d+$/.test(raw) ? Number(raw) : raw;
+}
+
 async function bootstrap() {
   // `rawBody: true` expõe `req.rawBody` (Buffer) para a validação de assinatura
   // do webhook do PSP, sem desabilitar o body parser usado pelo ValidationPipe.
-  const app = await NestFactory.create(AppModule, { rawBody: true, bufferLogs: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true,
+    bufferLogs: true,
+  });
+
+  // Atrás do proxy do Railway, `req.ip` seria o IP do proxy — e o rate limit de
+  // quem não está logado viraria um contador único para todo mundo.
+  app.set('trust proxy', trustProxySetting());
 
   // Troca o logger do Nest pelo estruturado. `bufferLogs` acima retém o que for
   // logado durante o bootstrap para que também saia no formato novo — sem isso,

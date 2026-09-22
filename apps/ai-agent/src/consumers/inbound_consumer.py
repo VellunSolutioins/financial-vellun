@@ -54,6 +54,7 @@ from ..services.media_resolver import (
 from ..services.message_processor import NOT_LINKED_MESSAGE, message_processor
 from ..services.metrics import metrics
 from ..services.subscription_gate import subscription_gate
+from ..services.usage_limiter import DAILY_LIMIT_MESSAGE, usage_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +142,10 @@ class InboundMessageConsumer:
             await message_processor.respond(
                 message.phone, block_message or NOT_LINKED_MESSAGE
             )
+            return
+        # Transcrição e visão também são pagas: o limite vale antes delas.
+        if not await usage_limiter.allow(message.phone):
+            await message_processor.respond(message.phone, DAILY_LIMIT_MESSAGE)
             return
 
         context = (

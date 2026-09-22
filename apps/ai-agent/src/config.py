@@ -40,7 +40,13 @@ class Settings(BaseSettings):
     log_level: str = "INFO"  # nível dos logs da aplicação (DEBUG | INFO | WARNING | ...)
     main_api_url: str = "http://localhost:3001"
     web_url: str = "https://financial-vellun-web.vercel.app"  # base do link de regularização
-    internal_api_key: str
+    # Chaves internas, uma por direção (plano de segurança, S2). Vazar a que o
+    # agente usa para chamar a API não permite chamar o agente, e vice-versa.
+    # `INTERNAL_API_KEY` é a chave única antiga: continua aceita e é usada como
+    # fallback até ser removida dos dois serviços.
+    internal_api_key: str = ""
+    internal_api_key_agent_to_api: str = ""
+    internal_api_key_api_to_agent: str = ""
     openai_api_key: str = ""
     whatsapp_provider_token: str = ""
     whatsapp_webhook_secret: str = ""  # App Secret (valida X-Hub-Signature-256)
@@ -51,6 +57,17 @@ class Settings(BaseSettings):
     whatsapp_provider: str = "log"  # "log" | "cloud-api" (Etapa 5)
     whatsapp_phone_number_id: str = ""
     whatsapp_api_base_url: str = "https://graph.facebook.com/v18.0"
+
+    @property
+    def outgoing_api_key(self) -> str:
+        """Chave enviada à API principal (direção agente→API)."""
+        return (self.internal_api_key_agent_to_api or self.internal_api_key).strip()
+
+    @property
+    def accepted_incoming_keys(self) -> list[str]:
+        """Chaves aceitas nas rotas internas do agente (direção API→agente)."""
+        keys = (self.internal_api_key_api_to_agent, self.internal_api_key)
+        return [key.strip() for key in keys if key.strip()]
 
     @property
     def is_local(self) -> bool:
@@ -70,6 +87,9 @@ class Settings(BaseSettings):
 
     # Mídia (áudio/imagem) recebida no WhatsApp
     media_max_bytes: int = 16 * 1024 * 1024  # 16 MB (limite da Cloud API)
+    # Corpo máximo aceito no POST do webhook. Os eventos da Meta têm poucos KB;
+    # o limite impede que tráfego sem assinatura ocupe memória antes da checagem.
+    webhook_max_body_bytes: int = 1024 * 1024  # 1 MB
 
     # Diálogo / confirmação
     confidence_threshold: float = 0.7
@@ -141,6 +161,11 @@ class Settings(BaseSettings):
     # que só existe no `.env` simplesmente não aparece.
     loki_push_url: str = ""
 
+    # Mensagens processadas (LLM, áudio, imagem) por telefone por dia. Protege
+    # o custo de IA contra abuso; 0 desliga. Fica acima do uso de uma pessoa e
+    # do perfil do teste de carga (que espalha por muitos telefones).
+    ai_daily_message_limit: int = 200
+
     # Contexto conversacional fornecido ao LLM
     conversation_context_message_limit: int = 15
     conversation_context_max_chars: int = 4000
@@ -166,9 +191,16 @@ class Settings(BaseSettings):
             problemas.append("WHATSAPP_WEBHOOK_SECRET vazio (assinatura do webhook)")
         if self.webhook_allow_unsigned:
             problemas.append("WEBHOOK_ALLOW_UNSIGNED=true só é permitido em ambiente local")
-        if len(self.internal_api_key.strip()) < MIN_SECRET_LENGTH:
+        if len(self.outgoing_api_key) < MIN_SECRET_LENGTH:
             problemas.append(
-                f"INTERNAL_API_KEY com menos de {MIN_SECRET_LENGTH} caracteres"
+                "INTERNAL_API_KEY_AGENT_TO_API (ou INTERNAL_API_KEY) ausente ou com "
+                f"menos de {MIN_SECRET_LENGTH} caracteres"
+            )
+        incoming = self.accepted_incoming_keys
+        if not incoming or any(len(key) < MIN_SECRET_LENGTH for key in incoming):
+            problemas.append(
+                "INTERNAL_API_KEY_API_TO_AGENT (ou INTERNAL_API_KEY) ausente ou com "
+                f"menos de {MIN_SECRET_LENGTH} caracteres"
             )
         if not self.metrics_token.strip():
             problemas.append("METRICS_TOKEN vazio (/metrics ficaria recusado)")

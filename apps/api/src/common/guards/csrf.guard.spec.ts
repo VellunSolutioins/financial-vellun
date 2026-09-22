@@ -198,4 +198,21 @@ describe('CsrfGuard', () => {
       guard.canActivate(context('POST', { ops_session: 'jwt' }, {}, '/ops/auth/logout')),
     ).toThrow(ForbiddenException);
   });
+
+  // ── Login CSRF ───────────────────────────────────────────────────────────
+  // Login e cadastro dispensam o token, mas não a origem: uma página de
+  // terceiro não pode entrar o visitante na conta do atacante.
+  it.each(['/auth/login', '/auth/register'])('bloqueia %s vindo de origem desconhecida', (path) => {
+    expect(() =>
+      guard.canActivate(context('POST', {}, { origin: 'https://evil.example' }, path)),
+    ).toThrow(ForbiddenException);
+  });
+
+  it.each(['/auth/login', '/auth/register'])('libera %s vindo do app web', (path) => {
+    expect(
+      guard.canActivate(
+        context('POST', {}, { origin: 'https://financial-vellun-web.vercel.app' }, path),
+      ),
+    ).toBe(true);
+  });
 });

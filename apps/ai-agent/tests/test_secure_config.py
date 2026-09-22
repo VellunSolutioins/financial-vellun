@@ -54,7 +54,7 @@ def test_producao_completa_sobe():
     [
         ("whatsapp_webhook_secret", "", "WHATSAPP_WEBHOOK_SECRET"),
         ("webhook_allow_unsigned", True, "WEBHOOK_ALLOW_UNSIGNED"),
-        ("internal_api_key", "curta", "INTERNAL_API_KEY"),
+        ("internal_api_key", "curta", "INTERNAL_API_KEY_AGENT_TO_API"),
         ("metrics_token", "", "METRICS_TOKEN"),
         ("whatsapp_provider", "log", "WHATSAPP_PROVIDER"),
     ],
@@ -152,3 +152,46 @@ def test_vinculo_sobrevive_a_serializacao():
     assert restored is not None
     assert restored.belongs_to({"userId": "u1", "contactId": "c1", "linkVersion": 3})
     assert not restored.belongs_to({"userId": "u1", "contactId": "c1", "linkVersion": 4})
+
+
+# ── Chaves internas por direção ───────────────────────────────────────────────
+def test_chaves_por_direcao_substituem_a_antiga():
+    config = criar(
+        internal_api_key="",
+        internal_api_key_agent_to_api="a" * 32,
+        internal_api_key_api_to_agent="b" * 32,
+    )
+
+    assert config.outgoing_api_key == "a" * 32
+    assert config.accepted_incoming_keys == ["b" * 32]
+
+
+def test_na_convivencia_a_chave_antiga_segue_aceita_e_e_fallback_de_envio():
+    config = criar(internal_api_key="l" * 32, internal_api_key_api_to_agent="b" * 32)
+
+    assert config.outgoing_api_key == "l" * 32
+    assert config.accepted_incoming_keys == ["b" * 32, "l" * 32]
+
+
+def test_sem_chave_de_entrada_nao_sobe():
+    with pytest.raises(ValidationError, match="INTERNAL_API_KEY_API_TO_AGENT"):
+        criar(internal_api_key="", internal_api_key_agent_to_api="a" * 32)
+
+
+def test_rota_interna_recusa_a_chave_da_outra_direcao(monkeypatch, client):
+    monkeypatch.setattr(settings, "internal_api_key", "")
+    monkeypatch.setattr(settings, "internal_api_key_agent_to_api", "a" * 32)
+    monkeypatch.setattr(settings, "internal_api_key_api_to_agent", "b" * 32)
+    payload = {"route": "inbound", "message": {}}
+
+    recusada = client.post(
+        "/internal/ops/reprocess", json=payload, headers={"x-internal-api-key": "a" * 32}
+    )
+    aceita = client.post(
+        "/internal/ops/reprocess", json=payload, headers={"x-internal-api-key": "b" * 32}
+    )
+
+    assert recusada.status_code == 401
+    # Passou da autenticação: o payload vazio é recusado pela validação (422).
+    assert aceita.status_code == 422
+

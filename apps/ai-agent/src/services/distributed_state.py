@@ -57,6 +57,14 @@ class StateStore(ABC):
     async def get(self, key: str) -> str | None:
         """Valor gravado por ``put``, ou ``None`` se ausente ou expirado."""
 
+    @abstractmethod
+    async def incr(self, key: str, ttl_seconds: int) -> int:
+        """Incrementa um contador e devolve o novo valor.
+
+        O TTL começa no primeiro incremento e não é renovado pelos seguintes: a
+        janela do contador fica fixa (ex.: o dia).
+        """
+
 
 class InMemoryStateStore(StateStore):
     def __init__(self) -> None:
@@ -100,9 +108,25 @@ class InMemoryStateStore(StateStore):
     async def get(self, key: str) -> str | None:
         return self._values.get(key) if self._alive(key) else None
 
+    async def incr(self, key: str, ttl_seconds: int) -> int:
+        current = int(self._values[key]) if self._alive(key) and key in self._values else 0
+        if current == 0:
+            self._entries[key] = time.time() + ttl_seconds
+        self._values[key] = str(current + 1)
+        return current + 1
+
     def expire_lock_now(self, key: str) -> None:
         """Auxiliar de teste: simula o TTL do lock vencendo."""
         self._locks.expire_now(key)
+
+
+_INCR_WITH_TTL = """
+local value = redis.call('INCR', KEYS[1])
+if value == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return value
+"""
 
 
 class RedisStateStore(StateStore):
@@ -140,6 +164,11 @@ class RedisStateStore(StateStore):
     async def get(self, key: str) -> str | None:
         client = await self._provider.client()
         return await client.get(key)
+
+    async def incr(self, key: str, ttl_seconds: int) -> int:
+        client = await self._provider.client()
+        # INCR e EXPIRE num script: atômico, e o contador nunca fica sem TTL.
+        return int(await client.eval(_INCR_WITH_TTL, 1, key, ttl_seconds))
 
 
 _store: StateStore | None = None

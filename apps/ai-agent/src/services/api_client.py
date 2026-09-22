@@ -21,7 +21,7 @@ class ApiClient:
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
                 base_url=settings.main_api_url,
-                headers={"x-internal-api-key": settings.internal_api_key},
+                headers={"x-internal-api-key": settings.outgoing_api_key},
                 timeout=30.0,
             )
         return self._client

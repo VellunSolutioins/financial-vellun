@@ -24,7 +24,13 @@ function setup(secrets: Record<string, string | undefined> = {}) {
   return { service: new OpsSessionService(jwt, config), jwt };
 }
 
-const payload = { sub: 'op-1', login: 'alguem', role: 'operator' as const, cvs: false };
+const payload = {
+  sub: 'op-1',
+  login: 'alguem',
+  role: 'operator' as const,
+  cvs: false,
+  auth: Math.floor(Date.now() / 1000),
+};
 
 describe('OpsSessionService', () => {
   it('assina e verifica a própria sessão', async () => {
@@ -77,5 +83,15 @@ describe('OpsSessionService', () => {
     const { service } = setup({ OPS_JWT_SECRET: PRODUCT_SECRET });
 
     await expect(service.sign(payload)).rejects.toThrow(/diferente de JWT_SECRET/);
+  });
+
+  it('a renovação não passa do prazo absoluto contado do login', async () => {
+    const { service, jwt } = setup();
+    // Login há 11h55: restam 5 minutos, menos que o TTL deslizante de 30.
+    const auth = Math.floor(Date.now() / 1000) - (12 * 60 * 60 - 5 * 60);
+    const token = await service.sign({ ...payload, auth });
+
+    const { exp } = jwt.decode(token) as { exp: number };
+    expect(exp - auth).toBeLessThanOrEqual(12 * 60 * 60);
   });
 });

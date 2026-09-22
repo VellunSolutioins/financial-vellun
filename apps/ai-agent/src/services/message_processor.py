@@ -30,6 +30,7 @@ from .phone_verification import (
 )
 from .subscription_gate import subscription_gate
 from .transaction_creator import transaction_creator
+from .usage_limiter import DAILY_LIMIT_MESSAGE, usage_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -156,6 +157,12 @@ class MessageProcessor:
             metrics.incr("subscription_blocked")
             logger.info("Acesso bloqueado por assinatura")
             return await self._respond(phone, block_message or NOT_LINKED_MESSAGE)
+
+        # Depois do vínculo e da assinatura, antes de qualquer chamada paga. O
+        # comprovante (intent pré-extraído) já foi contado no consumer de
+        # entrada, onde a leitura da imagem aconteceu.
+        if pre_extracted is None and not await usage_limiter.allow(phone):
+            return await self._respond(phone, DAILY_LIMIT_MESSAGE)
 
         if pre_extracted is not None:
             # Comprovante: a visão já extraiu o intent no consumer de entrada.

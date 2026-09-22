@@ -33,9 +33,15 @@ _DESTINOS: dict[str, type[BaseModel]] = {
 
 
 def _require_internal_key(x_internal_api_key: str | None = Header(default=None)) -> None:
-    """Valida a chave interna em tempo constante (evita timing attacks)."""
-    expected = settings.internal_api_key
-    if not x_internal_api_key or not hmac.compare_digest(x_internal_api_key, expected):
+    """Valida a chave da direção API→agente em tempo constante.
+
+    Aceita também a ``INTERNAL_API_KEY`` antiga enquanto ela existir. Compara
+    com todas as chaves, sem parar na primeira, para o tempo não revelar qual
+    casou.
+    """
+    provided = (x_internal_api_key or "").encode()
+    matches = [hmac.compare_digest(provided, key.encode()) for key in settings.accepted_incoming_keys]
+    if not x_internal_api_key or not any(matches):
         raise HTTPException(status_code=401, detail="Chave de API interna inválida")
 
 

@@ -7,8 +7,13 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 
-import { OPS_SESSION_COOKIE, OPS_SESSION_RENEW_THRESHOLD_SECONDS } from '../../ops.constants';
+import {
+  OPS_SESSION_ABSOLUTE_TTL_SECONDS,
+  OPS_SESSION_COOKIE,
+  OPS_SESSION_RENEW_THRESHOLD_SECONDS,
+} from '../../ops.constants';
 import { CurrentOpsOperator } from '../decorators/current-operator.decorator';
+import { GithubOAuthClient } from '../github-oauth.client';
 import { OpsAuthService } from '../ops-auth.service';
 import { OpsSessionService } from '../ops-session.service';
 
@@ -24,6 +29,10 @@ import { OpsSessionService } from '../ops-session.service';
  * 2. **O papel vem do banco, não do token.** O token só carrega o `sub`
  *    confiável; papel e `canViewSensitive` são relidos a cada requisição, então
  *    revogar permissão tem efeito imediato em vez de esperar os 30 minutos.
+ * 3. **A sessão tem prazo absoluto** (12 h desde o login) e, a cada renovação,
+ *    o pertencimento à organização no GitHub é conferido de novo quando há
+ *    `OPS_GITHUB_ORG_TOKEN`. Antes, quem saía da organização sem ser
+ *    desativado aqui mantinha a sessão renovável indefinidamente.
  */
 @Injectable()
 export class OpsAuthGuard implements CanActivate {
@@ -32,6 +41,7 @@ export class OpsAuthGuard implements CanActivate {
   constructor(
     private readonly session: OpsSessionService,
     private readonly auth: OpsAuthService,
+    private readonly github: GithubOAuthClient,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -46,6 +56,16 @@ export class OpsAuthGuard implements CanActivate {
 
     const payload = await this.session.verify(token);
     if (!payload) throw this.deny('OPS_SESSION_REQUIRED');
+
+    // Sessão sem momento de login (emitida antes do prazo absoluto) ou vencida.
+    const now = Math.floor(Date.now() / 1000);
+    if (
+      typeof payload.auth !== 'number' ||
+      now - payload.auth >= OPS_SESSION_ABSOLUTE_TTL_SECONDS
+    ) {
+      this.session.clearSessionCookie(response);
+      throw this.deny('OPS_SESSION_REQUIRED');
+    }
 
     const operator = await this.auth.findById(payload.sub);
     if (!operator || !operator.active) {
@@ -74,17 +94,29 @@ export class OpsAuthGuard implements CanActivate {
    */
   private async renewIfNearExpiry(
     response: Response,
-    payload: { exp: number },
+    payload: { exp: number; auth: number },
     operator: CurrentOpsOperator,
   ): Promise<void> {
     const secondsLeft = payload.exp - Math.floor(Date.now() / 1000);
     if (secondsLeft > OPS_SESSION_RENEW_THRESHOLD_SECONDS) return;
+
+    // Renovar é o momento de reconfirmar a organização: acontece no máximo a
+    // cada ~15 minutos por operador, e não custa uma chamada por requisição.
+    // Sem resposta do GitHub (ou sem token configurado), a sessão segue até o
+    // prazo absoluto; só um "não é membro" explícito a derruba.
+    const member = await this.github.isOrgMemberByLogin(operator.githubLogin);
+    if (member === false) {
+      this.logger.warn(`Operador ${operator.githubLogin} não pertence mais à organização`);
+      this.session.clearSessionCookie(response);
+      throw this.deny('OPS_SESSION_REQUIRED');
+    }
 
     await this.session.issueSessionCookie(response, {
       sub: operator.id,
       login: operator.githubLogin,
       role: operator.role,
       cvs: operator.canViewSensitive,
+      auth: payload.auth,
     });
   }
 

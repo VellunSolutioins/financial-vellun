@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+import { API_TO_AGENT_KEY_ENV, outgoingInternalKey } from '../../common/internal-keys.util';
+
 import { correlationHeaders } from '../../observability/correlation';
 import { ReprocessRoute } from './reprocess-destinations';
 
@@ -58,7 +60,8 @@ export class AgentReprocessClient {
       /\/+$/,
       '',
     );
-    this.apiKey = config.getOrThrow<string>('INTERNAL_API_KEY');
+    // Chave da direção API→agente (ou a antiga, durante a migração).
+    this.apiKey = outgoingInternalKey(config, API_TO_AGENT_KEY_ENV);
   }
 
   async republish(request: ReprocessRequest): Promise<ReprocessOutcome> {
