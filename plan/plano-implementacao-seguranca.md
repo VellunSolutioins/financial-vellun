@@ -288,12 +288,22 @@ Decisões já tomadas:
 > - **`packageManager`** passou a `pnpm@10.15.0`, que é quem escreveu o `pnpm-lock.yaml` e
 >   instalou o `node_modules`; com 9.0.0 declarado, o pnpm local falhava por store
 >   incompatível.
-> - **Pendente — Next.js:** a auditoria aponta **duas RCE críticas** corrigidas só a partir
->   de 15.5.24 (a linha 14 não tem correção): execução remota em servidor hospedado em
->   Windows e na API de otimização de imagem com AVIF. O app não usa `next/image`, e a
->   hospedagem é Vercel (Linux), o que reduz a exposição, mas não a elimina. A migração para
->   Next 15 exige React 19 e revisão do web inteiro, então fica em branch própria, com
->   verificação manual no navegador.
+> - **Next.js:** feito na branch `feat/seguranca-next15` — Next 14.2 → 15.5.26 e React 18 →
+>   19, que a linha 15 exige. Motivo: **duas RCE críticas** sem correção na linha 14
+>   (servidor hospedado em Windows e API de otimização de imagem com AVIF).
+>   - A migração foi barata porque 19 das 28 páginas são componentes de cliente e nada usa
+>     `cookies()`, `headers()` ou `params` de servidor — as APIs que viraram assíncronas.
+>     Todas as bibliotecas do web já declaram suporte ao React 19.
+>   - Verificado: build, lint, tipos e `next start` respondendo 200 em `/`, `/login`,
+>     `/cadastro`, `/app/verificar-whatsapp` e `/ops/login`, com os headers novos.
+>     **Falta a verificação manual no navegador** (formulários, gráficos e a tela de
+>     verificação do WhatsApp em celular e computador).
+>   - `shell-quote` (crítico, via `concurrently`) resolvido por override do pnpm.
+> - **Passivo de dependências (depois desta etapa):** 60 avisos, **nenhum crítico**; 37 altos,
+>   quase todos transitivos de ferramenta de desenvolvimento (`@nestjs/cli`, `eslint`). Os
+>   dois que merecem decisão própria: `multer` (via `@nestjs/platform-express`, só corrigido
+>   no Nest 11 — a API não usa upload de arquivo) e `lodash` (sem versão corrigida
+>   publicada). Zerado o passivo, o job de auditoria vira bloqueante.
 
 - Migrar `apps/web` para uma linha suportada do Next.js, em branch próprio (§9).
 - `next.config.js` com headers de segurança e CSP em modo `Report-Only`.

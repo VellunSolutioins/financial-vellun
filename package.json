@@ -43,7 +43,10 @@
       "prisma",
       "@scarf/scarf",
       "unrs-resolver"
-    ]
+    ],
+    "overrides": {
+      "shell-quote": "^1.8.4"
+    }
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
