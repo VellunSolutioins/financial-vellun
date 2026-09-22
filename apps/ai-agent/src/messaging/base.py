@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 #: Routing keys lógicas (o nome físico da fila vem da configuração).
 ROUTE_INBOUND = "inbound"
 ROUTE_PROCESSING = "processing"
+ROUTE_OUTBOUND = "outbound"
 
 #: Header que carrega o número da tentativa entre republicações.
 HEADER_ATTEMPT = "x-attempt"

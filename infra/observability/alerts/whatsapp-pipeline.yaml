@@ -45,9 +45,9 @@ groups:
         # consumidor por construção (o TTL devolve a mensagem), e a DLQ tem o
         # alerta próprio abaixo.
         expr: |
-          rabbitmq_detailed_queue_messages_ready{queue=~"whatsapp\\.(inbound|processing)\\.v1"} > 0
+          rabbitmq_detailed_queue_messages_ready{queue=~"whatsapp\\.(inbound|processing|outbound)\\.v1"} > 0
             and on(queue)
-          rabbitmq_detailed_queue_consumers{queue=~"whatsapp\\.(inbound|processing)\\.v1"} == 0
+          rabbitmq_detailed_queue_consumers{queue=~"whatsapp\\.(inbound|processing|outbound)\\.v1"} == 0
         for: 2m
         labels:
           severity: critical
@@ -66,9 +66,9 @@ groups:
         # crescimento de 20/min por 15 minutos é problema — o limiar absoluto
         # confundiria os dois.
         expr: |
-          deriv(rabbitmq_detailed_queue_messages_ready{queue=~"whatsapp\\.(inbound|processing)\\.v1"}[10m]) > 0.3
+          deriv(rabbitmq_detailed_queue_messages_ready{queue=~"whatsapp\\.(inbound|processing|outbound)\\.v1"}[10m]) > 0.3
             and
-          rabbitmq_detailed_queue_messages_ready{queue=~"whatsapp\\.(inbound|processing)\\.v1"} > 100
+          rabbitmq_detailed_queue_messages_ready{queue=~"whatsapp\\.(inbound|processing|outbound)\\.v1"} > 100
         for: 15m
         labels:
           severity: warning

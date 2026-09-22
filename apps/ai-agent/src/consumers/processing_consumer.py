@@ -15,10 +15,13 @@ Garantias:
   processada antes da pergunta;
 - **concorrência limitada** — o número de jobs simultâneos vem de
   ``PROCESSING_CONSUMER_CONCURRENCY`` (o semáforo vive no consumer do broker);
-- **entrega retentável sem reprocessar** — a resposta calculada é guardada antes
-  de ser enviada. Se só o envio falhar, o retry reenvia esse texto: refazer o job
-  repetiria efeitos que não são idempotentes (a confirmação pendente já foi
-  consumida). O job só é marcado como concluído **depois** da entrega.
+- **entrega fora do caminho crítico** — a resposta calculada é publicada em
+  ``whatsapp.outbound.v1`` e o job é ackado. Antes, a chamada à Graph API
+  acontecia aqui, **antes** do ack: com o WhatsApp fora, o job ficava preso no
+  timeout do envio e o retry refazia um trabalho cujos efeitos não se repetem
+  com segurança (a confirmação pendente já tinha sido consumida). A resposta
+  continua guardada em ``job:reply:{jobId}``, que é o que permite uma segunda
+  tentativa reenviar em vez de reprocessar.
 """
 
 from __future__ import annotations
@@ -34,8 +37,9 @@ from ..messaging.base import HEADER_DEFER_COUNT, BrokerMessage, DeferError, Perm
 from ..messaging.contracts import ProcessingJobV1, utcnow
 from ..observability.logging import log_context
 from ..services.distributed_state import StateStore, get_state_store
-from ..services.message_processor import message_processor
+from ..services.message_processor import job_identity, message_processor
 from ..services.metrics import metrics
+from ..services.outbound import outbound_dispatcher
 
 logger = logging.getLogger(__name__)
 
@@ -141,18 +145,36 @@ class MessageProcessingConsumer:
 
         chave_resposta = reply_key(job.job_id)
         reply = await self.store.get(chave_resposta)
+        # O texto guardado no Redis não carrega identidade; numa retomada ela
+        # fica vazia, e a mensagem de saída vai só com telefone e `jobId`. O
+        # entregador não precisa dela (contrato C5) — é contexto de log.
+        identidade: dict[str, str | None] = {}
         if reply is None:
-            reply = await message_processor.process_job(job)
+            token = job_identity.set(identidade)
+            try:
+                reply = await message_processor.process_job(job)
+            finally:
+                job_identity.reset(token)
             await self.store.put(chave_resposta, reply, settings.job_dedupe_ttl_seconds)
         else:
             metrics.incr("jobs_reply_resumed")
             logger.info("Resposta já calculada numa tentativa anterior; só reenviando")
 
         if reply:
-            await message_processor.deliver(job.phone, reply)
+            # Publicar, não enviar: a entrega é de outro consumer. A
+            # deduplicação por `jobId` acontece lá, então uma republicação em
+            # duplicidade daqui não vira uma segunda mensagem no celular.
+            await outbound_dispatcher.send(
+                job.phone,
+                reply,
+                job_id=job.job_id,
+                user_id=identidade.get("userId"),
+                contact_id=identidade.get("contactId"),
+            )
 
         # Só marca como concluído depois que o estado final está persistido
-        # (lançamento criado ou confirmação pendente gravada) e a resposta entregue.
+        # (lançamento criado ou confirmação pendente gravada) e a resposta
+        # entregue ou enfileirada para entrega.
         await self.store.mark(done_key(job.job_id), settings.job_dedupe_ttl_seconds)
         await self.store.forget(chave_resposta)
         metrics.observe_ms("processing_duration_ms", (time.monotonic() - started) * 1000)

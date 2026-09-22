@@ -147,6 +147,7 @@ enum OpsAuditResult {
 enum OpsFailureSource {
   whatsapp_inbound
   whatsapp_processing
+  whatsapp_outbound
 }
 
 /// Ciclo de vida de uma falha no catálogo.

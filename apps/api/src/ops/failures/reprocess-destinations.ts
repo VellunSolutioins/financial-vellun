@@ -3,11 +3,11 @@ import { OpsFailureSource } from '@prisma/client';
 /**
  * Rotas lógicas que o agente aceita em `POST /internal/ops/reprocess`.
  *
- * São os mesmos nomes de `ROUTE_INBOUND`/`ROUTE_PROCESSING` em
+ * São os mesmos nomes de `ROUTE_INBOUND`/`ROUTE_PROCESSING`/`ROUTE_OUTBOUND` em
  * `apps/ai-agent/src/messaging/base.py`. O nome **físico** da fila e a exchange
  * continuam saindo da configuração do agente — nunca trafegam por aqui.
  */
-export type ReprocessRoute = 'inbound' | 'processing';
+export type ReprocessRoute = 'inbound' | 'processing' | 'outbound';
 
 /**
  * Allowlist de destino do reprocessamento.
@@ -16,7 +16,7 @@ export type ReprocessRoute = 'inbound' | 'processing';
  * `sourceQueue` nem o `routingKey`, que são colunas de texto preenchidas a
  * partir do envelope da DLQ. A diferença importa: texto vindo de uma mensagem
  * pode ser manipulado por quem consegue publicar na DLQ, enquanto o enum só
- * assume dois valores que o Postgres aceita.
+ * assume os valores que o Postgres aceita.
  *
  * Nada disso vem do navegador. O pedido do operador carrega o **id da falha** e
  * uma justificativa; o destino é derivado aqui, no servidor.
@@ -24,6 +24,7 @@ export type ReprocessRoute = 'inbound' | 'processing';
 const DESTINOS: Record<OpsFailureSource, ReprocessRoute> = {
   whatsapp_inbound: 'inbound',
   whatsapp_processing: 'processing',
+  whatsapp_outbound: 'outbound',
 };
 
 export function routeForSource(source: OpsFailureSource): ReprocessRoute {

@@ -1,6 +1,7 @@
 # Runbook — pipeline de mensageria do WhatsApp
 
-Operação do fluxo `webhook → whatsapp.inbound.v1 → agrupamento → whatsapp.processing.v1 → lançamento`.
+Operação do fluxo `webhook → whatsapp.inbound.v1 → agrupamento → whatsapp.processing.v1 →
+lançamento → whatsapp.outbound.v1 → resposta`.
 As decisões por trás do desenho estão em [docs/adrs/](adrs/README.md); a visão
 geral e as variáveis de ambiente estão no [README](../README.md).
 
@@ -8,15 +9,16 @@ geral e as variáveis de ambiente estão no [README](../README.md).
 
 ## Mapa rápido
 
-| Recurso               | Nome                                                   | Papel                                           |
-| --------------------- | ------------------------------------------------------ | ----------------------------------------------- |
-| Exchange principal    | `whatsapp.x`                                           | routing keys `inbound` e `processing`           |
-| Exchange de retry     | `whatsapp.retry.x`                                     | recebe as republicações com atraso              |
-| Dead-letter exchange  | `whatsapp.dlx`                                         | routing keys `inbound.dlq` e `processing.dlq`   |
-| Fila de entrada       | `whatsapp.inbound.v1`                                  | mensagens individuais do webhook                |
-| Fila de processamento | `whatsapp.processing.v1`                               | jobs consolidados por telefone                  |
-| Retry                 | `whatsapp.{inbound,processing}.retry.{1,4,16,60,300}s` | TTL fixo, dead-letter de volta à fila de origem |
-| DLQ                   | `whatsapp.{inbound,processing}.dlq`                    | falhas permanentes ou tentativas esgotadas      |
+| Recurso               | Nome                                                            | Papel                                                                                   |
+| --------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Exchange principal    | `whatsapp.x`                                                    | routing keys `inbound`, `processing` e `outbound`                                       |
+| Exchange de retry     | `whatsapp.retry.x`                                              | recebe as republicações com atraso                                                      |
+| Dead-letter exchange  | `whatsapp.dlx`                                                  | routing keys `*.dlq` das três filas                                                     |
+| Fila de entrada       | `whatsapp.inbound.v1`                                           | mensagens individuais do webhook                                                        |
+| Fila de processamento | `whatsapp.processing.v1`                                        | jobs consolidados por telefone                                                          |
+| Fila de saída         | `whatsapp.outbound.v1`                                          | respostas a entregar (ver [ADR-0011](adrs/0011-entrega-assincrona-em-fila-de-saida.md)) |
+| Retry                 | `whatsapp.{inbound,processing,outbound}.retry.{1,4,16,60,300}s` | TTL fixo, dead-letter de volta à fila de origem                                         |
+| DLQ                   | `whatsapp.{inbound,processing,outbound}.dlq`                    | falhas permanentes ou tentativas esgotadas                                              |
 
 Chaves no Redis:
 
@@ -248,7 +250,14 @@ docker exec financial-vellun-rabbitmq rabbitmqctl list_queues name messages cons
 2. Se houver consumers e a fila cresce, aumente
    `PROCESSING_CONSUMER_CONCURRENCY` ou suba mais réplicas de
    `python -m src.worker`.
-3. Se `whatsapp.processing.v1` cresce e `jobs_deferred` está alto, o gargalo é
+3. Se só `whatsapp.outbound.v1` cresce, o problema é **entrega**, não
+   processamento: os lançamentos estão sendo registrados e o que falta é a
+   resposta sair. Olhe `whatsapp_send_failed` e o status que a Graph API está
+   devolvendo. Enquanto o WhatsApp não voltar, não há o que fazer além de
+   deixar a fila acumular — ela drena sozinha, e o `job:sent:{jobId}` impede
+   que a retomada duplique mensagem. Avisar o usuário pelo WhatsApp não é
+   opção: é o canal que está fora.
+4. Se `whatsapp.processing.v1` cresce e `jobs_deferred` está alto, o gargalo é
    contenção por telefone — mais réplicas não ajudam; investigue por que um
    telefone está preso (`proc:lock:*` no Redis).
 

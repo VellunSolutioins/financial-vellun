@@ -109,6 +109,11 @@ KNOWN_COUNTERS = (
     "extractions_idempotent_hit",
     "whatsapp_send_failed",
     "jobs_reply_resumed",
+    # Entrega assíncrona (P3): publicada na fila de saída, entregue, ou
+    # descartada por já ter sido entregue neste `jobId`.
+    "outbound_published",
+    "outbound_sent",
+    "outbound_duplicated",
     # Falha definitiva
     "dlq",
     # Catalogo de falhas (Entrega 5): a DLQ e transporte, o Postgres e a fonte
@@ -134,6 +139,7 @@ KNOWN_TIMINGS = {
     "llm_latency_ms": "llm_latency_seconds",
     "processing_duration_ms": "processing_duration_seconds",
     "receive_to_process_ms": "receive_to_process_seconds",
+    "outbound_send_ms": "outbound_send_seconds",
 }
 
 

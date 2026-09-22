@@ -117,9 +117,18 @@ class Settings(BaseSettings):
     rabbitmq_url: str = "amqp://guest:guest@localhost:5672/"
     rabbitmq_inbound_queue: str = "whatsapp.inbound.v1"
     rabbitmq_processing_queue: str = "whatsapp.processing.v1"
+    rabbitmq_outbound_queue: str = "whatsapp.outbound.v1"
     rabbitmq_prefetch: int = 10
     inbound_consumer_concurrency: int = 5
     processing_consumer_concurrency: int = 3
+    # Entregas simultâneas ao WhatsApp. Precisa caber no rate limit da Meta:
+    # `réplicas do worker × esta concorrência` é o número de chamadas em voo.
+    outbound_consumer_concurrency: int = 3
+    # "queue" = a resposta é publicada em `whatsapp.outbound.v1` e entregue por
+    # um consumer próprio (P3); "direct" = entrega no próprio caminho que a
+    # calculou, como antes. O padrão é a fila; `direct` fica como rollback sem
+    # deploy de código, no padrão da ADR-0009.
+    outbound_delivery: str = "queue"  # "queue" | "direct"
     message_max_retries: int = 5
     message_retry_base_seconds: float = 1.0
     message_retry_max_seconds: float = 300.0
@@ -175,6 +184,17 @@ class Settings(BaseSettings):
     def is_broker_pipeline(self) -> bool:
         """`True` quando o webhook publica em fila (pipeline novo)."""
         return (self.message_pipeline or "broker").strip().lower() != "legacy"
+
+    @property
+    def is_queued_outbound(self) -> bool:
+        """`True` quando a resposta vai para `whatsapp.outbound.v1`.
+
+        Amarrado ao pipeline de broker: no caminho legado não há fila nenhuma,
+        então publicar a resposta seria enviá-la para lugar nenhum.
+        """
+        if not self.is_broker_pipeline:
+            return False
+        return (self.outbound_delivery or "queue").strip().lower() != "direct"
 
     @model_validator(mode="after")
     def _recusar_configuracao_insegura(self) -> "Settings":

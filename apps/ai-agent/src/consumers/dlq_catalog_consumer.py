@@ -37,8 +37,8 @@ from ..messaging.contracts import DlqEnvelopeV1
 from ..observability.logging import log_context
 from ..services.distributed_state import get_state_store
 from ..services.failure_catalog import failure_catalog
-from ..services.message_processor import message_processor
 from ..services.metrics import metrics
+from ..services.outbound import outbound_dispatcher
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 _SOURCE_POR_SUFIXO = {
     "inbound": "whatsapp_inbound",
     "processing": "whatsapp_processing",
+    "outbound": "whatsapp_outbound",
 }
 
 
@@ -123,11 +124,22 @@ class DlqCatalogMessageConsumer:
         A janela e marcada **antes** do envio: se o proprio WhatsApp e o que esta
         fora, cada falha da DLQ tentaria de novo e seguraria o consumer no timeout
         do envio. Assim e no maximo uma tentativa por telefone por janela.
+
+        **Falha vinda da propria fila de saida nao gera aviso.** O aviso e uma
+        mensagem de WhatsApp, entregue pela mesma fila que acabou de falhar: ele
+        falharia igual, cairia na DLQ e geraria outro aviso. O cooldown
+        atrasaria o ciclo, nao o impediria. Quem precisa saber que a entrega
+        parou e o operador, pelo painel e pelo alerta de profundidade da DLQ —
+        nao o usuario, por um canal que esta fora do ar.
         """
         cooldown = settings.dlq_user_notice_cooldown_seconds
         payload = envelope.payload if isinstance(envelope.payload, dict) else {}
         phone = payload.get("phone")
         if cooldown <= 0 or not isinstance(phone, str) or not phone:
+            return
+        if source_from_queue(envelope.source_queue) == "whatsapp_outbound":
+            metrics.incr("dlq_user_notice_suppressed")
+            logger.info("Falha da fila de saida: aviso suprimido para nao realimentar a DLQ")
             return
 
         try:
@@ -137,7 +149,7 @@ class DlqCatalogMessageConsumer:
                 metrics.incr("dlq_user_notice_suppressed")
                 return
             await store.mark(chave, cooldown)
-            await message_processor.deliver(phone, DLQ_USER_NOTICE)
+            await outbound_dispatcher.send(phone, DLQ_USER_NOTICE, kind="notice")
             metrics.incr("dlq_user_notified")
         except Exception:  # noqa: BLE001 - a falha ja esta catalogada; o aviso e extra
             metrics.incr("dlq_user_notice_failed")

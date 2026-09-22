@@ -46,6 +46,15 @@ HELP_MESSAGE = (
 #: ``process_job`` a ativa — ver a docstring dele.
 _reply_outbox: ContextVar[list[str] | None] = ContextVar("reply_outbox", default=None)
 
+#: Preenchido com ``{"userId", "contactId"}`` assim que o contato é resolvido,
+#: para o consumer de processamento anexar identidade à mensagem de saída sem
+#: consultar de novo. Quem abre o slot é o **chamador** (o consumer), e não este
+#: módulo: assim um dublê de ``process_job`` num teste simplesmente não o
+#: preenche, em vez de quebrar.
+job_identity: ContextVar[dict[str, str | None] | None] = ContextVar(
+    "job_identity", default=None
+)
+
 AFFIRMATIVE = ("sim", "isso", "confirmo", "ok", "pode", "correto", "certo", "exato")
 NEGATIVE = ("não", "nao", "cancela", "cancelar", "errado", "deixa")
 
@@ -150,6 +159,10 @@ class MessageProcessor:
             return await self._respond(phone, ALREADY_LINKED_MESSAGE)
 
         user_id = contact["userId"]
+        slot = job_identity.get()
+        if slot is not None:
+            slot["userId"] = user_id
+            slot["contactId"] = contact.get("id")
 
         # Bloqueia antes de qualquer operação paga (LLM/criação) se sem assinatura.
         allowed, block_message = await subscription_gate.evaluate(user_id)
@@ -286,12 +299,22 @@ class MessageProcessor:
         return await self._respond(phone, response_prefix + result["message"])
 
     async def respond(self, phone: str, text: str) -> str:
-        """Envia a resposta ao usuário — ou a guarda, dentro de ``process_job``."""
+        """Responde ao usuário — ou guarda o texto, dentro de ``process_job``.
+
+        Fora de um job (avisos do consumer de entrada, caminho legado), a
+        resposta vai para o despachante de saída, que enfileira ou entrega
+        conforme ``OUTBOUND_DELIVERY``. Nenhum ponto do domínio chama o
+        messenger direto.
+        """
         outbox = _reply_outbox.get()
         if outbox is not None:
             outbox.append(text)
             return text
-        return await self.deliver(phone, text)
+
+        from .outbound import outbound_dispatcher
+
+        await outbound_dispatcher.send(phone, text, kind="notice")
+        return text
 
     async def deliver(self, phone: str, text: str) -> str:
         """Entrega ao usuário e registra como outbound. **Levanta** se não entregar."""

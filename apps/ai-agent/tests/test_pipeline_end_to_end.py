@@ -21,7 +21,6 @@ from src.config import settings
 from src.consumers import DlqCatalogMessageConsumer
 from src.main import app
 from src.messaging.base import BrokerMessage, PermanentError
-from src.messaging.contracts import ProcessingJobV1
 from src.schemas.financial_intent import FinancialIntent, IntentType, TransactionTypeEnum
 from src.services.distributed_state import get_state_store
 
@@ -163,15 +162,21 @@ async def test_mensagem_do_webhook_vira_lancamento_e_resposta(pipeline_no_ar, mu
     assert mundo.entregues == [(PHONE, "Lançamento criado!")]
 
 
-async def test_recusa_do_whatsapp_chega_na_dlq_e_o_usuario_e_avisado(
-    pipeline_no_ar, mundo, broker, monkeypatch
+async def test_recusa_do_whatsapp_isola_a_entrega_sem_perder_o_lancamento(
+    pipeline_no_ar, mundo, broker
 ):
-    """O incidente, com as correções: a falha deixa de ser silêncio.
+    """O incidente, com as correções e com a entrega assíncrona (P3).
 
-    Antes, a recusa da Meta virava um ``warning``, o job era marcado como
-    concluído e o usuário não recebia nada. Agora o job cai na DLQ sem ser dado
-    como concluído, e o catálogo de falhas avisa o usuário assim que o envio
-    volta a funcionar.
+    Antes de tudo, a recusa da Meta virava um ``warning``, o job era marcado
+    como concluído e o usuário não recebia nada. Depois, a recusa derrubava o
+    **job inteiro** na DLQ — nada se perdia, mas um problema de entrega ficava
+    misturado com problema de processamento, e reprocessar refazia um trabalho
+    que já tinha efeito.
+
+    Agora as duas metades são separadas: o processamento conclui e é ackado (o
+    lançamento está criado, a confirmação pendente já foi consumida), e o que
+    falha é só a entrega — numa fila própria, com DLQ própria, reprocessável
+    sozinha.
     """
     mundo.recusa = PermanentError("WhatsApp Cloud API recusou envio: HTTP 401")
 
@@ -179,13 +184,70 @@ async def test_recusa_do_whatsapp_chega_na_dlq_e_o_usuario_e_avisado(
     await esperar(lambda: broker.dlq)
 
     envelope = broker.dlq[0]
-    assert envelope.source_queue == "processing"
+    assert envelope.source_queue == "outbound"
     assert envelope.permanent is True
     assert len(mundo.criados) == 1  # o lançamento existe; só a entrega falhou
-    job = ProcessingJobV1.model_validate(envelope.payload)
-    assert await get_state_store().exists(f"job:done:{job.job_id}") is False
 
-    # O catálogo de falhas (no RabbitMQ, um consumer da DLQ) recebe o envelope.
+    # O job foi concluído: refazê-lo não traria nada de volta, e traria o risco
+    # de repetir efeito. O que sobrou para reprocessar é a mensagem de saída.
+    job_id = envelope.payload["jobId"]
+    assert await get_state_store().exists(f"job:done:{job_id}") is True
+    assert envelope.payload["phone"] == PHONE
+
+
+async def test_falha_de_entrega_nao_gera_aviso_pelo_canal_que_caiu(
+    pipeline_no_ar, mundo, broker, monkeypatch
+):
+    """Aviso de DLQ vinda da fila de saída é suprimido.
+
+    O aviso é uma mensagem de WhatsApp, entregue pela mesma fila que acabou de
+    falhar: ele falharia igual, cairia na DLQ e geraria outro aviso. Quem
+    precisa saber que a entrega parou é o operador, pelo painel e pelo alerta de
+    profundidade — não o usuário, por um canal fora do ar.
+    """
+    mundo.recusa = PermanentError("WhatsApp Cloud API recusou envio: HTTP 401")
+    assert (await postar_webhook()).status_code == 202
+    await esperar(lambda: broker.dlq)
+    envelope = broker.dlq[0]
+
+    import src.consumers.dlq_catalog_consumer as catalogo
+
+    class Catalogo:
+        def __init__(self) -> None:
+            self.capturadas: list[dict] = []
+
+        async def capture(self, **kwargs):
+            self.capturadas.append(kwargs)
+            return {"id": "falha-1", "duplicate": False}
+
+    registro = Catalogo()
+    monkeypatch.setattr(catalogo, "failure_catalog", registro)
+    mundo.recusa = None
+    mundo.entregues.clear()
+
+    await DlqCatalogMessageConsumer("whatsapp.outbound.dlq", "outbound.dlq").handle(
+        BrokerMessage(
+            body=envelope.model_dump_json(by_alias=True).encode(),
+            routing_key="outbound.dlq",
+        )
+    )
+
+    # Catalogada para o operador, e rotulada como falha de entrega.
+    assert len(registro.capturadas) == 1
+    assert registro.capturadas[0]["source"] == "whatsapp_outbound"
+    # E nenhuma mensagem nova para o usuário.
+    assert mundo.entregues == []
+
+
+async def test_falha_de_processamento_continua_avisando_o_usuario(
+    pipeline_no_ar, mundo, monkeypatch
+):
+    """A supressão vale só para a fila de saída, não para a de processamento.
+
+    Uma mensagem que nunca chegou a ser processada continua sendo silêncio do
+    ponto de vista do usuário — e é esse silêncio que o aviso existe para
+    quebrar.
+    """
     import src.consumers.dlq_catalog_consumer as catalogo
 
     class Catalogo:
@@ -193,13 +255,27 @@ async def test_recusa_do_whatsapp_chega_na_dlq_e_o_usuario_e_avisado(
             return {"id": "falha-1", "duplicate": False}
 
     monkeypatch.setattr(catalogo, "failure_catalog", Catalogo())
-    mundo.recusa = None
+
+    envelope = catalogo.DlqEnvelopeV1(
+        payload={"phone": PHONE, "jobId": "job-1"},
+        sourceQueue="whatsapp.processing.dlq",
+        routingKey="processing.dlq",
+        attempts=5,
+        errorType="TimeoutError",
+        errorMessage="API principal fora",
+    )
+
     await DlqCatalogMessageConsumer("whatsapp.processing.dlq", "processing.dlq").handle(
         BrokerMessage(
             body=envelope.model_dump_json(by_alias=True).encode(),
             routing_key="processing.dlq",
         )
     )
+
+    # O aviso também passa pela fila de saída: por isso a espera. Quando o
+    # canal está de pé, essa volta extra não muda nada para o usuário — e é o
+    # que garante que exista um ponto só por onde toda resposta sai.
+    await esperar(lambda: mundo.entregues)
 
     assert len(mundo.entregues) == 1
     phone, texto = mundo.entregues[0]

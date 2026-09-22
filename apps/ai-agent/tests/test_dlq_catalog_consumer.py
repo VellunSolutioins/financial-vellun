@@ -41,13 +41,19 @@ class FakeCatalogo:
 
 
 class FakeEntrega:
-    """Dublê do `message_processor.deliver`. `erro` simula o WhatsApp recusando."""
+    """Dublê do despachante de saída. `erro` simula o WhatsApp recusando.
+
+    Desde o P3 o aviso não é entregue aqui: ele é publicado na fila de saída e
+    entregue pelo consumer de outbound. O que o teste continua verificando é o
+    mesmo — que o aviso sai, uma vez por telefone por janela, e que falhar nele
+    não impede o ack.
+    """
 
     def __init__(self) -> None:
         self.enviadas: list[tuple[str, str]] = []
         self.erro: BaseException | None = None
 
-    async def deliver(self, phone, text):
+    async def send(self, phone, text, **kwargs):
         if self.erro is not None:
             raise self.erro
         self.enviadas.append((phone, text))
@@ -59,7 +65,7 @@ def entrega(monkeypatch):
     fake = FakeEntrega()
     import src.consumers.dlq_catalog_consumer as module
 
-    monkeypatch.setattr(module, "message_processor", fake)
+    monkeypatch.setattr(module, "outbound_dispatcher", fake)
     return fake
 
 

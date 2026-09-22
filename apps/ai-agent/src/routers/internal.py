@@ -12,8 +12,8 @@ from pydantic import BaseModel, ValidationError
 
 from ..bootstrap import pipeline
 from ..config import settings
-from ..messaging.base import ROUTE_INBOUND, ROUTE_PROCESSING, PublishError
-from ..messaging.contracts import InboundMessageV1, ProcessingJobV1
+from ..messaging.base import ROUTE_INBOUND, ROUTE_OUTBOUND, ROUTE_PROCESSING, PublishError
+from ..messaging.contracts import InboundMessageV1, OutboundMessageV1, ProcessingJobV1
 from ..schemas.ops import ReprocessRequest
 from ..services.metrics import metrics
 
@@ -23,12 +23,13 @@ router = APIRouter(prefix="/internal", tags=["internal"])
 
 #: Allowlist de destinos do reprocessamento: rota lógica -> contrato publicado.
 #:
-#: Só existem duas, e a única forma de acrescentar uma terceira é editando este
-#: mapa. Exchange e nome físico de fila continuam saindo da configuração, nunca
-#: do pedido — quem chama escolhe entre duas rotas conhecidas, não um destino.
+#: A única forma de acrescentar uma rota é editando este mapa. Exchange e nome
+#: físico de fila continuam saindo da configuração, nunca do pedido — quem chama
+#: escolhe entre rotas conhecidas, não um destino.
 _DESTINOS: dict[str, type[BaseModel]] = {
     ROUTE_INBOUND: InboundMessageV1,
     ROUTE_PROCESSING: ProcessingJobV1,
+    ROUTE_OUTBOUND: OutboundMessageV1,
 }
 
 
