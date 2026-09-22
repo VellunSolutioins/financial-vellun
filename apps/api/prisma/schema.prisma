@@ -4,7 +4,20 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+  // Caminho da aplicação: pode passar por pooler (PgBouncer em transaction
+  // mode), e por isso carrega `pgbouncer=true`, `connection_limit` e
+  // `pool_timeout` — ver docs/connection-budget.md.
+  url       = env("DATABASE_URL")
+  // Caminho das migrations e do `prisma db push`: conexão direta, sem pooler.
+  // `migrate deploy` usa advisory lock e prepared statements nomeados, que um
+  // pooler em transaction mode não preserva entre comandos — a migration
+  // falharia de formas difíceis de diagnosticar (contrato C7).
+  //
+  // Declarada, a variável passa a ser **obrigatória**: o Prisma recusa o schema
+  // sem ela, inclusive em desenvolvimento. É de propósito — em dev ela aponta
+  // para o mesmo Postgres de `DATABASE_URL`, e o que não queremos é alguém
+  // descobrir em produção que a migration foi pelo pooler.
+  directUrl = env("DIRECT_URL")
 }
 
 // ── Enums ─────────────────────────────────────────────────────────────────────
@@ -354,9 +367,24 @@ model Transaction {
 
   aiExtractedTransactions AiExtractedTransaction[]
 
-  @@index([userId])
-  @@index([transactionDate])
-  @@index([type])
+  // Todo acesso a lançamento é escopado por usuário — não existe consulta que
+  // varra a tabela inteira. Por isso os índices úteis começam em `userId`, e os
+  // de coluna única que existiam antes (`userId`, `transactionDate`, `type`)
+  // eram, na prática, o mesmo índice pior: o planner escolhia um deles e
+  // filtrava o resto lendo heap.
+  //
+  // Listagem (ordenada por data) e série diária do dashboard.
+  @@index([userId, transactionDate])
+  // Agregações do dashboard (soma por tipo no período) e as listas de contas a
+  // pagar/receber, que filtram por `status: pending`. `status` antes de `type`
+  // porque toda consulta deste grupo fixa os dois.
+  @@index([userId, status, type, transactionDate])
+  // "Lançamentos recentes" do dashboard: ordena por `createdAt`, não por
+  // `transactionDate` — um lançamento de ontem registrado agora aparece no topo.
+  @@index([userId, createdAt])
+  // Mantidos: são os lados "um" das relações, usados por join e pela checagem
+  // de integridade ao excluir conta/categoria. Nenhum começa por `userId`, então
+  // nenhum composto acima os cobre.
   @@index([categoryId])
   @@index([accountId])
   @@map("transactions")
@@ -422,6 +450,10 @@ model AiConversation {
   whatsappContact WhatsappContact @relation(fields: [whatsappContactId], references: [id], onDelete: Cascade)
   messages        AiMessage[]
 
+  // A conversa ativa de um contato é lida em toda mensagem recebida — inclusive
+  // dentro do `SELECT ... FOR UPDATE` que serializa a criação. Sem índice
+  // nenhum, isso era um seq scan por mensagem, e a tabela só cresce.
+  @@index([whatsappContactId, status, createdAt])
   @@map("ai_conversations")
 }
 

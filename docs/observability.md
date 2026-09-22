@@ -63,10 +63,10 @@ forwarder que leia stdout de outro container, ou a própria aplicação emitir.
 
 Escolhemos o segundo, e a troca é honesta:
 
-| | A favor | Contra |
-| --- | --- | --- |
-| App empurra | Log sai já estruturado e correlacionado, sem parsear texto. Credencial do Grafana fica só no Alloy. | O processo conhece o endereço do Alloy. Buffer em memória pode descartar sob pressão. |
-| Forwarder lendo stdout | App não sabe que observabilidade existe. | No Railway, um container não lê o stdout de outro — exigiria sidecar por serviço. |
+|                        | A favor                                                                                             | Contra                                                                                |
+| ---------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| App empurra            | Log sai já estruturado e correlacionado, sem parsear texto. Credencial do Grafana fica só no Alloy. | O processo conhece o endereço do Alloy. Buffer em memória pode descartar sob pressão. |
+| Forwarder lendo stdout | App não sabe que observabilidade existe.                                                            | No Railway, um container não lê o stdout de outro — exigiria sidecar por serviço.     |
 
 As três invariantes do transporte (`apps/api/src/observability/loki-transport.ts`
 e `apps/ai-agent/src/observability/loki_handler.py`):
@@ -94,16 +94,16 @@ orçamento é medido, não estimado.
 
 ### Medição (2026-09-09, uma réplica de cada serviço, nesta máquina)
 
-| job               | bruto | enviado | cortado |
-| ----------------- | ----: | ------: | ------: |
-| api               |   153 |     153 |       – |
-| ai-agent          |   142 |     142 |       – |
-| ai-agent-worker   |   142 |     142 |       – |
-| rabbitmq          | 2.682 |     263 |  −2.419 |
-| postgres          | 1.116 |     709 |    −407 |
-| redis             |   649 |     330 |    −319 |
-| alloy             |   571 |     535 |     −36 |
-| **total**         | 5.455 | **2.274** | −3.181 |
+| job             | bruto |   enviado | cortado |
+| --------------- | ----: | --------: | ------: |
+| api             |   153 |       153 |       – |
+| ai-agent        |   142 |       142 |       – |
+| ai-agent-worker |   142 |       142 |       – |
+| rabbitmq        | 2.682 |       263 |  −2.419 |
+| postgres        | 1.116 |       709 |    −407 |
+| redis           |   649 |       330 |    −319 |
+| alloy           |   571 |       535 |     −36 |
+| **total**       | 5.455 | **2.274** |  −3.181 |
 
 Com a API aquecida (55 rotas registradas × ~3 status × 13 séries do histograma),
 a projeção é **~4.400 séries, 44% do teto** — folga suficiente para uma segunda
@@ -120,11 +120,11 @@ Reproduzir a medição: ver [Verificação local](#verificação-local) abaixo.
 
 Em `prometheus.relabel "corta_ruido"` (`infra/observability/alloy/config.alloy`):
 
-| Regra | Devolve | Perda aceitável porque |
-| --- | ---: | --- |
-| `erlang_vm_(allocators\|msacc_.*\|dist_.*\|statistics_garbage_collection)` | ~2.370 | Diagnostica a VM Erlang, não o nosso pipeline. O painel do RabbitMQ mostra ao vivo se precisar. |
-| `redis_(latency_percentiles\|commands_latencies)_.*` | ~320 | Usamos Redis para agrupamento e lock; interessa `redis_up`, memória e conexões — não a distribuição por comando. |
-| `pg_statio_user_.*` | ~150 | Mantemos `pg_stat_user_tables_*`, que responde "falta índice aqui?". |
+| Regra                                                                      | Devolve | Perda aceitável porque                                                                                           |
+| -------------------------------------------------------------------------- | ------: | ---------------------------------------------------------------------------------------------------------------- |
+| `erlang_vm_(allocators\|msacc_.*\|dist_.*\|statistics_garbage_collection)` |  ~2.370 | Diagnostica a VM Erlang, não o nosso pipeline. O painel do RabbitMQ mostra ao vivo se precisar.                  |
+| `redis_(latency_percentiles\|commands_latencies)_.*`                       |    ~320 | Usamos Redis para agrupamento e lock; interessa `redis_up`, memória e conexões — não a distribuição por comando. |
+| `pg_statio_user_.*`                                                        |    ~150 | Mantemos `pg_stat_user_tables_*`, que responde "falta índice aqui?".                                             |
 
 > **Uma regra que existiu e foi removida.** Havia um descarte de `pg_settings_.*`
 > (255 séries de configuração do servidor, constantes entre scrapes). Ele saiu
@@ -159,12 +159,12 @@ Confirmadas na documentação oficial em **2026-09-09**. `latest` não é usado:
 exporter que renomeia métrica entre versões esvazia dashboard e alerta em
 silêncio.
 
-| Componente | Versão | Lançamento |
-| --- | --- | --- |
-| `grafana/alloy` | `v1.19.2` | 2026-08-26 |
-| `prometheuscommunity/postgres-exporter` | `v0.20.1` | 2026-07-07 |
-| `oliver006/redis_exporter` | `v1.91.1` | 2026-09-07 |
-| `rabbitmq_prometheus` | plugin do `rabbitmq:3.13` | — |
+| Componente                              | Versão                    | Lançamento |
+| --------------------------------------- | ------------------------- | ---------- |
+| `grafana/alloy`                         | `v1.19.2`                 | 2026-08-26 |
+| `prometheuscommunity/postgres-exporter` | `v0.20.1`                 | 2026-07-07 |
+| `oliver006/redis_exporter`              | `v1.91.1`                 | 2026-09-07 |
+| `rabbitmq_prometheus`                   | plugin do `rabbitmq:3.13` | —          |
 
 Limites do free tier do Grafana Cloud na mesma data: **10 mil séries ativas/mês**,
 **50 GB de log/mês**, retenção de **14 dias** para métricas, logs e traces. Esses
@@ -182,22 +182,22 @@ Nas variáveis do Railway, nunca no repositório.
 
 ### Alloy
 
-| Variável | Para quê |
-| --- | --- |
-| `GRAFANA_CLOUD_PROM_URL` / `_USER` | endpoint e id da instância do Prometheus |
-| `GRAFANA_CLOUD_LOKI_URL` / `_USER` | endpoint e id da instância do Loki |
-| `GRAFANA_CLOUD_TOKEN` | token com escopo de **escrita** apenas |
-| `METRICS_TOKEN` | o mesmo aceito por `/metrics` dos três serviços |
-| `ENVIRONMENT` | vira o label `env` de toda série e todo log |
+| Variável                           | Para quê                                        |
+| ---------------------------------- | ----------------------------------------------- |
+| `GRAFANA_CLOUD_PROM_URL` / `_USER` | endpoint e id da instância do Prometheus        |
+| `GRAFANA_CLOUD_LOKI_URL` / `_USER` | endpoint e id da instância do Loki              |
+| `GRAFANA_CLOUD_TOKEN`              | token com escopo de **escrita** apenas          |
+| `METRICS_TOKEN`                    | o mesmo aceito por `/metrics` dos três serviços |
+| `ENVIRONMENT`                      | vira o label `env` de toda série e todo log     |
 
 ### Serviços de aplicação
 
-| Variável | Para quê |
-| --- | --- |
-| `METRICS_TOKEN` | Bearer exigido em `/metrics`. **Mesmo valor** nos três. |
-| `PORT` | `3001` na API, `8010` no agente. O Alloy scrapa porta fixa; sem ela o Railway pode atribuir outra e o alvo fica `down`. |
-| `LOKI_PUSH_URL` | `http://alloy.railway.internal:3100`. Sem ela, sem envio de log. Preencher **depois** de o Alloy estar no ar. |
-| `WORKER_METRICS_PORT` | porta do HTTP mínimo do worker (padrão 8011) |
+| Variável              | Para quê                                                                                                                |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `METRICS_TOKEN`       | Bearer exigido em `/metrics`. **Mesmo valor** nos três.                                                                 |
+| `PORT`                | `3001` na API, `8010` no agente. O Alloy scrapa porta fixa; sem ela o Railway pode atribuir outra e o alvo fica `down`. |
+| `LOKI_PUSH_URL`       | `http://alloy.railway.internal:3100`. Sem ela, sem envio de log. Preencher **depois** de o Alloy estar no ar.           |
+| `WORKER_METRICS_PORT` | porta do HTTP mínimo do worker (padrão 8011)                                                                            |
 
 ### Painel de operações (só na API)
 
@@ -205,9 +205,9 @@ O painel **não consulta** o Grafana: ele leva até lá. Por isso basta a URL
 pública da organização, sem token de leitura no backend. Ausentes, os atalhos
 somem da tela em vez de virarem link quebrado.
 
-| Variável | Para quê |
-| --- | --- |
-| `OPS_GRAFANA_URL` | base da organização, ex.: `https://SEU-ORG.grafana.net`. Monta os links dos quatro dashboards. |
+| Variável                          | Para quê                                                                                                                                                              |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OPS_GRAFANA_URL`                 | base da organização, ex.: `https://SEU-ORG.grafana.net`. Monta os links dos quatro dashboards.                                                                        |
 | `OPS_GRAFANA_LOKI_DATASOURCE_UID` | UID da fonte Loki (Connections → Data sources → a URL termina em `/datasources/edit/<uid>`). Sem ela não há Explore filtrado por `correlationId` no detalhe da falha. |
 
 ### Contas de monitoramento com privilégio mínimo

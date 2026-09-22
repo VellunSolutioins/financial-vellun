@@ -7,14 +7,14 @@ Origem: etapa S4 do [plano de segurança](../plan/plano-implementacao-seguranca.
 
 ## O que é guardado e por quanto tempo
 
-| Dado | Onde | Retenção | Como é aplicada |
-| --- | --- | --- | --- |
-| Texto das mensagens do WhatsApp | `ai_messages.content` | 90 dias (`AI_CONTENT_RETENTION_DAYS`) | Job diário às 4h substitui o texto por `[conteúdo removido por retenção]`; a linha permanece |
-| Texto que originou uma extração | `ai_extracted_transactions.raw_input` | 90 dias (a mesma variável) | Mesmo job |
-| Falhas do pipeline | `ops_failed_messages` | `retention_until` da própria linha | Job diário às 3h apaga a linha |
-| Trilha de mudanças de identidade | `user_security_events` | Sem expurgo | Append-only: só sai junto com a conta |
-| Trilha de operações | `ops_audit_log` | Sem expurgo | Append-only |
-| Lançamentos, contas, categorias | tabelas do produto | Enquanto a conta existir | Exclusão de conta (LGPD) |
+| Dado                             | Onde                                  | Retenção                              | Como é aplicada                                                                              |
+| -------------------------------- | ------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Texto das mensagens do WhatsApp  | `ai_messages.content`                 | 90 dias (`AI_CONTENT_RETENTION_DAYS`) | Job diário às 4h substitui o texto por `[conteúdo removido por retenção]`; a linha permanece |
+| Texto que originou uma extração  | `ai_extracted_transactions.raw_input` | 90 dias (a mesma variável)            | Mesmo job                                                                                    |
+| Falhas do pipeline               | `ops_failed_messages`                 | `retention_until` da própria linha    | Job diário às 3h apaga a linha                                                               |
+| Trilha de mudanças de identidade | `user_security_events`                | Sem expurgo                           | Append-only: só sai junto com a conta                                                        |
+| Trilha de operações              | `ops_audit_log`                       | Sem expurgo                           | Append-only                                                                                  |
+| Lançamentos, contas, categorias  | tabelas do produto                    | Enquanto a conta existir              | Exclusão de conta (LGPD)                                                                     |
 
 **Por que o texto some e a linha fica:** o lançamento criado já vive em
 `transactions`, e o contexto que o agente usa é de dias. Manter a linha preserva

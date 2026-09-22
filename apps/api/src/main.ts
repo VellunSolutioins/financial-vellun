@@ -104,6 +104,12 @@ async function bootstrap() {
     SwaggerModule.setup('api/docs', app, document);
   }
 
+  // Sem isto o Nest ignora SIGTERM: `onModuleDestroy` não roda, o pool do
+  // Prisma não é devolvido e o Redis fica pendurado até o timeout do servidor.
+  // Num deploy com sobreposição, as conexões da instância velha somam às da
+  // nova exatamente quando o `max_connections` está mais apertado.
+  app.enableShutdownHooks();
+
   const port = process.env.PORT ?? process.env.API_PORT ?? 3001;
 
   try {

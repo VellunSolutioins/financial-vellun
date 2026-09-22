@@ -47,7 +47,9 @@ export class CategoriesService {
 
     const hasTransactions = await this.prisma.transaction.count({ where: { categoryId: id } });
     if (hasTransactions > 0) {
-      throw new BadRequestException('Categoria possui lançamentos vinculados e não pode ser excluída');
+      throw new BadRequestException(
+        'Categoria possui lançamentos vinculados e não pode ser excluída',
+      );
     }
 
     return this.prisma.category.delete({ where: { id } });

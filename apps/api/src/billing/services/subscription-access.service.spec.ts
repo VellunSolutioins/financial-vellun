@@ -8,7 +8,7 @@ const PAST = new Date('2026-06-10T12:00:00.000Z');
 
 function makeService(findFirst: jest.Mock, enforced = 'true') {
   const prisma = { subscription: { findFirst } } as any;
-  const config = { get: jest.fn((_k: string, d?: string) => (enforced ?? d)) } as any;
+  const config = { get: jest.fn((_k: string, d?: string) => enforced ?? d) } as any;
   return new SubscriptionAccessService(prisma, config);
 }
 

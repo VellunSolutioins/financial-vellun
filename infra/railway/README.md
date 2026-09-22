@@ -4,14 +4,14 @@ Um arquivo por serviço. O Railway não lê esta pasta sozinho: em cada serviço
 **Settings → Config as code → Railway config file**, aponte para o caminho
 correspondente. Sem isso, os arquivos aqui são só documentação.
 
-| Serviço no Railway                       | Arquivo                      | Papel                                   |
-| ---------------------------------------- | ---------------------------- | --------------------------------------- |
-| `financial-vellun-api`                   | `api.toml`                   | NestJS + Prisma                         |
-| `financial-vellun-web`                   | `web.toml`                   | Next.js (enquanto não está na Vercel)   |
-| `financial-vellun-ai-agent`              | `ai-agent.toml`              | Webhook do WhatsApp (HTTP)              |
-| `financial-vellun-ai-agent-worker`       | `ai-agent-worker.toml`       | Consumers das filas                     |
-| `alloy`                                  | —                            | Ver `docs/observability.md`             |
-| `rabbitmq`, `postgres`, `redis`          | —                            | Plugins/imagens do próprio Railway      |
+| Serviço no Railway                 | Arquivo                | Papel                                 |
+| ---------------------------------- | ---------------------- | ------------------------------------- |
+| `financial-vellun-api`             | `api.toml`             | NestJS + Prisma                       |
+| `financial-vellun-web`             | `web.toml`             | Next.js (enquanto não está na Vercel) |
+| `financial-vellun-ai-agent`        | `ai-agent.toml`        | Webhook do WhatsApp (HTTP)            |
+| `financial-vellun-ai-agent-worker` | `ai-agent-worker.toml` | Consumers das filas                   |
+| `alloy`                            | —                      | Ver `docs/observability.md`           |
+| `rabbitmq`, `postgres`, `redis`    | —                      | Plugins/imagens do próprio Railway    |
 
 O nome do serviço importa: ele vira o endereço na rede privada
 (`<serviço>.railway.internal`) e é o que o `config.alloy` scrapa. Renomear um
@@ -38,14 +38,14 @@ Depois de subir o worker, descomente o alvo dele em
 
 Nada além do que precisa ser público é público.
 
-| Serviço                | Domínio público | Por quê                                                                 |
-| ---------------------- | --------------- | ----------------------------------------------------------------------- |
-| `web`                  | **sim**         | é o produto                                                             |
-| `api`                  | **sim**         | o browser chama direto                                                  |
-| `ai-agent`             | **sim**         | a Meta entrega o webhook nele (assinado, `X-Hub-Signature-256`)          |
-| `ai-agent-worker`      | não             | só consome fila; a 8011 é health e metrics                              |
-| `alloy`                | não             | recebe log e scrapa pela rede privada                                   |
-| `postgres`, `redis`, `rabbitmq` | não    | nunca expostos; acesso só por `*.railway.internal`                      |
+| Serviço                         | Domínio público | Por quê                                                         |
+| ------------------------------- | --------------- | --------------------------------------------------------------- |
+| `web`                           | **sim**         | é o produto                                                     |
+| `api`                           | **sim**         | o browser chama direto                                          |
+| `ai-agent`                      | **sim**         | a Meta entrega o webhook nele (assinado, `X-Hub-Signature-256`) |
+| `ai-agent-worker`               | não             | só consome fila; a 8011 é health e metrics                      |
+| `alloy`                         | não             | recebe log e scrapa pela rede privada                           |
+| `postgres`, `redis`, `rabbitmq` | não             | nunca expostos; acesso só por `*.railway.internal`              |
 
 Conferir a cada serviço novo:
 

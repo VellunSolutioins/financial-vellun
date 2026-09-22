@@ -57,12 +57,12 @@ perde o que não foi enviado — aceitável, e é o mesmo trade-off do free tier
 [infra/observability/alloy/config.alloy](../infra/observability/alloy/config.alloy),
 blocos `prometheus.scrape "aplicacoes"` e `"infraestrutura"`.
 
-| Antes | Depois |
-| --- | --- |
-| `api.railway.internal:3001` | `financial-vellun-api.railway.internal:3001` |
-| `ai-agent-web.railway.internal:8010` | `financial-vellun-ai-agent.railway.internal:8010` |
-| `ai-agent-worker.railway.internal:8011` | comentado, com explicação |
-| `postgres-exporter...:9187`, `redis-exporter...:9121` | comentados |
+| Antes                                                 | Depois                                            |
+| ----------------------------------------------------- | ------------------------------------------------- |
+| `api.railway.internal:3001`                           | `financial-vellun-api.railway.internal:3001`      |
+| `ai-agent-web.railway.internal:8010`                  | `financial-vellun-ai-agent.railway.internal:8010` |
+| `ai-agent-worker.railway.internal:8011`               | comentado, com explicação                         |
+| `postgres-exporter...:9187`, `redis-exporter...:9121` | comentados                                        |
 
 - **worker**: comentado (não removido) com nota de que só existe quando
   `RUN_CONSUMERS_IN_API=false` e o worker roda em serviço próprio; hoje os
@@ -192,7 +192,7 @@ nas variáveis do Railway.
 ## Depois do merge — passos manuais no Railway
 
 1. **Criar o serviço `alloy`** a partir do repositório, com
-   *Dockerfile Path* = `Dockerfile.alloy`. Variáveis:
+   _Dockerfile Path_ = `Dockerfile.alloy`. Variáveis:
    `GRAFANA_CLOUD_PROM_URL`, `GRAFANA_CLOUD_PROM_USER`, `GRAFANA_CLOUD_LOKI_URL`,
    `GRAFANA_CLOUD_LOKI_USER`, `GRAFANA_CLOUD_TOKEN`, `METRICS_TOKEN` (o **mesmo**
    da API e do agente) e `ENVIRONMENT=production`. **Sem domínio público** — quem

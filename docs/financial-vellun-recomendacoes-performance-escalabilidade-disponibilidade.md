@@ -5,37 +5,37 @@
 Este documento consolida recomendações técnicas para evolução do projeto
 **financial-vellun**, com foco em:
 
--   performance;
--   escalabilidade horizontal;
--   disponibilidade;
--   isolamento de falhas;
--   eficiência no uso de PostgreSQL, Redis e RabbitMQ;
--   capacidade operacional e observabilidade.
+- performance;
+- escalabilidade horizontal;
+- disponibilidade;
+- isolamento de falhas;
+- eficiência no uso de PostgreSQL, Redis e RabbitMQ;
+- capacidade operacional e observabilidade.
 
 A análise considera a arquitetura atual do projeto, incluindo API
 NestJS, AI Agent em Python/FastAPI, RabbitMQ, Redis, PostgreSQL,
 integração com WhatsApp e OpenAI, mecanismos de retry/DLQ, idempotência,
 locks distribuídos e a infraestrutura de observabilidade.
 
-------------------------------------------------------------------------
+---
 
 ## 2. Diagnóstico geral
 
 A arquitetura atual já possui fundamentos importantes para crescimento:
 
--   RabbitMQ com filas duráveis;
--   mensagens persistentes;
--   publisher confirms;
--   ACK manual;
--   prefetch configurável;
--   retry e DLQ;
--   idempotência;
--   Redis para estado distribuído;
--   locks distribuídos por telefone;
--   graceful shutdown;
--   métricas e logs estruturados;
--   Grafana Cloud, Loki e Alloy;
--   métricas de RabbitMQ, Redis, PostgreSQL e aplicação.
+- RabbitMQ com filas duráveis;
+- mensagens persistentes;
+- publisher confirms;
+- ACK manual;
+- prefetch configurável;
+- retry e DLQ;
+- idempotência;
+- Redis para estado distribuído;
+- locks distribuídos por telefone;
+- graceful shutdown;
+- métricas e logs estruturados;
+- Grafana Cloud, Loki e Alloy;
+- métricas de RabbitMQ, Redis, PostgreSQL e aplicação.
 
 Portanto, a prioridade não deve ser substituir tecnologias ou migrar
 prematuramente para uma arquitetura de microservices.
@@ -44,43 +44,47 @@ Os principais ganhos estão em **desacoplar workloads, otimizar acesso ao
 PostgreSQL, controlar concorrência e melhorar a elasticidade
 operacional**.
 
-------------------------------------------------------------------------
+---
 
 ## 3. Prioridades
 
-  -----------------------------------------------------------------------
-  Prioridade              Recomendação            Objetivo
-  ----------------------- ----------------------- -----------------------
-  P0                      Separar webhook/API do  Escala independente e
-                          AI Agent dos consumers  isolamento de falhas
+---
 
-  P0                      Revisar índices         Reduzir custo das
-                          compostos no PostgreSQL consultas principais
+Prioridade Recomendação Objetivo
 
-  P1                      Criar pipeline outbound Isolar WhatsApp do
-                          assíncrono              processamento principal
+---
 
-  P1                      Escalar workers baseado Elasticidade orientada
-                          em backlog              à demanda
+P0 Separar webhook/API do Escala independente e
+AI Agent dos consumers isolamento de falhas
 
-  P1                      Definir connection      Proteger PostgreSQL
-                          budget e pooling        
+P0 Revisar índices Reduzir custo das
+compostos no PostgreSQL consultas principais
 
-  P1                      Melhorar readiness e    Disponibilidade e
-                          health checks           deploy seguro
+P1 Criar pipeline outbound Isolar WhatsApp do
+assíncrono processamento principal
 
-  P2                      Adicionar cache         Reduzir consultas
-                          seletivo                repetitivas
+P1 Escalar workers baseado Elasticidade orientada
+em backlog à demanda
 
-  P2                      Avaliar polling do      Eficiência
-                          GroupFlusher em alta    
-                          escala                  
+P1 Definir connection Proteger PostgreSQL
+budget e pooling
 
-  P2                      Declarar infraestrutura Recuperabilidade e
-                          e deploy                previsibilidade
-  -----------------------------------------------------------------------
+P1 Melhorar readiness e Disponibilidade e
+health checks deploy seguro
 
-------------------------------------------------------------------------
+P2 Adicionar cache Reduzir consultas
+seletivo repetitivas
+
+P2 Avaliar polling do Eficiência
+GroupFlusher em alta  
+ escala
+
+P2 Declarar infraestrutura Recuperabilidade e
+e deploy previsibilidade
+
+---
+
+---
 
 ## 4. Separar AI Agent HTTP dos workers
 
@@ -89,7 +93,7 @@ O projeto já suporta conceitualmente essa separação através de
 
 A topologia de produção recomendada é:
 
-``` text
+```text
                     ┌── AI Agent HTTP #1
 WhatsApp ── LB ─────┤
                     └── AI Agent HTTP #2
@@ -109,20 +113,20 @@ características diferentes.
 
 O webhook deve:
 
--   responder rapidamente;
--   realizar pouco processamento;
--   publicar a mensagem;
--   permanecer disponível mesmo quando serviços downstream estiverem
-    lentos.
+- responder rapidamente;
+- realizar pouco processamento;
+- publicar a mensagem;
+- permanecer disponível mesmo quando serviços downstream estiverem
+  lentos.
 
 Os workers executam operações potencialmente lentas:
 
--   chamadas à OpenAI;
--   consultas ao Redis;
--   chamadas à API NestJS;
--   operações no PostgreSQL;
--   processamento conversacional;
--   integrações externas.
+- chamadas à OpenAI;
+- consultas ao Redis;
+- chamadas à API NestJS;
+- operações no PostgreSQL;
+- processamento conversacional;
+- integrações externas.
 
 Separando os processos, torna-se possível escalar cada camada
 independentemente.
@@ -131,25 +135,25 @@ independentemente.
 
 Serviço HTTP:
 
-``` text
+```text
 RUN_CONSUMERS_IN_API=false
 ```
 
 Worker:
 
-``` text
+```text
 python -m src.worker
 ```
 
 Essa mudança deve ser uma das primeiras evoluções de infraestrutura.
 
-------------------------------------------------------------------------
+---
 
 ## 5. Revisar índices de `Transaction`
 
 Atualmente existem índices individuais como:
 
-``` prisma
+```prisma
 @@index([userId])
 @@index([transactionDate])
 @@index([type])
@@ -159,7 +163,7 @@ Atualmente existem índices individuais como:
 
 Entretanto, consultas reais combinam frequentemente:
 
-``` text
+```text
 userId
 type
 status
@@ -168,7 +172,7 @@ transactionDate
 
 Exemplo conceitual:
 
-``` sql
+```sql
 WHERE user_id = ?
   AND type = ?
   AND status = 'confirmed'
@@ -177,7 +181,7 @@ WHERE user_id = ?
 
 Também existem listagens semelhantes a:
 
-``` sql
+```sql
 WHERE user_id = ?
 ORDER BY transaction_date DESC
 ```
@@ -186,7 +190,7 @@ ORDER BY transaction_date DESC
 
 ### Candidatos a avaliação
 
-``` prisma
+```prisma
 @@index([userId, transactionDate])
 @@index([userId, status, transactionDate])
 @@index([userId, type, status, transactionDate])
@@ -196,27 +200,27 @@ Não é recomendado adicionar todos indiscriminadamente.
 
 Cada índice:
 
--   ocupa armazenamento;
--   aumenta custo de INSERT;
--   aumenta custo de UPDATE;
--   aumenta manutenção interna do PostgreSQL.
+- ocupa armazenamento;
+- aumenta custo de INSERT;
+- aumenta custo de UPDATE;
+- aumenta manutenção interna do PostgreSQL.
 
 A decisão deve ser baseada em consultas reais utilizando:
 
-``` sql
+```sql
 EXPLAIN (ANALYZE, BUFFERS)
 ```
 
 O índice `[userId, transactionDate]` é um candidato especialmente
 relevante devido à natureza multiusuário da aplicação.
 
-------------------------------------------------------------------------
+---
 
 ## 6. Índice para conversações do WhatsApp
 
 Existe consulta equivalente a:
 
-``` typescript
+```typescript
 aiConversation.findFirst({
   where: {
     whatsappContactId: contact.id,
@@ -230,14 +234,14 @@ aiConversation.findFirst({
 
 Um índice composto adequado deve ser avaliado:
 
-``` prisma
+```prisma
 @@index([whatsappContactId, status, createdAt])
 ```
 
 Esse índice reduz o custo de localizar a conversa ativa mais recente de
 um contato conforme o histórico cresce.
 
-------------------------------------------------------------------------
+---
 
 ## 7. Criar fila outbound para WhatsApp
 
@@ -246,7 +250,7 @@ processamento.
 
 Conceitualmente:
 
-``` text
+```text
 consume job
     ↓
 contexto
@@ -265,7 +269,7 @@ critical path do worker.
 
 A arquitetura recomendada é:
 
-``` text
+```text
 processing queue
       │
       ▼
@@ -287,7 +291,7 @@ processing queue
 
 ### Topologia sugerida
 
-``` text
+```text
 whatsapp.outbound.v1
 whatsapp.outbound.retry.*
 whatsapp.outbound.dlq
@@ -297,7 +301,7 @@ whatsapp.outbound.dlq
 
 Se ocorrer:
 
-``` text
+```text
 OpenAI      → disponível
 PostgreSQL  → disponível
 RabbitMQ    → disponível
@@ -311,19 +315,19 @@ outbound.
 
 Isso melhora:
 
--   isolamento de falhas;
--   throughput;
--   retry;
--   capacidade operacional;
--   observabilidade.
+- isolamento de falhas;
+- throughput;
+- retry;
+- capacidade operacional;
+- observabilidade.
 
-------------------------------------------------------------------------
+---
 
 ## 8. Escalabilidade baseada em backlog
 
 O projeto possui controles como:
 
-``` text
+```text
 RABBITMQ_PREFETCH
 INBOUND_CONSUMER_CONCURRENCY
 PROCESSING_CONSUMER_CONCURRENCY
@@ -336,13 +340,13 @@ indicador.
 
 Um indicador melhor é:
 
-``` text
+```text
 queue_depth / processing_rate = estimated_drain_time
 ```
 
 Exemplo:
 
-``` text
+```text
 300 jobs aguardando
 30 jobs/min processados
 
@@ -351,7 +355,7 @@ estimated_drain_time ≈ 10 minutos
 
 Outro indicador especialmente importante é:
 
-``` text
+```text
 oldest_message_age_seconds
 ```
 
@@ -359,7 +363,7 @@ oldest_message_age_seconds
 
 Já:
 
-``` text
+```text
 oldest_message_age_seconds = 270
 ```
 
@@ -367,7 +371,7 @@ indica que existe uma mensagem aguardando 4 minutos e 30 segundos.
 
 Esse indicador representa melhor a experiência real do usuário.
 
-------------------------------------------------------------------------
+---
 
 ## 9. Controle explícito de concorrência
 
@@ -376,7 +380,7 @@ downstream.
 
 Exemplo:
 
-``` text
+```text
 10 workers
 ×
 10 jobs simultâneos
@@ -386,15 +390,15 @@ Exemplo:
 
 Cada processamento pode utilizar:
 
--   NestJS;
--   PostgreSQL;
--   Redis;
--   OpenAI;
--   WhatsApp.
+- NestJS;
+- PostgreSQL;
+- Redis;
+- OpenAI;
+- WhatsApp.
 
 Portanto:
 
-``` text
+```text
 workers × processing_concurrency
 ```
 
@@ -402,23 +406,23 @@ deve respeitar a capacidade dos serviços downstream.
 
 Uma regra operacional importante é:
 
-``` text
+```text
 workers × processing_concurrency <= downstream_capacity
 ```
 
 Devem ser considerados principalmente:
 
--   limite de conexões PostgreSQL;
--   rate limits da OpenAI;
--   rate limits da Meta;
--   capacidade da API NestJS;
--   capacidade do Redis;
--   tamanho do pool HTTP.
+- limite de conexões PostgreSQL;
+- rate limits da OpenAI;
+- rate limits da Meta;
+- capacidade da API NestJS;
+- capacidade do Redis;
+- tamanho do pool HTTP.
 
 Escalar workers sem controlar essas dependências pode simplesmente
 deslocar o gargalo.
 
-------------------------------------------------------------------------
+---
 
 ## 10. PostgreSQL como provável gargalo estrutural
 
@@ -428,7 +432,7 @@ superiores aos esperados nas fases iniciais do produto.
 O PostgreSQL tende a se tornar um gargalo antes deles porque várias
 partes do sistema convergem para o banco.
 
-``` text
+```text
 Frontend
    │
 NestJS
@@ -441,7 +445,7 @@ AI Agent / Workers
 
 Quando ocorre escalabilidade horizontal:
 
-``` text
+```text
 API × N
 Workers × N
 ```
@@ -452,7 +456,7 @@ o número potencial de conexões também cresce.
 
 Adotar pooling controlado:
 
-``` text
+```text
 PostgreSQL
      │
  PgBouncer
@@ -469,7 +473,7 @@ Deve existir um orçamento explícito de conexões.
 
 Exemplo conceitual:
 
-``` text
+```text
 PostgreSQL max_connections = 100
 
 infra/admin = 15
@@ -483,7 +487,7 @@ O número real deve ser definido conforme infraestrutura e carga.
 Sem esse controle, autoscaling pode causar connection exhaustion no
 banco.
 
-------------------------------------------------------------------------
+---
 
 ## 11. Cache seletivo
 
@@ -494,42 +498,42 @@ Dados financeiros possuem requisitos fortes de consistência.
 
 Bons candidatos a cache são dados relativamente estáveis:
 
--   categorias;
--   contas ativas;
--   plano;
--   assinatura;
--   configurações;
--   metadados utilizados frequentemente pelo AI Agent.
+- categorias;
+- contas ativas;
+- plano;
+- assinatura;
+- configurações;
+- metadados utilizados frequentemente pelo AI Agent.
 
 Exemplo:
 
-``` text
+```text
 categories:{userId}
 TTL = 5 minutos
 ```
 
 Isso pode transformar determinados caminhos de:
 
-``` text
+```text
 Worker → NestJS → PostgreSQL
 ```
 
 em:
 
-``` text
+```text
 Worker → Redis
 ```
 
 O cache deve ser introduzido somente após medição das queries e
 definição clara da estratégia de invalidação.
 
-------------------------------------------------------------------------
+---
 
 ## 12. Redis como infraestrutura crítica
 
 Redis atualmente participa de:
 
-``` text
+```text
 agrupamento
 locks
 conversation state
@@ -545,24 +549,24 @@ Redis deve ser tratado operacionalmente como infraestrutura de estado.
 
 Devem ser avaliados:
 
--   persistência;
--   backups quando aplicável;
--   política de eviction;
--   limite de memória;
--   disponibilidade;
--   monitoramento;
--   estratégia de recuperação.
+- persistência;
+- backups quando aplicável;
+- política de eviction;
+- limite de memória;
+- disponibilidade;
+- monitoramento;
+- estratégia de recuperação.
 
 Não há necessidade arquitetural evidente de remover Redis. A tecnologia
 é adequada ao problema.
 
-------------------------------------------------------------------------
+---
 
 ## 13. Lock por telefone
 
 O projeto utiliza lock distribuído:
 
-``` text
+```text
 proc:lock:{phone}
 ```
 
@@ -570,7 +574,7 @@ Essa decisão preserva ordenação e consistência da conversa.
 
 Sem o lock:
 
-``` text
+```text
 mensagem A ──┐
              ├── processamento simultâneo
 mensagem B ──┘
@@ -580,7 +584,7 @@ poderia gerar alterações inconsistentes no estado conversacional.
 
 O efeito deliberado é:
 
-``` text
+```text
 throughput por telefone = 1
 ```
 
@@ -590,7 +594,7 @@ Para o domínio do Financial, esse trade-off é adequado: consistência
 conversacional é mais importante do que paralelismo dentro de uma única
 conversa.
 
-------------------------------------------------------------------------
+---
 
 ## 14. RabbitMQ
 
@@ -598,7 +602,7 @@ Não existe indicação atual de que RabbitMQ seja um gargalo arquitetural.
 
 A implementação já possui características importantes:
 
-``` text
+```text
 durable queues
 persistent messages
 publisher confirms
@@ -617,20 +621,20 @@ RabbitMQ é adequado ao workload atual.
 
 O foco deve permanecer em:
 
--   tuning de prefetch;
--   concorrência;
--   número de consumers;
--   queue age;
--   backlog;
--   tempo de processamento.
+- tuning de prefetch;
+- concorrência;
+- número de consumers;
+- queue age;
+- backlog;
+- tempo de processamento.
 
-------------------------------------------------------------------------
+---
 
 ## 15. Observabilidade e SLOs
 
 A infraestrutura atual já possui uma base relevante:
 
-``` text
+```text
 Prometheus
 Grafana Cloud
 Loki
@@ -647,7 +651,7 @@ Isso permite uma abordagem orientada por medição.
 
 Adicionar ou priorizar:
 
-``` text
+```text
 webhook_to_ack_latency
 message_end_to_end_latency
 queue_oldest_message_age
@@ -656,7 +660,7 @@ transaction_creation_latency
 
 Acompanhar distribuições:
 
-``` text
+```text
 p50
 p95
 p99
@@ -666,7 +670,7 @@ p99
 
 Um indicador importante deve representar o fluxo completo:
 
-``` text
+```text
 WhatsApp message
       ↓
 webhook
@@ -692,13 +696,13 @@ A métrica deve responder:
 Esse indicador representa melhor a experiência real do usuário do que
 CPU ou memória isoladamente.
 
-------------------------------------------------------------------------
+---
 
 ## 16. Readiness e health checks
 
 Health checks devem distinguir:
 
-``` text
+```text
 liveness
 readiness
 ```
@@ -719,9 +723,9 @@ Responde:
 
 Para workers, pode considerar dependências essenciais como:
 
--   RabbitMQ;
--   Redis;
--   API interna quando necessária.
+- RabbitMQ;
+- Redis;
+- API interna quando necessária.
 
 Para o webhook, a dependência crítica principal é a capacidade de
 publicar de forma durável no broker.
@@ -729,7 +733,7 @@ publicar de forma durável no broker.
 Essa separação melhora rolling deployments e evita direcionar tráfego
 para instâncias incapazes de processá-lo corretamente.
 
-------------------------------------------------------------------------
+---
 
 ## 17. GroupFlusher e polling
 
@@ -744,7 +748,7 @@ Não é prioridade alterar essa arquitetura agora.
 
 A recomendação é medir:
 
-``` text
+```text
 poll executions
 groups found per poll
 groups flushed per second
@@ -758,7 +762,7 @@ distribuídos.
 Até existir evidência de gargalo, manter a implementação atual é
 preferível.
 
-------------------------------------------------------------------------
+---
 
 ## 18. Infraestrutura e deploy declarativos
 
@@ -769,18 +773,18 @@ existir apenas como estado externo ao repositório.
 
 No médio prazo, devem ser versionados:
 
--   configuração de deploy;
--   comandos de inicialização;
--   variáveis documentadas;
--   health checks;
--   número mínimo de réplicas;
--   políticas de restart;
--   configuração de observabilidade;
--   infraestrutura possível via IaC.
+- configuração de deploy;
+- comandos de inicialização;
+- variáveis documentadas;
+- health checks;
+- número mínimo de réplicas;
+- políticas de restart;
+- configuração de observabilidade;
+- infraestrutura possível via IaC.
 
 O objetivo é permitir:
 
-``` text
+```text
 repositório + secrets
         ↓
 reconstrução previsível do ambiente
@@ -788,7 +792,7 @@ reconstrução previsível do ambiente
 
 Isso melhora disaster recovery e reduz configuration drift.
 
-------------------------------------------------------------------------
+---
 
 ## 19. Arquitetura-alvo recomendada
 
@@ -796,7 +800,7 @@ A evolução não exige decomposição prematura em microservices.
 
 Uma arquitetura adequada seria:
 
-``` text
+```text
                          ┌───────────────┐
                          │   Frontend    │
                          └───────┬───────┘
@@ -843,7 +847,7 @@ Workers          Workers
 
 A aplicação continua essencialmente composta por:
 
-``` text
+```text
 1 monorepo
 1 API principal
 1 agente
@@ -855,7 +859,7 @@ A aplicação continua essencialmente composta por:
 A diferença é que os processos passam a possuir responsabilidades
 operacionais mais bem definidas.
 
-------------------------------------------------------------------------
+---
 
 ## 20. Sequência recomendada de evolução
 
@@ -887,7 +891,7 @@ operacionais mais bem definidas.
 
 Adicionar:
 
-``` text
+```text
 queue_depth
 queue_oldest_message_age
 processing_rate
@@ -902,7 +906,7 @@ PostgreSQL connection utilization
 
 Executar cenários como:
 
-``` text
+```text
 10 mensagens/min
 100 mensagens/min
 500 mensagens/min
@@ -911,23 +915,23 @@ Executar cenários como:
 
 Medir:
 
--   p50;
--   p95;
--   p99;
--   backlog;
--   drain time;
--   CPU;
--   memória;
--   conexões PostgreSQL;
--   conexões Redis;
--   taxa de consumo RabbitMQ;
--   latência OpenAI.
+- p50;
+- p95;
+- p99;
+- backlog;
+- drain time;
+- CPU;
+- memória;
+- conexões PostgreSQL;
+- conexões Redis;
+- taxa de consumo RabbitMQ;
+- latência OpenAI.
 
 ### Fase 6 --- tuning
 
 Somente após essas medições ajustar:
 
-``` text
+```text
 RABBITMQ_PREFETCH
 INBOUND_CONSUMER_CONCURRENCY
 PROCESSING_CONSUMER_CONCURRENCY
@@ -936,7 +940,7 @@ HTTP connection pools
 PostgreSQL connection pools
 ```
 
-------------------------------------------------------------------------
+---
 
 ## 21. Capacity review recomendado
 
@@ -945,7 +949,7 @@ capacity review do pipeline.
 
 Para cada mensagem:
 
-``` text
+```text
 WhatsApp
    ↓
 Webhook
@@ -969,19 +973,19 @@ Outbound
 
 devem ser levantados:
 
--   número de operações Redis;
--   número de queries SQL;
--   número de chamadas HTTP internas;
--   número de chamadas OpenAI;
--   tempo médio por etapa;
--   p95/p99 por etapa;
--   número de conexões utilizadas;
--   consumo médio de CPU;
--   consumo médio de memória.
+- número de operações Redis;
+- número de queries SQL;
+- número de chamadas HTTP internas;
+- número de chamadas OpenAI;
+- tempo médio por etapa;
+- p95/p99 por etapa;
+- número de conexões utilizadas;
+- consumo médio de CPU;
+- consumo médio de memória.
 
 Com esses dados é possível estimar:
 
-``` text
+```text
 throughput por worker
 workers necessários
 capacidade máxima antes de saturar PostgreSQL
@@ -992,7 +996,7 @@ tempo necessário para drenar backlog
 Essa análise deve orientar o dimensionamento, em vez de aumentar
 concorrência com base apenas em intuição.
 
-------------------------------------------------------------------------
+---
 
 ## 22. Conclusão
 

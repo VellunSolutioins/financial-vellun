@@ -63,23 +63,23 @@ Decisões já tomadas:
 
 > Seção idêntica nos dois planos. Cada decisão tem **um dono**; o outro plano apenas consome.
 
-| # | Tema | Dono | Regra acordada |
-|---|------|------|----------------|
-| C1 | Redis na API | Segurança (S2) | `RedisModule` em `apps/api/src/redis/` (ioredis). Prefixos `rl:` (throttler) e `cache:` (performance). Mesma instância do agente, prefixos separados. |
-| C2 | Revogação de sessão sem custo extra | Segurança (S1) | A validação da sessão substitui a leitura de usuário que já existe na `jwt.strategy` (1 query com `include`). **Sessão e usuário nunca vão para cache.** |
-| C3 | Identidade por telefone | Segurança (S1) | `GET /internal/whatsapp/contacts/:phone` e `subscription-access` **não são cacheáveis** (nem no agente, nem na API). Performance otimiza com memo por job e índices. |
-| C4 | Estado conversacional pendente | Segurança (S1) | `conv:{phone}` passa a guardar `userId`, `contactId` e `linkVersion`. Ao concluir uma confirmação o agente re-resolve a identidade e descarta o estado se divergir. A API não precisa apagar chaves do agente. |
-| C5 | Fila outbound | Performance (P3) | Contrato `OutboundMessageV1` em `messaging/contracts.py` com `schemaVersion`, `userId`, `contactId`, `jobId`. Toda resposta, inclusive a boas-vindas enviada após o reverse OTP, passa por ela quando existir. O outbound worker só envia; não decide identidade. |
-| C6 | Migrations Prisma | Ambos | Migrations pequenas e separadas (`YYYYMMDDHHMMSS_snake_case`). Segurança: `user_sessions`, `phone_verifications`, campos de vínculo em `whatsapp_contacts` (`verified_at`, `revoked_at`, `link_version`) e `@@index([userId])` nela. Performance: índices de `Transaction` e `AiConversation`. Nenhum plano cria índice que o outro já cria. |
-| C7 | PgBouncer × transações atômicas | Performance (P2) | Pool em *transaction mode* com `pgbouncer=true` e `directUrl` para migrations. As operações atômicas da segurança usam transação interativa ou `updateMany` condicional, **sem** advisory lock de sessão, `LISTEN` ou prepared statements nomeados. |
-| C8 | Config inválida × readiness | Segurança (S1) define boot; Performance (P1) define readiness | Configuração inválida ou insegura → **falha no boot**. Dependência indisponível → **readiness 503**. |
-| C9 | Webhook assinado × loadtest | Segurança (S1) | Bypass de assinatura só com `WEBHOOK_ALLOW_UNSIGNED=true` **e** ambiente local. `scripts/loadtest.py` passa a assinar os payloads com HMAC. |
-| C10 | docker-compose, Dockerfile, Railway | Segurança define as regras (S1/S3); Performance adiciona serviços (P1/P2/P6) | Portas em `127.0.0.1`, Redis com senha, RabbitMQ sem `guest`; serviços novos (PgBouncer) seguem as mesmas regras. Dockerfile do agente com `USER` não-root serve HTTP e worker. `railway.toml` (performance) inclui o checklist de rede privada (segurança). |
-| C11 | Escalar a API horizontalmente | Performance (P6) | **Bloqueado até** throttler em Redis + `trust proxy` (S2). |
-| C12 | Rate limit por usuário/telefone | Segurança (S2) | Limites calibrados acima do perfil de loadtest (P5); o loadtest usa muitos telefones distintos. Rejeições por limite viram métrica. |
-| C13 | Métricas | Ambos | Mesmo registry (`services/metrics.py` no agente; `observability/` na API), prefixos `vellun_agent_*` / `vellun_api_*`, sem telefone ou PII em labels. |
-| C14 | Retenção de `AiMessage` / `rawInput` | Segurança (S4) | Job de purga em lotes pequenos, fora de pico, dentro do connection budget (P2). |
-| C15 | Integração da `feature/melhorias` | Ambos | Os planos valem para a `main`. Ao integrar a `feature/melhorias`, aplicar os itens da seção "Quando a feature/melhorias for integrada" de cada plano antes do merge em produção. |
+| #   | Tema                                 | Dono                                                                         | Regra acordada                                                                                                                                                                                                                                                                                                                               |
+| --- | ------------------------------------ | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C1  | Redis na API                         | Segurança (S2)                                                               | `RedisModule` em `apps/api/src/redis/` (ioredis). Prefixos `rl:` (throttler) e `cache:` (performance). Mesma instância do agente, prefixos separados.                                                                                                                                                                                        |
+| C2  | Revogação de sessão sem custo extra  | Segurança (S1)                                                               | A validação da sessão substitui a leitura de usuário que já existe na `jwt.strategy` (1 query com `include`). **Sessão e usuário nunca vão para cache.**                                                                                                                                                                                     |
+| C3  | Identidade por telefone              | Segurança (S1)                                                               | `GET /internal/whatsapp/contacts/:phone` e `subscription-access` **não são cacheáveis** (nem no agente, nem na API). Performance otimiza com memo por job e índices.                                                                                                                                                                         |
+| C4  | Estado conversacional pendente       | Segurança (S1)                                                               | `conv:{phone}` passa a guardar `userId`, `contactId` e `linkVersion`. Ao concluir uma confirmação o agente re-resolve a identidade e descarta o estado se divergir. A API não precisa apagar chaves do agente.                                                                                                                               |
+| C5  | Fila outbound                        | Performance (P3)                                                             | Contrato `OutboundMessageV1` em `messaging/contracts.py` com `schemaVersion`, `userId`, `contactId`, `jobId`. Toda resposta, inclusive a boas-vindas enviada após o reverse OTP, passa por ela quando existir. O outbound worker só envia; não decide identidade.                                                                            |
+| C6  | Migrations Prisma                    | Ambos                                                                        | Migrations pequenas e separadas (`YYYYMMDDHHMMSS_snake_case`). Segurança: `user_sessions`, `phone_verifications`, campos de vínculo em `whatsapp_contacts` (`verified_at`, `revoked_at`, `link_version`) e `@@index([userId])` nela. Performance: índices de `Transaction` e `AiConversation`. Nenhum plano cria índice que o outro já cria. |
+| C7  | PgBouncer × transações atômicas      | Performance (P2)                                                             | Pool em _transaction mode_ com `pgbouncer=true` e `directUrl` para migrations. As operações atômicas da segurança usam transação interativa ou `updateMany` condicional, **sem** advisory lock de sessão, `LISTEN` ou prepared statements nomeados.                                                                                          |
+| C8  | Config inválida × readiness          | Segurança (S1) define boot; Performance (P1) define readiness                | Configuração inválida ou insegura → **falha no boot**. Dependência indisponível → **readiness 503**.                                                                                                                                                                                                                                         |
+| C9  | Webhook assinado × loadtest          | Segurança (S1)                                                               | Bypass de assinatura só com `WEBHOOK_ALLOW_UNSIGNED=true` **e** ambiente local. `scripts/loadtest.py` passa a assinar os payloads com HMAC.                                                                                                                                                                                                  |
+| C10 | docker-compose, Dockerfile, Railway  | Segurança define as regras (S1/S3); Performance adiciona serviços (P1/P2/P6) | Portas em `127.0.0.1`, Redis com senha, RabbitMQ sem `guest`; serviços novos (PgBouncer) seguem as mesmas regras. Dockerfile do agente com `USER` não-root serve HTTP e worker. `railway.toml` (performance) inclui o checklist de rede privada (segurança).                                                                                 |
+| C11 | Escalar a API horizontalmente        | Performance (P6)                                                             | **Bloqueado até** throttler em Redis + `trust proxy` (S2).                                                                                                                                                                                                                                                                                   |
+| C12 | Rate limit por usuário/telefone      | Segurança (S2)                                                               | Limites calibrados acima do perfil de loadtest (P5); o loadtest usa muitos telefones distintos. Rejeições por limite viram métrica.                                                                                                                                                                                                          |
+| C13 | Métricas                             | Ambos                                                                        | Mesmo registry (`services/metrics.py` no agente; `observability/` na API), prefixos `vellun_agent_*` / `vellun_api_*`, sem telefone ou PII em labels.                                                                                                                                                                                        |
+| C14 | Retenção de `AiMessage` / `rawInput` | Segurança (S4)                                                               | Job de purga em lotes pequenos, fora de pico, dentro do connection budget (P2).                                                                                                                                                                                                                                                              |
+| C15 | Integração da `feature/melhorias`    | Ambos                                                                        | Os planos valem para a `main`. Ao integrar a `feature/melhorias`, aplicar os itens da seção "Quando a feature/melhorias for integrada" de cada plano antes do merge em produção.                                                                                                                                                             |
 
 **Ordem global intercalada:** S1 → P1 → S2 → P2 → P3 → S3 → P4/P5 → S4 → P6.
 
@@ -383,23 +383,23 @@ Itens do relatório que só existem na `feature/melhorias`. Aplicar ao integrar 
 
 ## Rastreabilidade
 
-| Item do relatório | Passo |
-|---|---|
-| §1 Telefone declarado como verificado | S1.1 |
-| §2 Troca de telefone não revoga | S1.2 |
-| §3 Logout/senha não invalidam tokens | S1.3 (membros: seção de integração) |
-| §4 Webhook sem assinatura por padrão | S1.4 |
-| §5 CORS/CSRF com previews/localhost | S2 |
-| §6 Portas publicadas | S1.5 |
-| §7 Limites após alocação | S2 |
-| §8 Sessão administrativa sem prazo absoluto | S2 |
-| §9 Dependências | S3 |
-| Mudança de identidade | S1.2 |
-| Privacidade (`LogMessenger`) | S1.4 |
-| Retenção | S4 |
-| Headers do frontend | S3 |
-| Container | S3 |
-| API interna | S2 |
-| Rate limiting | S2 |
-| Convites | Seção de integração (não existe na `main`) |
-| Segredos | S3 |
+| Item do relatório                           | Passo                                      |
+| ------------------------------------------- | ------------------------------------------ |
+| §1 Telefone declarado como verificado       | S1.1                                       |
+| §2 Troca de telefone não revoga             | S1.2                                       |
+| §3 Logout/senha não invalidam tokens        | S1.3 (membros: seção de integração)        |
+| §4 Webhook sem assinatura por padrão        | S1.4                                       |
+| §5 CORS/CSRF com previews/localhost         | S2                                         |
+| §6 Portas publicadas                        | S1.5                                       |
+| §7 Limites após alocação                    | S2                                         |
+| §8 Sessão administrativa sem prazo absoluto | S2                                         |
+| §9 Dependências                             | S3                                         |
+| Mudança de identidade                       | S1.2                                       |
+| Privacidade (`LogMessenger`)                | S1.4                                       |
+| Retenção                                    | S4                                         |
+| Headers do frontend                         | S3                                         |
+| Container                                   | S3                                         |
+| API interna                                 | S2                                         |
+| Rate limiting                               | S2                                         |
+| Convites                                    | Seção de integração (não existe na `main`) |
+| Segredos                                    | S3                                         |

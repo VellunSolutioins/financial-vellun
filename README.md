@@ -25,12 +25,12 @@ financial-vellun/
 
 ## Pré-requisitos
 
-| Ferramenta     | Versão                                   | Verificar                |
-| -------------- | ---------------------------------------- | ------------------------ |
-| Node.js        | ≥ 20 (`.nvmrc` fixa `22.13.1`)           | `node -v`                |
-| pnpm           | ≥ 9 (`corepack enable` usa a do projeto) | `pnpm -v`                |
-| Python         | ≥ 3.11 (`.python-version` do agente: `3.12`) | `python --version`   |
-| Docker Desktop | com Compose v2                           | `docker compose version` |
+| Ferramenta     | Versão                                       | Verificar                |
+| -------------- | -------------------------------------------- | ------------------------ |
+| Node.js        | ≥ 20 (`.nvmrc` fixa `22.13.1`)               | `node -v`                |
+| pnpm           | ≥ 9 (`corepack enable` usa a do projeto)     | `pnpm -v`                |
+| Python         | ≥ 3.11 (`.python-version` do agente: `3.12`) | `python --version`       |
+| Docker Desktop | com Compose v2                               | `docker compose version` |
 
 ---
 
@@ -72,128 +72,128 @@ cp apps/ai-agent/.env.example    apps/ai-agent/.env
 **Infraestrutura** (`infra/docker/.env`) — **obrigatório**: o `docker-compose.yml`
 lê este arquivo (`env_file`) e o `pnpm db:up` falha sem ele.
 
-| Variável                                           | Descrição                                                              |
-| -------------------------------------------------- | ---------------------------------------------------------------------- |
-| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Credenciais do Postgres. Precisam bater com o `DATABASE_URL` da API |
-| `RABBITMQ_USER` / `RABBITMQ_PASSWORD`              | Usuário do broker. Obrigatórios (sem padrão). Precisam bater com `RABBITMQ_URL` do agente |
-| `REDIS_PASSWORD`                                   | Senha do Redis (`requirepass`). Obrigatória. Precisa bater com `REDIS_URL` do agente |
-| `GRAFANA_CLOUD_*`                                  | Só para `pnpm obs:up` (Alloy local). Podem ficar vazios               |
+| Variável                                              | Descrição                                                                                 |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Credenciais do Postgres. Precisam bater com o `DATABASE_URL` da API                       |
+| `RABBITMQ_USER` / `RABBITMQ_PASSWORD`                 | Usuário do broker. Obrigatórios (sem padrão). Precisam bater com `RABBITMQ_URL` do agente |
+| `REDIS_PASSWORD`                                      | Senha do Redis (`requirepass`). Obrigatória. Precisa bater com `REDIS_URL` do agente      |
+| `GRAFANA_CLOUD_*`                                     | Só para `pnpm obs:up` (Alloy local). Podem ficar vazios                                   |
 
 > As credenciais do Postgres só valem na **primeira** subida do volume. Se trocar
 > depois, rode `pnpm db:down` e remova o volume `financial-vellun-postgres`.
 
 **API** (`apps/api/.env`):
 
-| Variável                     | Descrição                                                                      |
-| ---------------------------- | ------------------------------------------------------------------------------ |
-| `DATABASE_URL`               | Conexão com o PostgreSQL. **Porta `5433`** no host (o compose mapeia `5433:5432`) |
-| `JWT_SECRET`                 | Segredo dos access tokens (≥ 32 chars)                                         |
-| `JWT_REFRESH_SECRET`         | Segredo dos refresh tokens (≥ 32 chars)                                        |
-| `API_PORT`                   | Porta da API (padrão `3001`; `PORT` tem precedência, usado no Railway)          |
-| `INTERNAL_API_KEY`           | Chave antiga compartilhada com o agente — **idêntica** nos dois `.env`; substituída pelas chaves por direção |
-| `INTERNAL_API_KEY_AGENT_TO_API` / `INTERNAL_API_KEY_API_TO_AGENT` | Uma chave por direção da comunicação interna — **idênticas** nos dois `.env` |
-| `WEB_URL`                    | Origem do frontend (CORS e links). Local: `http://localhost:3000`             |
-| `AI_AGENT_URL`               | Base do agente (boas-vindas por WhatsApp no cadastro)                          |
-| `BILLING_ENFORCEMENT_ENABLED`| `false` = não bloqueia usuários sem assinatura (útil em dev)                   |
-| `ASAAS_API_URL` / `ASAAS_API_KEY` / `ASAAS_WEBHOOK_TOKEN` | Gateway de pagamento (sandbox em dev)             |
-| `BILLING_CALLBACK_BASE_URL`  | URL pública para o retorno do checkout (o Asaas recusa `localhost`)            |
-| `METRICS_TOKEN`              | Bearer do `/metrics` — mesmo valor no agente. Sem ele o endpoint fica fechado  |
-| `LOKI_PUSH_URL`              | Envio de logs ao Alloy. Vazio em dev (sem Alloy)                               |
-| `OPS_JWT_SECRET`             | Sessão do painel `/ops`. **Precisa ser diferente** de `JWT_SECRET`             |
-| `OPS_GITHUB_ORG` / `OPS_GITHUB_CLIENT_ID` / `OPS_GITHUB_CLIENT_SECRET` | OAuth App do GitHub para login de operadores |
-| `OPS_GITHUB_CALLBACK_URL` / `API_URL` | Callback do OAuth (vazio → `API_URL` + `/ops/auth/github/callback`)   |
-| `OPS_BOOTSTRAP_ADMIN_GITHUB_LOGIN` | Login GitHub do **primeiro** `ops_admin` (ver [Painel de operações](#painel-de-operações-ops)) |
-| `OPS_GRAFANA_URL` / `OPS_GRAFANA_LOKI_DATASOURCE_UID` | Links do painel para o Grafana. Vazios desligam a seção      |
+| Variável                                                               | Descrição                                                                                                    |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `DATABASE_URL`                                                         | Conexão com o PostgreSQL. **Porta `5433`** no host (o compose mapeia `5433:5432`)                            |
+| `JWT_SECRET`                                                           | Segredo dos access tokens (≥ 32 chars)                                                                       |
+| `JWT_REFRESH_SECRET`                                                   | Segredo dos refresh tokens (≥ 32 chars)                                                                      |
+| `API_PORT`                                                             | Porta da API (padrão `3001`; `PORT` tem precedência, usado no Railway)                                       |
+| `INTERNAL_API_KEY`                                                     | Chave antiga compartilhada com o agente — **idêntica** nos dois `.env`; substituída pelas chaves por direção |
+| `INTERNAL_API_KEY_AGENT_TO_API` / `INTERNAL_API_KEY_API_TO_AGENT`      | Uma chave por direção da comunicação interna — **idênticas** nos dois `.env`                                 |
+| `WEB_URL`                                                              | Origem do frontend (CORS e links). Local: `http://localhost:3000`                                            |
+| `AI_AGENT_URL`                                                         | Base do agente (boas-vindas por WhatsApp no cadastro)                                                        |
+| `BILLING_ENFORCEMENT_ENABLED`                                          | `false` = não bloqueia usuários sem assinatura (útil em dev)                                                 |
+| `ASAAS_API_URL` / `ASAAS_API_KEY` / `ASAAS_WEBHOOK_TOKEN`              | Gateway de pagamento (sandbox em dev)                                                                        |
+| `BILLING_CALLBACK_BASE_URL`                                            | URL pública para o retorno do checkout (o Asaas recusa `localhost`)                                          |
+| `METRICS_TOKEN`                                                        | Bearer do `/metrics` — mesmo valor no agente. Sem ele o endpoint fica fechado                                |
+| `LOKI_PUSH_URL`                                                        | Envio de logs ao Alloy. Vazio em dev (sem Alloy)                                                             |
+| `OPS_JWT_SECRET`                                                       | Sessão do painel `/ops`. **Precisa ser diferente** de `JWT_SECRET`                                           |
+| `OPS_GITHUB_ORG` / `OPS_GITHUB_CLIENT_ID` / `OPS_GITHUB_CLIENT_SECRET` | OAuth App do GitHub para login de operadores                                                                 |
+| `OPS_GITHUB_CALLBACK_URL` / `API_URL`                                  | Callback do OAuth (vazio → `API_URL` + `/ops/auth/github/callback`)                                          |
+| `OPS_BOOTSTRAP_ADMIN_GITHUB_LOGIN`                                     | Login GitHub do **primeiro** `ops_admin` (ver [Painel de operações](#painel-de-operações-ops))               |
+| `OPS_GRAFANA_URL` / `OPS_GRAFANA_LOKI_DATASOURCE_UID`                  | Links do painel para o Grafana. Vazios desligam a seção                                                      |
 
 O produto (web + WhatsApp) funciona sem Asaas, OAuth do GitHub e Grafana
 configurados; só o checkout e o painel `/ops` dependem deles.
 
 **Web** (`apps/web/.env.local`):
 
-| Variável              | Descrição                              |
-| --------------------- | -------------------------------------- |
+| Variável              | Descrição                                    |
+| --------------------- | -------------------------------------------- |
 | `NEXT_PUBLIC_API_URL` | URL da API (padrão: `http://localhost:3001`) |
 
 **AI Agent** (`apps/ai-agent/.env`):
 
 Núcleo:
 
-| Variável                    | Padrão                     | Descrição                                                        |
-| --------------------------- | -------------------------- | ---------------------------------------------------------------- |
-| `AI_AGENT_PORT`             | `8010`                     | Porta do agente                                                  |
-| `ENVIRONMENT`               | `development`              | `development` \| `production` (ver [Produção](#rodando-em-produção)) |
-| `LOG_LEVEL`                 | `INFO`                     | `DEBUG` \| `INFO` \| `WARNING` \| `ERROR`                        |
-| `MAIN_API_URL`              | `http://localhost:3001`    | URL da API principal                                             |
-| `WEB_URL`                   | `http://localhost:3000`    | Base do link de regularização da assinatura (em produção, a URL pública do web) |
-| `INTERNAL_API_KEY`          | —                          | Chave antiga, igual à da API (aceita durante a migração)         |
-| `INTERNAL_API_KEY_AGENT_TO_API` / `INTERNAL_API_KEY_API_TO_AGENT` | — | Chaves por direção, iguais às da API (header `x-internal-api-key`) |
-| `LLM_PROVIDER`              | `rules`                    | `rules` (sem LLM) \| `openai`                                    |
-| `OPENAI_API_KEY`            | —                          | Chave da OpenAI (necessária quando `LLM_PROVIDER=openai`)        |
-| `OPENAI_MODEL`              | `gpt-4o-mini`              | Modelo usado na extração de intenção                             |
-| `OPENAI_VISION_MODEL`       | —                          | Modelo para comprovantes/imagens (vazio → `OPENAI_MODEL`)        |
-| `OPENAI_TRANSCRIPTION_MODEL`| `whisper-1`                | Transcrição de áudio                                             |
-| `MEDIA_MAX_BYTES`           | `16777216`                 | Limite de download de mídia (16 MB)                              |
-| `CONFIDENCE_THRESHOLD`      | `0.7`                      | Abaixo disso, o lançamento exige confirmação do usuário          |
-| `CONVERSATION_TTL_MINUTES`  | `30`                       | TTL do estado de confirmação em memória                          |
+| Variável                                                          | Padrão                  | Descrição                                                                       |
+| ----------------------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------- |
+| `AI_AGENT_PORT`                                                   | `8010`                  | Porta do agente                                                                 |
+| `ENVIRONMENT`                                                     | `development`           | `development` \| `production` (ver [Produção](#rodando-em-produção))            |
+| `LOG_LEVEL`                                                       | `INFO`                  | `DEBUG` \| `INFO` \| `WARNING` \| `ERROR`                                       |
+| `MAIN_API_URL`                                                    | `http://localhost:3001` | URL da API principal                                                            |
+| `WEB_URL`                                                         | `http://localhost:3000` | Base do link de regularização da assinatura (em produção, a URL pública do web) |
+| `INTERNAL_API_KEY`                                                | —                       | Chave antiga, igual à da API (aceita durante a migração)                        |
+| `INTERNAL_API_KEY_AGENT_TO_API` / `INTERNAL_API_KEY_API_TO_AGENT` | —                       | Chaves por direção, iguais às da API (header `x-internal-api-key`)              |
+| `LLM_PROVIDER`                                                    | `rules`                 | `rules` (sem LLM) \| `openai`                                                   |
+| `OPENAI_API_KEY`                                                  | —                       | Chave da OpenAI (necessária quando `LLM_PROVIDER=openai`)                       |
+| `OPENAI_MODEL`                                                    | `gpt-4o-mini`           | Modelo usado na extração de intenção                                            |
+| `OPENAI_VISION_MODEL`                                             | —                       | Modelo para comprovantes/imagens (vazio → `OPENAI_MODEL`)                       |
+| `OPENAI_TRANSCRIPTION_MODEL`                                      | `whisper-1`             | Transcrição de áudio                                                            |
+| `MEDIA_MAX_BYTES`                                                 | `16777216`              | Limite de download de mídia (16 MB)                                             |
+| `CONFIDENCE_THRESHOLD`                                            | `0.7`                   | Abaixo disso, o lançamento exige confirmação do usuário                         |
+| `CONVERSATION_TTL_MINUTES`                                        | `30`                    | TTL do estado de confirmação em memória                                         |
 
 Messenger (resposta ao usuário — ver [factory](apps/ai-agent/src/services/messenger/factory.py)):
 
-| Variável                   | Padrão                              | Descrição                                                       |
-| -------------------------- | ----------------------------------- | --------------------------------------------------------------- |
-| `WHATSAPP_PROVIDER`        | `log`                               | `log` (só registra em log, dev) \| `cloud-api` (envio real)     |
-| `WHATSAPP_PROVIDER_TOKEN`  | —                                   | Token do WhatsApp Cloud API (obrigatório em `cloud-api`)        |
-| `WHATSAPP_PHONE_NUMBER_ID` | —                                   | ID do número no WhatsApp Cloud API (obrigatório em `cloud-api`) |
-| `WHATSAPP_API_BASE_URL`    | `https://graph.facebook.com/v18.0`  | Base da Graph API da Meta                                       |
-| `WHATSAPP_WEBHOOK_SECRET`  | —                                   | App Secret da Meta; valida `X-Hub-Signature-256` (**obrigatório em produção**) |
-| `WHATSAPP_VERIFY_TOKEN`    | —                                   | Token do handshake `GET` de verificação (igual ao "Verify token" do painel da Meta) |
+| Variável                   | Padrão                             | Descrição                                                                           |
+| -------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------- |
+| `WHATSAPP_PROVIDER`        | `log`                              | `log` (só registra em log, dev) \| `cloud-api` (envio real)                         |
+| `WHATSAPP_PROVIDER_TOKEN`  | —                                  | Token do WhatsApp Cloud API (obrigatório em `cloud-api`)                            |
+| `WHATSAPP_PHONE_NUMBER_ID` | —                                  | ID do número no WhatsApp Cloud API (obrigatório em `cloud-api`)                     |
+| `WHATSAPP_API_BASE_URL`    | `https://graph.facebook.com/v18.0` | Base da Graph API da Meta                                                           |
+| `WHATSAPP_WEBHOOK_SECRET`  | —                                  | App Secret da Meta; valida `X-Hub-Signature-256` (**obrigatório em produção**)      |
+| `WHATSAPP_VERIFY_TOKEN`    | —                                  | Token do handshake `GET` de verificação (igual ao "Verify token" do painel da Meta) |
 
 > Com `ENVIRONMENT=production`, `WHATSAPP_PROVIDER=log` (ou `cloud-api` sem
 > token/phone id) impede a subida do agente.
 
 Pipeline de mensageria (broker durável):
 
-| Variável                          | Padrão                                 | Descrição                                                                 |
-| --------------------------------- | -------------------------------------- | ------------------------------------------------------------------------- |
-| `MESSAGE_PIPELINE`                | `broker`                               | `broker` (webhook publica em fila) \| `legacy` (buffer em processo, rollback) |
-| `MESSAGE_BROKER`                  | `rabbitmq`                             | `rabbitmq` \| `inmemory` (dev sem Docker; **não é durável**)              |
-| `RABBITMQ_URL`                    | `amqp://<user>:<senha>@localhost:5672/` | Conexão com o broker (credenciais de `infra/docker/.env`)                 |
-| `RABBITMQ_INBOUND_QUEUE`          | `whatsapp.inbound.v1`                  | Fila das mensagens individuais                                             |
-| `RABBITMQ_PROCESSING_QUEUE`       | `whatsapp.processing.v1`               | Fila dos jobs consolidados por telefone                                    |
-| `RABBITMQ_PREFETCH`               | `10`                                   | Mensagens não ackadas entregues por canal de consumo                       |
-| `INBOUND_CONSUMER_CONCURRENCY`    | `5`                                    | Jobs simultâneos no consumer de entrada                                    |
-| `PROCESSING_CONSUMER_CONCURRENCY` | `3`                                    | Jobs simultâneos no consumer de processamento (limita chamadas à OpenAI)   |
-| `MESSAGE_MAX_RETRIES`             | `5`                                    | Tentativas antes de mandar para a DLQ                                      |
-| `MESSAGE_RETRY_BASE_SECONDS`      | `1.0`                                  | Base do backoff (`base * 2^tentativa`, com jitter)                         |
-| `MESSAGE_RETRY_MAX_SECONDS`       | `300.0`                                | Teto do backoff                                                            |
-| `RUN_CONSUMERS_IN_API`            | `true`                                 | `false` = a API só publica; consumo em `pnpm agent:worker`                 |
-| `SHUTDOWN_DRAIN_SECONDS`          | `20.0`                                 | Espera pelo que está em voo antes de devolver à fila no shutdown           |
-| `RUN_DLQ_CATALOG_CONSUMER`        | `true`                                 | Drena as DLQs para o catálogo de falhas no Postgres (painel `/ops`)        |
-| `DLQ_CATALOG_PREFETCH`            | `5`                                    | Prefetch do consumer do catálogo                                           |
-| `DLQ_USER_NOTICE_COOLDOWN_SECONDS`| `600`                                  | Janela do aviso ao usuário de mensagem não processada (`0` desliga)        |
+| Variável                           | Padrão                                  | Descrição                                                                     |
+| ---------------------------------- | --------------------------------------- | ----------------------------------------------------------------------------- |
+| `MESSAGE_PIPELINE`                 | `broker`                                | `broker` (webhook publica em fila) \| `legacy` (buffer em processo, rollback) |
+| `MESSAGE_BROKER`                   | `rabbitmq`                              | `rabbitmq` \| `inmemory` (dev sem Docker; **não é durável**)                  |
+| `RABBITMQ_URL`                     | `amqp://<user>:<senha>@localhost:5672/` | Conexão com o broker (credenciais de `infra/docker/.env`)                     |
+| `RABBITMQ_INBOUND_QUEUE`           | `whatsapp.inbound.v1`                   | Fila das mensagens individuais                                                |
+| `RABBITMQ_PROCESSING_QUEUE`        | `whatsapp.processing.v1`                | Fila dos jobs consolidados por telefone                                       |
+| `RABBITMQ_PREFETCH`                | `10`                                    | Mensagens não ackadas entregues por canal de consumo                          |
+| `INBOUND_CONSUMER_CONCURRENCY`     | `5`                                     | Jobs simultâneos no consumer de entrada                                       |
+| `PROCESSING_CONSUMER_CONCURRENCY`  | `3`                                     | Jobs simultâneos no consumer de processamento (limita chamadas à OpenAI)      |
+| `MESSAGE_MAX_RETRIES`              | `5`                                     | Tentativas antes de mandar para a DLQ                                         |
+| `MESSAGE_RETRY_BASE_SECONDS`       | `1.0`                                   | Base do backoff (`base * 2^tentativa`, com jitter)                            |
+| `MESSAGE_RETRY_MAX_SECONDS`        | `300.0`                                 | Teto do backoff                                                               |
+| `RUN_CONSUMERS_IN_API`             | `true`                                  | `false` = a API só publica; consumo em `pnpm agent:worker`                    |
+| `SHUTDOWN_DRAIN_SECONDS`           | `20.0`                                  | Espera pelo que está em voo antes de devolver à fila no shutdown              |
+| `RUN_DLQ_CATALOG_CONSUMER`         | `true`                                  | Drena as DLQs para o catálogo de falhas no Postgres (painel `/ops`)           |
+| `DLQ_CATALOG_PREFETCH`             | `5`                                     | Prefetch do consumer do catálogo                                              |
+| `DLQ_USER_NOTICE_COOLDOWN_SECONDS` | `600`                                   | Janela do aviso ao usuário de mensagem não processada (`0` desliga)           |
 
 Estado distribuído (Redis) — agrupamento, locks e estado de conversa:
 
-| Variável                          | Padrão                     | Descrição                                                     |
-| --------------------------------- | -------------------------- | ------------------------------------------------------------- |
-| `REDIS_URL`                       | `redis://:<senha>@localhost:6379/0` | Conexão Redis (senha = `REDIS_PASSWORD` de `infra/docker/.env`) |
-| `GROUP_STORE_BACKEND`             | `redis`                    | `redis` \| `memory` (agrupamento, locks e marcadores de job)  |
-| `CONVERSATION_STATE_BACKEND`      | `redis`                    | `redis` \| `memory` (confirmações pendentes)                  |
-| `CONVERSATION_STATE_TTL_SECONDS`  | `1800`                     | TTL da confirmação pendente                                    |
-| `PROCESSING_LOCK_TTL_SECONDS`     | `120`                      | TTL do lock por telefone durante o processamento               |
-| `JOB_DEDUPE_TTL_SECONDS`          | `86400`                    | Janela de deduplicação por `jobId`                             |
-| `REDIS_LOCK_TTL_SECONDS`          | `30`                       | TTL do lock durante a consolidação do grupo                    |
-| `WORKER_POLL_INTERVAL_SECONDS`    | `1.0`                      | Intervalo de polling do worker de agrupamento                  |
+| Variável                         | Padrão                              | Descrição                                                       |
+| -------------------------------- | ----------------------------------- | --------------------------------------------------------------- |
+| `REDIS_URL`                      | `redis://:<senha>@localhost:6379/0` | Conexão Redis (senha = `REDIS_PASSWORD` de `infra/docker/.env`) |
+| `GROUP_STORE_BACKEND`            | `redis`                             | `redis` \| `memory` (agrupamento, locks e marcadores de job)    |
+| `CONVERSATION_STATE_BACKEND`     | `redis`                             | `redis` \| `memory` (confirmações pendentes)                    |
+| `CONVERSATION_STATE_TTL_SECONDS` | `1800`                              | TTL da confirmação pendente                                     |
+| `PROCESSING_LOCK_TTL_SECONDS`    | `120`                               | TTL do lock por telefone durante o processamento                |
+| `JOB_DEDUPE_TTL_SECONDS`         | `86400`                             | Janela de deduplicação por `jobId`                              |
+| `REDIS_LOCK_TTL_SECONDS`         | `30`                                | TTL do lock durante a consolidação do grupo                     |
+| `WORKER_POLL_INTERVAL_SECONDS`   | `1.0`                               | Intervalo de polling do worker de agrupamento                   |
 
 Agrupamento (debounce) de mensagens fragmentadas:
 
-| Variável                            | Padrão   | Descrição                                                        |
-| ----------------------------------- | -------- | ---------------------------------------------------------------- |
-| `MESSAGE_BUFFER_DEBOUNCE_SECONDS`   | `5`      | Janela de espera para agrupar mensagens do mesmo telefone        |
-| `MESSAGE_BUFFER_MAX_MESSAGES`       | `10`     | Consolida imediatamente ao atingir N mensagens na janela         |
-| `MESSAGE_BUFFER_MAX_AGE_SECONDS`    | `30`     | Idade máxima do grupo, contada da **primeira** mensagem          |
-| `CONVERSATION_CONTEXT_MESSAGE_LIMIT`| `15`     | Máximo de mensagens de histórico enviadas ao LLM                 |
-| `CONVERSATION_CONTEXT_MAX_CHARS`    | `4000`   | Limite de caracteres do prompt de contexto                       |
-| `MESSAGE_MAX_CHARS`                 | `2000`   | Tamanho máximo de uma mensagem recebida (acima disso não é processada e o usuário recebe resposta com o limite) |
+| Variável                             | Padrão | Descrição                                                                                                       |
+| ------------------------------------ | ------ | --------------------------------------------------------------------------------------------------------------- |
+| `MESSAGE_BUFFER_DEBOUNCE_SECONDS`    | `5`    | Janela de espera para agrupar mensagens do mesmo telefone                                                       |
+| `MESSAGE_BUFFER_MAX_MESSAGES`        | `10`   | Consolida imediatamente ao atingir N mensagens na janela                                                        |
+| `MESSAGE_BUFFER_MAX_AGE_SECONDS`     | `30`   | Idade máxima do grupo, contada da **primeira** mensagem                                                         |
+| `CONVERSATION_CONTEXT_MESSAGE_LIMIT` | `15`   | Máximo de mensagens de histórico enviadas ao LLM                                                                |
+| `CONVERSATION_CONTEXT_MAX_CHARS`     | `4000` | Limite de caracteres do prompt de contexto                                                                      |
+| `MESSAGE_MAX_CHARS`                  | `2000` | Tamanho máximo de uma mensagem recebida (acima disso não é processada e o usuário recebe resposta com o limite) |
 
 Somente para `MESSAGE_PIPELINE=legacy` (buffer em processo, será removido):
 
@@ -205,11 +205,11 @@ Somente para `MESSAGE_PIPELINE=legacy` (buffer em processo, será removido):
 
 Observabilidade:
 
-| Variável              | Padrão                    | Descrição                                                              |
-| --------------------- | ------------------------- | ---------------------------------------------------------------------- |
-| `METRICS_TOKEN`       | `local-dev-metrics-token` | Bearer do `/metrics` e `/metrics.json` — mesmo valor da API            |
-| `WORKER_METRICS_PORT` | `8011`                    | Porta do HTTP mínimo do worker (`/metrics`, `/health/*`)               |
-| `LOKI_PUSH_URL`       | —                         | Envio de logs ao Alloy (só o endereço base). Vazio em dev              |
+| Variável              | Padrão                    | Descrição                                                   |
+| --------------------- | ------------------------- | ----------------------------------------------------------- |
+| `METRICS_TOKEN`       | `local-dev-metrics-token` | Bearer do `/metrics` e `/metrics.json` — mesmo valor da API |
+| `WORKER_METRICS_PORT` | `8011`                    | Porta do HTTP mínimo do worker (`/metrics`, `/health/*`)    |
+| `LOKI_PUSH_URL`       | —                         | Envio de logs ao Alloy (só o endereço base). Vazio em dev   |
 
 ### 3. Iniciar a infraestrutura local
 
@@ -229,7 +229,6 @@ docker compose -f infra/docker/docker-compose.yml ps
 O painel do RabbitMQ fica em http://localhost:15672, e é por
 onde você inspeciona filas, retries e DLQ. Usuário e senha vêm de
 `RABBITMQ_USER`/`RABBITMQ_PASSWORD` em `infra/docker/.env`.
-
 
 ### 4. Gerar o client do Prisma, criar as tabelas e popular dados iniciais
 
@@ -347,23 +346,23 @@ pnpm web:dev
 pnpm agent:dev
 ```
 
-| Serviço            | URL                                 |
-| ------------------ | ----------------------------------- |
-| Web                | http://localhost:3000               |
-| Painel de operações| http://localhost:3000/ops           |
-| API                | http://localhost:3001               |
-| Swagger            | http://localhost:3001/api/docs      |
-| AI Agent           | http://localhost:8010               |
-| Painel do RabbitMQ | http://localhost:15672 (`RABBITMQ_USER`/`RABBITMQ_PASSWORD`) |
+| Serviço             | URL                                                          |
+| ------------------- | ------------------------------------------------------------ |
+| Web                 | http://localhost:3000                                        |
+| Painel de operações | http://localhost:3000/ops                                    |
+| API                 | http://localhost:3001                                        |
+| Swagger             | http://localhost:3001/api/docs                               |
+| AI Agent            | http://localhost:8010                                        |
+| Painel do RabbitMQ  | http://localhost:15672 (`RABBITMQ_USER`/`RABBITMQ_PASSWORD`) |
 
 Health e métricas — o mesmo trio nos três processos. `/metrics` exige o header
 `Authorization` com o `METRICS_TOKEN` configurado nos `.env`:
 
-| Serviço           | Liveness / Readiness                        | Métricas                          |
-| ----------------- | ------------------------------------------- | --------------------------------- |
-| API               | `:3001/health/live` · `:3001/health/ready`  | `:3001/metrics`                   |
-| AI Agent          | `:8010/health/live` · `:8010/health/ready`  | `:8010/metrics` · `/metrics.json` |
-| AI Agent (worker) | `:8011/health/live` · `:8011/health/ready`  | `:8011/metrics` · `/metrics.json` |
+| Serviço           | Liveness / Readiness                       | Métricas                          |
+| ----------------- | ------------------------------------------ | --------------------------------- |
+| API               | `:3001/health/live` · `:3001/health/ready` | `:3001/metrics`                   |
+| AI Agent          | `:8010/health/live` · `:8010/health/ready` | `:8010/metrics` · `/metrics.json` |
+| AI Agent (worker) | `:8011/health/live` · `:8011/health/ready` | `:8011/metrics` · `/metrics.json` |
 
 ```bash
 curl -H "Authorization: Bearer $METRICS_TOKEN" http://localhost:3001/metrics
@@ -435,7 +434,7 @@ Meta ──► POST /webhook/whatsapp ──► assinatura ──► normaliza �
 1. **Webhook** ([webhook.py](apps/ai-agent/src/routers/webhook.py)) — lê o corpo
    bruto, valida `X-Hub-Signature-256`, normaliza o payload e publica cada
    mensagem em `whatsapp.inbound.v1`. Responde `202 Accepted` **depois** do
-   *publisher confirm*, ou `503` se não puder garantir a publicação. Não chama a
+   _publisher confirm_, ou `503` se não puder garantir a publicação. Não chama a
    API principal, o banco, a OpenAI, nem baixa mídia.
 2. **Consumer de entrada** ([inbound_consumer.py](apps/ai-agent/src/consumers/inbound_consumer.py))
    — persiste a `AiMessage` de forma idempotente, baixa e transcreve áudio /
@@ -452,12 +451,12 @@ Meta ──► POST /webhook/whatsapp ──► assinatura ──► normaliza �
 
 ### Filas
 
-| Fila | Papel |
-| ---- | ----- |
-| `whatsapp.inbound.v1` | mensagens individuais publicadas pelo webhook |
-| `whatsapp.processing.v1` | mensagens já consolidadas por telefone |
+| Fila                                                   | Papel                                                            |
+| ------------------------------------------------------ | ---------------------------------------------------------------- |
+| `whatsapp.inbound.v1`                                  | mensagens individuais publicadas pelo webhook                    |
+| `whatsapp.processing.v1`                               | mensagens já consolidadas por telefone                           |
 | `whatsapp.{inbound,processing}.retry.{1,4,16,60,300}s` | buckets de retry com TTL e dead-letter de volta à fila de origem |
-| `whatsapp.{inbound,processing}.dlq` | falhas permanentes ou tentativas esgotadas |
+| `whatsapp.{inbound,processing}.dlq`                    | falhas permanentes ou tentativas esgotadas                       |
 
 Tudo é declarado `durable`, as mensagens são publicadas como persistentes e o
 consumo usa ack manual: uma mensagem só é ackada quando o efeito da etapa está
@@ -465,12 +464,12 @@ duravelmente concluído.
 
 ### Idempotência
 
-| Nível             | Chave                                  | Onde                                                 |
-| ----------------- | -------------------------------------- | ---------------------------------------------------- |
-| Entrada           | `providerMessageId`                    | `ai_messages.provider_message_id` (único)            |
-| Job consolidado   | `jobId` derivado de `sourceMessageIds` | marcador `job:done:{jobId}` no Redis                 |
-| Efeitos no banco  | `idempotencyKey` (= `jobId`)           | `transactions.idempotency_key` e                     |
-|                   |                                        | `ai_extracted_transactions.idempotency_key` (únicos) |
+| Nível            | Chave                                  | Onde                                                 |
+| ---------------- | -------------------------------------- | ---------------------------------------------------- |
+| Entrada          | `providerMessageId`                    | `ai_messages.provider_message_id` (único)            |
+| Job consolidado  | `jobId` derivado de `sourceMessageIds` | marcador `job:done:{jobId}` no Redis                 |
+| Efeitos no banco | `idempotencyKey` (= `jobId`)           | `transactions.idempotency_key` e                     |
+|                  |                                        | `ai_extracted_transactions.idempotency_key` (únicos) |
 
 Os três são necessários: um timeout **depois** de a escrita ter acontecido só é
 coberto pelo terceiro nível, no banco. Deduplicar também a extração é o que
@@ -658,27 +657,27 @@ cd apps/ai-agent && .venv/bin/python -m pytest -m integration -q
 
 ## Scripts disponíveis
 
-| Comando              | Descrição                                    |
-| -------------------- | -------------------------------------------- |
-| `pnpm dev`           | Sobe a infra + API + Web + agente em paralelo |
+| Comando                            | Descrição                                     |
+| ---------------------------------- | --------------------------------------------- |
+| `pnpm dev`                         | Sobe a infra + API + Web + agente em paralelo |
 | `pnpm db:up` / `pnpm infra:up`     | Sobe PostgreSQL + RabbitMQ + Redis via Docker |
 | `pnpm db:down` / `pnpm infra:down` | Para os containers de infraestrutura          |
-| `pnpm api:dev`       | Inicia a API em modo desenvolvimento         |
-| `pnpm web:dev`       | Inicia o frontend em modo desenvolvimento    |
-| `pnpm agent:dev`     | Inicia o agente de IA (HTTP, porta 8010)     |
-| `pnpm agent:worker`  | Só os consumers das filas (sem HTTP)         |
-| `pnpm prisma:generate` | Gera o Prisma Client                       |
-| `pnpm prisma:migrate`  | `prisma migrate dev` (cria migration em dev) |
-| `pnpm prisma:seed`     | Categorias padrão + usuário demo           |
-| `pnpm prisma:studio`   | Abre o Prisma Studio                       |
-| `pnpm test`          | Testes da API (Jest) + agente (pytest)       |
-| `pnpm test:agent`    | Só os testes do agente                       |
-| `pnpm typecheck`     | `tsc --noEmit` na API                        |
-| `pnpm lint`          | ESLint em todo o repo                        |
-| `pnpm format`        | Formata todos os arquivos com Prettier       |
-| `pnpm format:check`  | Verifica a formatação sem alterar arquivos   |
-| `pnpm obs:up` / `pnpm obs:down` | Infra + stack local de observabilidade |
-| `pnpm obs:check`     | Valida Alloy, regras de alerta e dashboards  |
+| `pnpm api:dev`                     | Inicia a API em modo desenvolvimento          |
+| `pnpm web:dev`                     | Inicia o frontend em modo desenvolvimento     |
+| `pnpm agent:dev`                   | Inicia o agente de IA (HTTP, porta 8010)      |
+| `pnpm agent:worker`                | Só os consumers das filas (sem HTTP)          |
+| `pnpm prisma:generate`             | Gera o Prisma Client                          |
+| `pnpm prisma:migrate`              | `prisma migrate dev` (cria migration em dev)  |
+| `pnpm prisma:seed`                 | Categorias padrão + usuário demo              |
+| `pnpm prisma:studio`               | Abre o Prisma Studio                          |
+| `pnpm test`                        | Testes da API (Jest) + agente (pytest)        |
+| `pnpm test:agent`                  | Só os testes do agente                        |
+| `pnpm typecheck`                   | `tsc --noEmit` na API                         |
+| `pnpm lint`                        | ESLint em todo o repo                         |
+| `pnpm format`                      | Formata todos os arquivos com Prettier        |
+| `pnpm format:check`                | Verifica a formatação sem alterar arquivos    |
+| `pnpm obs:up` / `pnpm obs:down`    | Infra + stack local de observabilidade        |
+| `pnpm obs:check`                   | Valida Alloy, regras de alerta e dashboards   |
 
 > **Banco/Prisma:** aplicar migrations com `pnpm --filter @financial-vellun/api exec prisma migrate deploy`; resetar em dev com `pnpm --filter @financial-vellun/api exec prisma migrate reset`.
 
@@ -694,11 +693,11 @@ apontar para uma URL pública (o Asaas recusa `localhost` — ver
 
 **Cartão que simula aprovação** ✅
 
-| Campo    | Valor                                  |
-| -------- | -------------------------------------- |
-| Número   | `4444 4444 4444 4444`                  |
+| Campo    | Valor                                     |
+| -------- | ----------------------------------------- |
+| Número   | `4444 4444 4444 4444`                     |
 | Validade | qualquer data **futura** (ex.: `12/2030`) |
-| CVV      | `123` (ou qualquer 3 dígitos)          |
+| CVV      | `123` (ou qualquer 3 dígitos)             |
 
 **Cartões que simulam recusa/falha** ❌
 
@@ -730,7 +729,7 @@ continua `http://localhost:3000` para o restante do app. Sem isso, a abertura do
 checkout falha.
 
 Outros `400` na criação do cliente costumam ser dados recusados pelo Asaas
-(ex.: *"O CPF/CNPJ informado é inválido."*): o cadastro agora valida o dígito
+(ex.: _"O CPF/CNPJ informado é inválido."_): o cadastro agora valida o dígito
 verificador, e a mensagem do Asaas é repassada ao usuário.
 
 ### `pnpm db:up` falha com `env file ... infra/docker/.env not found`
@@ -778,12 +777,12 @@ assinatura.
 
 ## Fases de implementação
 
-| Fase | Status | Escopo |
-| ---- | ------ | ------ |
-| **1 — Fundação** | ✅ Completo | Monorepo, schema Prisma, bootstrap apps, Docker |
-| **2 — Produto Pessoal** | ✅ Completo | Auth JWT, perfis, CRUD de contas/categorias/lançamentos, dashboard |
-| **3 — IA e WhatsApp** | 🚧 Em andamento | Webhook, extração de intenção, integração LLM, pipeline durável (RabbitMQ + Redis) (ver [arquitetura](#arquitetura-de-processamento-de-mensagens-whatsapp--ia)) |
-| **4 — Pessoa Jurídica** | 🚧 Em andamento | Dashboard empresarial, contas a pagar/receber, clientes/fornecedores, categorias |
+| Fase                       | Status          | Escopo                                                                                                                                                             |
+| -------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **1 — Fundação**           | ✅ Completo     | Monorepo, schema Prisma, bootstrap apps, Docker                                                                                                                    |
+| **2 — Produto Pessoal**    | ✅ Completo     | Auth JWT, perfis, CRUD de contas/categorias/lançamentos, dashboard                                                                                                 |
+| **3 — IA e WhatsApp**      | 🚧 Em andamento | Webhook, extração de intenção, integração LLM, pipeline durável (RabbitMQ + Redis) (ver [arquitetura](#arquitetura-de-processamento-de-mensagens-whatsapp--ia))    |
+| **4 — Pessoa Jurídica**    | 🚧 Em andamento | Dashboard empresarial, contas a pagar/receber, clientes/fornecedores, categorias                                                                                   |
 | **5 — Evolução (pós-MVP)** | 🚧 Em andamento | Recorrências, metas de gastos, caixinhas, cartões, lembretes, agenda, anotações, membros (Duo), análise financeira; pendentes: relatórios e importação de extratos |
 
 ---
@@ -798,4 +797,4 @@ assinatura.
 - [Prompts de implementação](docs/implementation-prompts.md)
 - [Requisitos — processamento assíncrono WhatsApp/IA](docs/whatsapp-ai-async-processing-requirements.md)
 - [Plano — processamento assíncrono WhatsApp/IA](plan/whatsapp-ai-async-processing-plan.md)
-- [Swagger da API](http://localhost:3001/api/docs) *(com o servidor rodando)*
+- [Swagger da API](http://localhost:3001/api/docs) _(com o servidor rodando)_

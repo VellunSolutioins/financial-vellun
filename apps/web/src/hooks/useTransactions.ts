@@ -45,7 +45,7 @@ interface TransactionsResponse {
 
 export function useTransactions(filters: TransactionFilters) {
   const [data, setData] = useState<Transaction[]>([]);
-  const [meta, setMeta] = useState({ total: 0, page: 1, limit: 20, total_pages: 1 });
+  const [meta, setMeta] = useState({ total: 0, page: 1, limit: 10, total_pages: 1 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -73,7 +73,7 @@ export function useTransactions(filters: TransactionFilters) {
     } finally {
       setLoading(false);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filtersKey]);
 
   useEffect(() => {

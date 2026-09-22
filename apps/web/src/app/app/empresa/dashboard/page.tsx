@@ -31,8 +31,10 @@ interface BusinessSummary {
   netResult: number;
   cashFlow: { date: string; income: number; expense: number; balance: number }[];
   topExpenseCategories: { categoryName: string; total: number; percentage: number }[];
-  accountsReceivable: { total: number; items: PendingTransaction[] };
-  accountsPayable: { total: number; items: PendingTransaction[] };
+  // `items` é a prévia (a API limita); `count` é quantas estão em aberto, e
+  // `total` soma todas — não só as da prévia.
+  accountsReceivable: { total: number; count: number; items: PendingTransaction[] };
+  accountsPayable: { total: number; count: number; items: PendingTransaction[] };
 }
 
 function formatCurrency(v: number) {
@@ -121,7 +123,9 @@ export default function EmpresaDashboardPage() {
                     <XAxis
                       dataKey="date"
                       tick={{ fontSize: 12 }}
-                      tickFormatter={(d: string) => formatDateBR(d, { day: '2-digit', month: '2-digit' })}
+                      tickFormatter={(d: string) =>
+                        formatDateBR(d, { day: '2-digit', month: '2-digit' })
+                      }
                     />
                     <YAxis tick={{ fontSize: 12 }} />
                     <Tooltip
@@ -129,9 +133,30 @@ export default function EmpresaDashboardPage() {
                       labelFormatter={(d) => formatDateBR(d as string)}
                     />
                     <Legend />
-                    <Area type="monotone" dataKey="income" name="Receitas" stroke="#10b981" fill="#10b981" fillOpacity={0.2} />
-                    <Area type="monotone" dataKey="expense" name="Despesas" stroke="#ef4444" fill="#ef4444" fillOpacity={0.2} />
-                    <Area type="monotone" dataKey="balance" name="Saldo acumulado" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.1} />
+                    <Area
+                      type="monotone"
+                      dataKey="income"
+                      name="Receitas"
+                      stroke="#10b981"
+                      fill="#10b981"
+                      fillOpacity={0.2}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="expense"
+                      name="Despesas"
+                      stroke="#ef4444"
+                      fill="#ef4444"
+                      fillOpacity={0.2}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="balance"
+                      name="Saldo acumulado"
+                      stroke="#3b82f6"
+                      fill="#3b82f6"
+                      fillOpacity={0.1}
+                    />
                   </AreaChart>
                 </ResponsiveContainer>
               )}
@@ -143,6 +168,7 @@ export default function EmpresaDashboardPage() {
             <PendingWidget
               title="Contas a Receber"
               total={data.accountsReceivable.total}
+              count={data.accountsReceivable.count}
               items={data.accountsReceivable.items}
               href="/app/empresa/contas-a-receber"
               accent="text-green-600"
@@ -150,6 +176,7 @@ export default function EmpresaDashboardPage() {
             <PendingWidget
               title="Contas a Pagar"
               total={data.accountsPayable.total}
+              count={data.accountsPayable.count}
               items={data.accountsPayable.items}
               href="/app/empresa/contas-a-pagar"
               accent="text-red-600"
@@ -190,12 +217,14 @@ export default function EmpresaDashboardPage() {
 function PendingWidget({
   title,
   total,
+  count,
   items,
   href,
   accent,
 }: {
   title: string;
   total: number;
+  count: number;
   items: PendingTransaction[];
   href: string;
   accent: string;
@@ -214,8 +243,11 @@ function PendingWidget({
           <p className="text-sm text-muted-foreground">Nada pendente.</p>
         ) : (
           <div className="space-y-2">
-            {items.slice(0, 5).map((t) => (
-              <div key={t.id} className="flex items-center justify-between py-1 border-b last:border-0">
+            {items.map((t) => (
+              <div
+                key={t.id}
+                className="flex items-center justify-between py-1 border-b last:border-0"
+              >
                 <div>
                   <p className="text-sm font-medium">{t.description}</p>
                   <p className="text-xs text-muted-foreground">
@@ -226,6 +258,14 @@ function PendingWidget({
                 <span className="text-sm font-semibold">{formatCurrency(t.amount)}</span>
               </div>
             ))}
+            {count > items.length && (
+              <p className="pt-1 text-xs text-muted-foreground">
+                Mostrando {items.length} de {count}.{' '}
+                <Link href={href} className="text-primary hover:underline">
+                  Ver todas
+                </Link>
+              </p>
+            )}
           </div>
         )}
       </CardContent>

@@ -53,6 +53,51 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  # Pooler de conexões em *transaction mode*, espelhando o que a produção usa.
+  #
+  # `profiles: [pooler]` mantém ele **fora** do `pnpm db:up`: o dia a dia não
+  # precisa dele, e subir um salto extra na frente do banco em desenvolvimento
+  # só atrapalha. Ele existe para responder a uma pergunta que produção
+  # responderia tarde demais: "isto continua funcionando sem sessão fixa?".
+  #
+  #   docker compose -f infra/docker/docker-compose.yml --profile pooler up -d pgbouncer
+  #
+  # Depois, aponte só a DATABASE_URL da API para a 6432, acrescentando
+  # `?pgbouncer=true&connection_limit=5&pool_timeout=10`. A DIRECT_URL continua
+  # na 5432: `prisma migrate` não pode passar por pooler (contrato C7).
+  # Ver docs/connection-budget.md.
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.23.1-p2
+    container_name: financial-vellun-pgbouncer
+    profiles: ['pooler']
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      TZ: America/Sao_Paulo
+      DB_HOST: postgres
+      DB_PORT: '5432'
+      DB_NAME: ${POSTGRES_DB:?defina POSTGRES_DB em infra/docker/.env}
+      DB_USER: ${POSTGRES_USER:?defina POSTGRES_USER em infra/docker/.env}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD em infra/docker/.env}
+      POOL_MODE: transaction
+      AUTH_TYPE: scram-sha-256
+      # Teto do que o pooler abre no Postgres, independente de quantos clientes
+      # chegarem. É este número que entra no connection budget — não o de
+      # clientes, que é justamente o que o pooler existe para multiplexar.
+      MAX_DB_CONNECTIONS: '20'
+      DEFAULT_POOL_SIZE: '20'
+      MAX_CLIENT_CONN: '200'
+    ports:
+      - '127.0.0.1:6432:6432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -p 6432 -U $${DB_USER}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
   # Estado distribuído: agrupamento por telefone, locks e estado de conversa.
   # `appendonly` garante que confirmações pendentes sobrevivam a restart.
   # `requirepass` exige REDIS_PASSWORD; os clientes usam

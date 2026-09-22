@@ -27,7 +27,7 @@ agrupamento distribuído, locks por telefone e estado de conversa — ambos novo
 1. **Áudio** é transcrito no InboundConsumer e entra no agrupamento por telefone; **imagem** roda visão no
    InboundConsumer e publica um job próprio com o intent pré-extraído + `forceConfirm` (preserva o
    comportamento atual de comprovante).
-2. Consumers sobem no **lifespan do FastAPI** *e* existe entrypoint `python -m src.worker` para escalar
+2. Consumers sobem no **lifespan do FastAPI** _e_ existe entrypoint `python -m src.worker` para escalar
    separado (`RUN_CONSUMERS_IN_API=true|false`).
 3. Rollout por flag `MESSAGE_PIPELINE=broker|legacy`, **padrão `broker`**; o caminho antigo permanece no repo
    por uma release.
@@ -61,15 +61,15 @@ Meta ──► POST /webhook/whatsapp ──► assinatura ──► normaliza �
 
 ### Topologia RabbitMQ (tudo `durable`, `delivery_mode=PERSISTENT`, publisher confirms)
 
-| Recurso | Tipo | Observação |
-|---|---|---|
-| `whatsapp.x` | exchange direct | routing keys `inbound`, `processing` |
-| `whatsapp.retry.x` | exchange direct | destino das republicações com atraso |
-| `whatsapp.dlx` | exchange direct | routing keys `inbound.dlq`, `processing.dlq` |
-| `whatsapp.inbound.v1` | queue | `x-dead-letter-exchange=whatsapp.dlx`, rk `inbound.dlq` |
-| `whatsapp.processing.v1` | queue | idem, rk `processing.dlq` |
-| `whatsapp.{inbound,processing}.retry.{1s,4s,16s,60s,300s}` | queues | `x-message-ttl` fixo + `x-dead-letter-exchange=whatsapp.x` de volta à fila de origem |
-| `whatsapp.inbound.dlq` / `whatsapp.processing.dlq` | queues | ligadas a `whatsapp.dlx` |
+| Recurso                                                    | Tipo            | Observação                                                                           |
+| ---------------------------------------------------------- | --------------- | ------------------------------------------------------------------------------------ |
+| `whatsapp.x`                                               | exchange direct | routing keys `inbound`, `processing`                                                 |
+| `whatsapp.retry.x`                                         | exchange direct | destino das republicações com atraso                                                 |
+| `whatsapp.dlx`                                             | exchange direct | routing keys `inbound.dlq`, `processing.dlq`                                         |
+| `whatsapp.inbound.v1`                                      | queue           | `x-dead-letter-exchange=whatsapp.dlx`, rk `inbound.dlq`                              |
+| `whatsapp.processing.v1`                                   | queue           | idem, rk `processing.dlq`                                                            |
+| `whatsapp.{inbound,processing}.retry.{1s,4s,16s,60s,300s}` | queues          | `x-message-ttl` fixo + `x-dead-letter-exchange=whatsapp.x` de volta à fila de origem |
+| `whatsapp.inbound.dlq` / `whatsapp.processing.dlq`         | queues          | ligadas a `whatsapp.dlx`                                                             |
 
 Buckets de retry com TTL fixo (sem head-of-line blocking de per-message TTL); o bucket é
 `min(base * 2^attempt, max)` arredondado para o bucket mais próximo, com jitter aplicado como espera
@@ -240,13 +240,13 @@ Novos arquivos em `apps/ai-agent/tests/`: `test_webhook_publish.py`, `test_inbou
 
 Mapeamento dos 20 casos obrigatórios:
 
-| # | Caso | Onde |
-|---|---|---|
-| 1,2,3,4,5,6 | 202 após confirm, 503 em falha, 401 sem publicar, multi-mensagem, evento de status | `test_webhook_publish.py` |
-| 7,9,10,11,18 | dedupe de `providerMessageId`, ack só após persistir, retry transitório, DLQ, mídia fora do HTTP | `test_inbound_consumer.py` |
-| 12 | fragmentos agrupados em ordem | `test_group_store.py` |
+| #                   | Caso                                                                                                                                                                                      | Onde                          |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| 1,2,3,4,5,6         | 202 após confirm, 503 em falha, 401 sem publicar, multi-mensagem, evento de status                                                                                                        | `test_webhook_publish.py`     |
+| 7,9,10,11,18        | dedupe de `providerMessageId`, ack só após persistir, retry transitório, DLQ, mídia fora do HTTP                                                                                          | `test_inbound_consumer.py`    |
+| 12                  | fragmentos agrupados em ordem                                                                                                                                                             | `test_group_store.py`         |
 | 8,13,14,16,17,19,20 | sem transação duplicada, paralelismo entre telefones, ordem no mesmo telefone, timeout pós-criação, shutdown devolve jobs, conta/categoria de outro usuário, sem assinatura não chama LLM | `test_processing_consumer.py` |
-| 15 | confirmação pendente sobrevive ao restart | `test_conversation_store.py` |
+| 15                  | confirmação pendente sobrevive ao restart                                                                                                                                                 | `test_conversation_store.py`  |
 
 Lado NestJS — `apps/api/src/internal/internal.service.spec.ts`: casos de `idempotencyKey` (hit devolve a
 existente sem criar; `P2002` concorrente devolve a existente; `source` gravado como `whatsapp`).

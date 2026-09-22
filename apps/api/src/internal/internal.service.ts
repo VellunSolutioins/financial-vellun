@@ -430,7 +430,12 @@ export class InternalService {
   }
 
   private async recordExtraction(dto: AiEventDto) {
-    if (!dto.userId || !dto.rawInput || dto.extractedPayload === undefined || dto.confidence === undefined) {
+    if (
+      !dto.userId ||
+      !dto.rawInput ||
+      dto.extractedPayload === undefined ||
+      dto.confidence === undefined
+    ) {
       throw new BadRequestException(
         'userId, rawInput, extractedPayload e confidence são obrigatórios para extrações',
       );

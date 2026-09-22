@@ -7,10 +7,12 @@ Hoje o webhook `POST /webhook/whatsapp` ([webhook.py](../apps/ai-agent/src/route
 O objetivo é introduzir uma camada de **ingestão → buffer/debounce por telefone → processamento assíncrono → contexto conversacional → idempotência**, evoluindo de um MVP em memória até uma arquitetura de produção com Redis/fila. A "Definição de Pronto" está em [requisitos §18](../docs/whatsapp-ai-async-processing-requirements.md).
 
 **Decisões do usuário:**
+
 - Escopo-alvo: **Etapas 1–5** (MVP completo + hardening de produção).
 - Messenger: **stub de log em dev**, **integração real de provedor em produção**, selecionável por env (mesmo padrão de `llm/factory.py`).
 
 ### Estado atual confirmado pela exploração
+
 - API já tem modelos `WhatsappContact`, `AiConversation`, `AiMessage`, `AiExtractedTransaction` ([schema.prisma:212-276](../apps/api/prisma/schema.prisma)) e enums `AiConversationStatus`/`AiMessageDirection`/`AiExtractionStatus`.
 - `recordMessage` já faz upsert do contato, reusa conversa `active` e **já retorna `{ id, conversationId }`** ([internal.service.ts:109-151](../apps/api/src/internal/internal.service.ts)).
 - Existe `normalizePhone` em [phone.util.ts](../apps/api/src/common/phone.util.ts) e `InternalApiKeyGuard` em [internal-api-key.guard.ts](../apps/api/src/internal/guards/internal-api-key.guard.ts).
@@ -112,12 +114,14 @@ O objetivo é introduzir uma camada de **ingestão → buffer/debounce por telef
 ## Arquivos principais
 
 **API (`apps/api`)**
+
 - [internal.controller.ts](../apps/api/src/internal/controllers/internal.controller.ts) — novo endpoint de histórico
 - [internal.service.ts](../apps/api/src/internal/internal.service.ts) — `listRecentMessagesByPhone`, idempotência em `recordMessage`
 - [schema.prisma](../apps/api/prisma/schema.prisma) — campos/índices em `AiMessage` + migration
 - reusar [phone.util.ts](../apps/api/src/common/phone.util.ts), `InternalApiKeyGuard`
 
 **Agent (`apps/ai-agent`)**
+
 - [webhook.py](../apps/ai-agent/src/routers/webhook.py) — só validar + bufferizar + responder
 - `services/message_buffer.py` (novo) — buffer/debounce/lock + interface `BufferBackend`
 - `services/message_processor.py` (novo) — lógica extraída de `_process_message`
@@ -135,6 +139,7 @@ O objetivo é introduzir uma camada de **ingestão → buffer/debounce por telef
 **Unitários (API):** histórico retorna ordenado/limitado/normalizado; `recordMessage` cria conversa quando não existe e reusa a ativa; idempotência por `providerMessageId`.
 
 **Integração / manual (HTTP)** — sequência do §15.3:
+
 ```bash
 curl -X POST http://localhost:8010/webhook/whatsapp -H "Content-Type: application/json" \
   -d '{"phone":"+5511999999999","message":"gastei","message_id":"m1"}'
@@ -143,6 +148,7 @@ curl -X POST http://localhost:8010/webhook/whatsapp -H "Content-Type: applicatio
 curl -X POST http://localhost:8010/webhook/whatsapp -H "Content-Type: application/json" \
   -d '{"phone":"+5511999999999","message":"no mercado","message_id":"m3"}'
 ```
+
 Esperado: 3 inbound salvas, **1** processamento, **1** lançamento, 1 outbound salva. Validar também: dois telefones intercalados não misturam contexto; telefone não vinculado recebe mensagem de orientação; resposta curta com histórico ("internet" após "paguei 300") completa o lançamento; reenvio de `m1` não duplica.
 
 Rodar o stack com `pnpm dev` (DB + API + agent). Aplicar migration com `pnpm --filter @financial-vellun/api exec prisma migrate dev`.

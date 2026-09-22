@@ -37,6 +37,7 @@ ao pedir um novo; rotas públicas + throttled.
 ### Backend (`apps/api`)
 
 **1. Prisma — model de token** ([schema.prisma](apps/api/prisma/schema.prisma))
+
 - Novo model `PasswordResetToken { id, userId, tokenHash @unique, expiresAt, usedAt?, createdAt }`
   com `user User @relation(onDelete: Cascade)` e índice em `userId`. Adicionar
   `passwordResetTokens PasswordResetToken[]` ao model `User`. Gerar migration
@@ -44,6 +45,7 @@ ao pedir um novo; rotas públicas + throttled.
 
 **2. Módulo de e-mail** — novo `src/mail/` (espelha o padrão factory+log do
 `apps/ai-agent/src/services/messenger/factory.py`)
+
 - `MailService` com método `sendPasswordReset(to, resetUrl)`.
 - Transport selecionado por `MAIL_PROVIDER` (`log` | `resend`): **log** apenas registra o link
   (dev); **resend** usa o SDK `resend` com `RESEND_API_KEY` e `MAIL_FROM`. Falha de envio é
@@ -51,6 +53,7 @@ ao pedir um novo; rotas públicas + throttled.
 
 **3. Auth — endpoints** ([auth.service.ts](apps/api/src/auth/auth.service.ts) +
 [auth.controller.ts](apps/api/src/auth/auth.controller.ts))
+
 - `forgotPassword(email)`: busca usuário; se existir, apaga tokens não usados anteriores, gera
   token (`crypto.randomBytes(32).toString('hex')`), grava `sha256(token)` + `expiresAt = now+1h`,
   chama `mailService.sendPasswordReset`. **Sempre** retorna `{ message: genérico }`.
@@ -58,7 +61,7 @@ ao pedir um novo; rotas públicas + throttled.
   não expirado (senão `BadRequestException` "Link inválido ou expirado"); atualiza
   `user.passwordHash` (bcrypt 12, como em `updatePassword`); marca `usedAt`. Retorno genérico.
 - DTOs `ForgotPasswordDto { email @IsEmail }` e `ResetPasswordDto { token @IsString, newPassword
-  @MinLength(8) }`.
+@MinLength(8) }`.
 - Rotas `POST /auth/forgot-password` e `POST /auth/reset-password` (públicas — sem `JwtAuthGuard`),
   com `@UseGuards(ThrottlerGuard)` + `@Throttle` (ex.: 5/15min).
 
@@ -70,21 +73,24 @@ rotas de recuperação). Atualizar [.env.example](apps/api/.env.example) com `MA
 ### Frontend (`apps/web`)
 
 **5. Telas** (em `app/(auth)/`, layout já existente)
+
 - `esqueci-senha/page.tsx`: form de e-mail → `forgotPassword` → exibe mensagem genérica de sucesso
   ("Se o e-mail existir, enviamos um link…") com toast.
 - `redefinir-senha/page.tsx`: lê `token` da query (`useSearchParams`, dentro de `<Suspense>`),
   nova senha + confirmar usando **`PasswordInput`**, validação Zod (mín. 8 + coincidência) →
   `resetPassword` → toast + redirect para `/login`. Sem token válido na URL, mostra erro.
-- [login/page.tsx](apps/web/src/app/(auth)/login/page.tsx): adicionar link **"Esqueci minha
+- [login/page.tsx](<apps/web/src/app/(auth)/login/page.tsx>): adicionar link **"Esqueci minha
   senha"** → `/esqueci-senha`.
 
 **6. Client + rotas públicas**
+
 - [lib/auth.ts](apps/web/src/lib/auth.ts): `forgotPassword(email)` e `resetPassword(token,
-  newPassword)` (POST nas rotas; pulam refresh, pois são `/auth/*` — já tratado no api-client).
+newPassword)` (POST nas rotas; pulam refresh, pois são `/auth/*` — já tratado no api-client).
 - [middleware.ts](apps/web/src/middleware.ts): adicionar `/esqueci-senha` e `/redefinir-senha` ao
   `PUBLIC_PATHS`.
 
 ### Fora de escopo (anotado para depois)
+
 Revogar sessões/refresh tokens ativos após o reset exigiria um store/versão de token (hoje o
 refresh é JWT stateless) — fica como melhoria futura.
 

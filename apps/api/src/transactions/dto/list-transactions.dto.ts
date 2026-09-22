@@ -1,4 +1,4 @@
-import { IsDateString, IsEnum, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsDateString, IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { TransactionSource, TransactionStatus, TransactionType } from '@prisma/client';
 import { Type } from 'class-transformer';
@@ -51,12 +51,23 @@ export class ListTransactionsDto {
   @Min(1)
   page?: number = 1;
 
-  @ApiProperty({ default: 20, required: false })
+  /**
+   * 10 por página, a regra de leitura confortável em mobile do CLAUDE.md. Era
+   * 20: o dobro de linhas por página e o dobro de trabalho por request, para
+   * uma tela que em celular já exigia rolagem na metade disso.
+   *
+   * O teto existe porque o parâmetro é público: sem ele, `?limit=1000000` é uma
+   * varredura da tabela inteira por request. 500 é o que a tela de pendentes
+   * pede hoje (`PendingTransactionsView`), então o teto não muda nada que já
+   * funciona — só fecha a porta do abuso.
+   */
+  @ApiProperty({ default: 10, maximum: 500, required: false })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  limit?: number = 20;
+  @Max(500)
+  limit?: number = 10;
 
   @ApiProperty({ default: 'transactionDate', required: false })
   @IsOptional()

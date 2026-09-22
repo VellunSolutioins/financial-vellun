@@ -70,7 +70,14 @@ novos.
 Resposta saudável:
 
 ```json
-{ "status": "ok", "pipeline": "broker", "broker": "up", "consumers": "up", "flusher": "up", "redis": "up" }
+{
+  "status": "ok",
+  "pipeline": "broker",
+  "broker": "up",
+  "consumers": "up",
+  "flusher": "up",
+  "redis": "up"
+}
 ```
 
 `consumers: "disabled"` e `flusher: "disabled"` são esperados quando
@@ -119,21 +126,21 @@ série por URL tentada.
 
 ### O que cada uma indica
 
-| Métrica                                                | Leitura                                                                                                           |
-| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| Métrica                                                | Leitura                                                                                                                                                                                                                     |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `webhook_received` / `publish_confirmed`               | divergência entre os dois indica itens descartados antes de publicar (payload sem mensagem, ou item inválido: `webhook_invalid_item`). Texto longo demais **é** publicado, como não suportado: veja `webhook_text_too_long` |
-| `publish_failed`                                       | o webhook devolveu `503`; o provedor vai reenviar                                                                 |
-| `webhook_latency_ms`                                   | inclui o _publisher confirm_. Subida sustentada = broker sob pressão                                              |
-| `messages_consumed` / `messages_duplicated`            | duplicadas altas são normais após um reenvio da Meta; sustentadas indicam ack lento                               |
-| `inbound_grouped` / `group_flushed` / `jobs_published` | acompanham o funil de consolidação                                                                                |
-| `receive_to_process_ms`                                | tempo entre receber e começar a processar; inclui o debounce (5 s)                                                |
-| `processing_duration_ms`                               | duração do processamento; dominado pela latência do LLM                                                           |
-| `jobs_deferred`                                        | jobs adiados por lock de telefone. Alto = muita mensagem simultânea do mesmo número                               |
-| `jobs_duplicated`                                      | reentregas descartadas pelo marcador `job:done`                                                                   |
-| `transactions_created` / `transactions_idempotent_hit` | lançamentos criados e lançamentos devolvidos por idempotência                                                     |
-| `transaction_failed`                                   | a API recusou o lançamento (conta/categoria inválida, sem assinatura)                                             |
-| `whatsapp_send_failed`                                 | falha ao responder ao usuário                                                                                     |
-| `dlq` / `dlq_messages`                                 | qualquer valor diferente de zero pede investigação                                                                |
+| `publish_failed`                                       | o webhook devolveu `503`; o provedor vai reenviar                                                                                                                                                                           |
+| `webhook_latency_ms`                                   | inclui o _publisher confirm_. Subida sustentada = broker sob pressão                                                                                                                                                        |
+| `messages_consumed` / `messages_duplicated`            | duplicadas altas são normais após um reenvio da Meta; sustentadas indicam ack lento                                                                                                                                         |
+| `inbound_grouped` / `group_flushed` / `jobs_published` | acompanham o funil de consolidação                                                                                                                                                                                          |
+| `receive_to_process_ms`                                | tempo entre receber e começar a processar; inclui o debounce (5 s)                                                                                                                                                          |
+| `processing_duration_ms`                               | duração do processamento; dominado pela latência do LLM                                                                                                                                                                     |
+| `jobs_deferred`                                        | jobs adiados por lock de telefone. Alto = muita mensagem simultânea do mesmo número                                                                                                                                         |
+| `jobs_duplicated`                                      | reentregas descartadas pelo marcador `job:done`                                                                                                                                                                             |
+| `transactions_created` / `transactions_idempotent_hit` | lançamentos criados e lançamentos devolvidos por idempotência                                                                                                                                                               |
+| `transaction_failed`                                   | a API recusou o lançamento (conta/categoria inválida, sem assinatura)                                                                                                                                                       |
+| `whatsapp_send_failed`                                 | falha ao responder ao usuário                                                                                                                                                                                               |
+| `dlq` / `dlq_messages`                                 | qualquer valor diferente de zero pede investigação                                                                                                                                                                          |
 
 Todo log relacionado ao mesmo evento carrega `correlationId`,
 `providerMessageId`, `jobId` (quando aplicável) e o telefone **hasheado** em

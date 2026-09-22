@@ -3,7 +3,7 @@
 > **Atualização (2026-09-05).** As seções 8.2 e 16.1 previam migrar o buffer em
 > memória para Redis antes de produção. Isso foi superado por uma arquitetura de
 > mensageria durável com RabbitMQ: o webhook apenas valida, normaliza e publica
-> (respondendo `202` após o *publisher confirm*), e todo o processamento roda em
+> (respondendo `202` após o _publisher confirm_), e todo o processamento roda em
 > consumers com ack manual, retry por buckets e DLQ.
 >
 > - Visão geral e variáveis: [README](../README.md#arquitetura-de-processamento-de-mensagens-whatsapp--ia)
@@ -1354,4 +1354,3 @@ A implementação pode ser considerada pronta para MVP quando:
 - telefone não vinculado recebe resposta adequada;
 - testes principais passam;
 - logs permitem rastrear uma mensagem do webhook até a transação criada.
-
