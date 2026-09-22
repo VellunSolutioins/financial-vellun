@@ -131,6 +131,11 @@ class OutboundMessageV1(_VersionedMessage):
     contact_id: str | None = Field(default=None, alias="contactId")
     #: Para quem lê o log e o catálogo de falhas: de onde a resposta veio.
     kind: Literal["reply", "notice"] = "reply"
+    #: Quando a primeira mensagem do usuário chegou ao webhook. É o que fecha a
+    #: métrica fim a fim: sem carregá-lo até aqui, a única latência mensurável
+    #: seria a de cada etapa isolada, e a soma delas não é o que o usuário
+    #: sente (não inclui tempo de fila).
+    first_received_at: datetime | None = Field(default=None, alias="firstReceivedAt")
     correlation_id: str = Field(default_factory=new_id, alias="correlationId")
     created_at: datetime = Field(default_factory=utcnow, alias="createdAt")
 

@@ -144,6 +144,24 @@ prometheus.scrape "rabbitmq_consumidores" {
   scrape_timeout  = "15s"
 }
 
+// Idade da mensagem mais antiga por fila — ver a justificativa no config de
+// produção. Localmente é onde se confere que o publisher está mesmo marcando a
+// propriedade AMQP `timestamp`: sem ela, o plugin reporta 0.
+prometheus.scrape "rabbitmq_idade_da_fila" {
+  targets = [
+    {
+      __address__      = "rabbitmq:15692",
+      __metrics_path__ = "/metrics/detailed",
+      __param_family   = "queue_metrics",
+      job              = "rabbitmq",
+    },
+  ]
+
+  forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+  scrape_interval = "15s"
+  scrape_timeout  = "15s"
+}
+
 // Mesmas regras de descarte do config de produção — ver a justificativa lá.
 prometheus.relabel "corta_ruido" {
   forward_to = [prometheus.remote_write.grafana_cloud.receiver]

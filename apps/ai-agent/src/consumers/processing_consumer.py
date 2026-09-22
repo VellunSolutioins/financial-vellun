@@ -170,6 +170,7 @@ class MessageProcessingConsumer:
                 job_id=job.job_id,
                 user_id=identidade.get("userId"),
                 contact_id=identidade.get("contactId"),
+                first_received_at=job.first_received_at,
             )
 
         # Só marca como concluído depois que o estado final está persistido

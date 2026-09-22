@@ -88,6 +88,12 @@ KNOWN_COUNTERS = (
     "vision_success",
     "vision_fail",
     # Agrupamento
+    # `flusher_polls` e `flusher_groups_found` respondem se vale sair do
+    # polling: a razão entre eles é a fração de ciclos que encontrou trabalho.
+    # Perto de zero, quase todo ciclo é desperdício e um gatilho por evento se
+    # paga; perto de um, o polling está no ritmo certo.
+    "flusher_polls",
+    "flusher_groups_found",
     "group_flushed",
     "group_flush_failed",
     "buffer_flush",
@@ -140,6 +146,7 @@ KNOWN_TIMINGS = {
     "processing_duration_ms": "processing_duration_seconds",
     "receive_to_process_ms": "receive_to_process_seconds",
     "outbound_send_ms": "outbound_send_seconds",
+    "message_end_to_end_ms": "message_end_to_end_seconds",
 }
 
 
@@ -190,6 +197,15 @@ class Metrics:
     # ── Escrita ─────────────────────────────────────────────────────────────
     def incr(self, name: str, amount: int = 1) -> None:
         self._counter(name).inc(amount)
+
+    def declare_timing(self, name: str) -> None:
+        """Cria o histograma agora, mesmo sem nenhuma observação ainda.
+
+        Mesma razão de ``KNOWN_COUNTERS``: uma série que só nasce na primeira
+        ocorrência faz ``absent(...)`` responder "sem dado" em vez de "zero", e
+        não há como alertar sobre algo que nunca apareceu.
+        """
+        self._histogram(name)
 
     def observe_ms(self, name: str, value_ms: float) -> None:
         """Registra uma duração dada em **milissegundos**.

@@ -31,7 +31,7 @@ from pydantic import ValidationError
 
 from ..config import settings
 from ..messaging.base import BrokerMessage, PermanentError
-from ..messaging.contracts import OutboundMessageV1
+from ..messaging.contracts import OutboundMessageV1, utcnow
 from ..observability.logging import log_context
 from ..services.distributed_state import StateStore, get_state_store
 from ..services.message_processor import message_processor
@@ -77,6 +77,16 @@ class OutboundMessageConsumer:
             await message_processor.deliver(message.phone, message.text)
             metrics.observe_ms("outbound_send_ms", (time.monotonic() - started) * 1000)
             metrics.incr("outbound_sent")
+
+            if message.first_received_at is not None:
+                # A única latência que corresponde ao que o usuário sente: do
+                # webhook até a mensagem sair. A soma das etapas não serve —
+                # ela não inclui o tempo parado em fila, que é exatamente o que
+                # cresce quando alguma coisa está apertada.
+                metrics.observe_ms(
+                    "message_end_to_end_ms",
+                    max((utcnow() - message.first_received_at).total_seconds() * 1000, 0.0),
+                )
 
             if chave is not None:
                 # Depois do envio, nunca antes: marcar primeiro e falhar o envio

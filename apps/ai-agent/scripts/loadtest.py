@@ -356,7 +356,7 @@ async def wait_drain(args: argparse.Namespace, segundos: float) -> tuple[dict, i
             print(
                 f"  filas={pendente:<5} grupos={grupos if grupos is not None else '?':<5}"
                 f" consumidas={contadores.get('messages_consumed', 0):<7}"
-                f" jobs={processados}/{publicados:<6} dlq={contadores.get('dlq_messages', 0)}"
+                f" jobs={processados}/{publicados:<6} dlq={contadores.get('dlq', 0)}"
             )
 
             if pendente == 0 and (grupos or 0) == 0 and processados >= publicados:

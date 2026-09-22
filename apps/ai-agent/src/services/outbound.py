@@ -22,6 +22,7 @@ comportamento degrada para a entrega direta em vez de falhar.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Literal
 
 from ..config import settings
@@ -53,6 +54,7 @@ class OutboundDispatcher:
         job_id: str | None = None,
         user_id: str | None = None,
         contact_id: str | None = None,
+        first_received_at: datetime | None = None,
     ) -> None:
         """Entrega ``text`` a ``phone`` — enfileirando ou na hora.
 
@@ -81,6 +83,7 @@ class OutboundDispatcher:
             job_id=job_id,
             user_id=user_id,
             contact_id=contact_id,
+            first_received_at=first_received_at,
         )
         message = (
             OutboundMessageV1(**campos, correlation_id=correlacao)
