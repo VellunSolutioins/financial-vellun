@@ -1,0 +1,98 @@
+# Verificação de cada push e PR (plano de segurança, S3).
+#
+# A ordem espelha o gancho local (`.claude/hooks/check-quality.mjs`): lint,
+# tipos e testes. Os jobs são separados para que uma falha diga, pelo nome, o
+# que quebrou — e para rodarem em paralelo.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Um push novo cancela a verificação anterior do mesmo branch.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  node:
+    name: Lint, tipos e testes (API e web)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Gerar o Prisma Client
+        run: pnpm --filter @financial-vellun/api exec prisma generate
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm --filter @financial-vellun/api test
+      # `pnpm format:check` ainda não entra: o repositório tem ~196 arquivos
+      # fora do padrão do Prettier (docs e planos, na maioria). Acrescentar o
+      # passo depois de um `pnpm format` de faxina, num commit só de formatação.
+
+  agent:
+    name: Testes do agente de IA
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/ai-agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # Instala pelo lock com hashes, igual à imagem: se o lock estiver
+      # desatualizado ou adulterado, o CI falha aqui.
+      - run: pip install --require-hashes -r requirements.lock
+      - run: pip install pytest pytest-asyncio
+      # Os testes de integração exigem RabbitMQ e Redis e ficam de fora (o
+      # `addopts` do pyproject já os desmarca).
+      - run: python -m pytest -q
+
+  audit:
+    name: Auditoria de dependências
+    runs-on: ubuntu-latest
+    # Informativo por enquanto: o repositório tem um passivo conhecido (Next.js
+    # 14, sem correção para dois avisos críticos, e pacotes transitivos). Passar
+    # para bloqueante assim que o passivo for zerado — é o que dá sentido ao job.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Falha em vulnerabilidade alta ou crítica; as demais aparecem no log.
+      - name: pnpm audit
+        run: pnpm audit --audit-level high
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: pip-audit
+        run: |
+          pip install pip-audit
+          pip-audit --requirement apps/ai-agent/requirements.lock --disable-pip
+
+  secrets:
+    name: Varredura de segredos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Histórico completo: um segredo removido no último commit continua
+          # nos anteriores, e é de lá que precisa ser rotacionado.
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

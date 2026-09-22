@@ -285,6 +285,19 @@ Instalar dependencias usando o Python da propria venv:
 Redis e RabbitMQ (`redis`, `aio-pika`) já fazem parte das dependências
 obrigatórias — o extra `[redis]` existe só por compatibilidade.
 
+**A imagem Docker instala pelo `requirements.lock`**, com versões fixas e hash
+de cada arquivo (`pip install --require-hashes`): o build de hoje traz
+exatamente os pacotes que foram conferidos. O `requirements.txt` continua sendo
+a lista de dependências diretas. Depois de mexer nele, regere o lock — dentro de
+um container Linux, para resolver as dependências do ambiente da imagem e não do
+Windows:
+
+```bash
+cd apps/ai-agent
+docker run --rm -v "$PWD:/w" -w /w python:3.12-slim \
+  sh -c "pip install -q pip-tools && pip-compile --generate-hashes --output-file requirements.lock requirements.txt"
+```
+
 Para rodar os testes, instale também o grupo `dev` (pytest). O `--group` exige
 pip ≥ 25.1, por isso a atualização do pip antes:
 
@@ -582,7 +595,7 @@ pnpm --filter @financial-vellun/web start
 ```bash
 cd apps/ai-agent
 python -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m pip install --require-hashes -r requirements.lock
 
 # Processo que recebe os webhooks (RUN_CONSUMERS_IN_API=false: só publica)
 .venv/bin/python -m uvicorn src.main:app --host 0.0.0.0 --port 8010

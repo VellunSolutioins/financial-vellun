@@ -267,6 +267,34 @@ Decisões já tomadas:
 
 ## S3 — Médio: dependências, supply chain, container
 
+> **Status (22/09/2026): implementado na branch `feat/seguranca-s1`, menos a migração do
+> Next.js.** Decisões e achados:
+>
+> - **Lock Python:** `apps/ai-agent/requirements.lock` com versões fixas e hashes, gerado
+>   dentro de `python:3.12-slim` (no Windows, o resolvedor descartaria `uvloop`/`httptools`).
+>   A suíte foi rodada no container com as versões travadas antes de adotá-las. A imagem e o
+>   CI instalam com `--require-hashes`; `requirements.txt` segue como lista de diretas.
+> - **Container:** `Dockerfile.ai-agent` com base fixada por digest, instalação pelo lock,
+>   usuário `agent` (uid 10001) e `HEALTHCHECK` via `urllib` (sem curl na imagem).
+> - **Frontend:** headers em `next.config.js` (CSP em `Report-Only`, `X-Frame-Options`,
+>   `nosniff`, `Referrer-Policy`, `Permissions-Policy`, HSTS) e `poweredByHeader: false`.
+>   A CSP fica em relatório porque o runtime do Next injeta script e estilo inline.
+> - **CI** (`.github/workflows/ci.yml`): lint/tipos/testes da API e do web, testes do agente
+>   pelo lock, `pnpm audit` + `pip-audit` e gitleaks com histórico completo.
+>   - A auditoria entra como **informativa** (`continue-on-error`): hoje o repositório tem 93
+>     avisos, 3 críticos. Virar bloqueante quando o passivo for zerado.
+>   - `pnpm format:check` ficou fora: ~196 arquivos (docs e planos) estão fora do padrão;
+>     entra depois de um commit de faxina só com formatação.
+> - **`packageManager`** passou a `pnpm@10.15.0`, que é quem escreveu o `pnpm-lock.yaml` e
+>   instalou o `node_modules`; com 9.0.0 declarado, o pnpm local falhava por store
+>   incompatível.
+> - **Pendente — Next.js:** a auditoria aponta **duas RCE críticas** corrigidas só a partir
+>   de 15.5.24 (a linha 14 não tem correção): execução remota em servidor hospedado em
+>   Windows e na API de otimização de imagem com AVIF. O app não usa `next/image`, e a
+>   hospedagem é Vercel (Linux), o que reduz a exposição, mas não a elimina. A migração para
+>   Next 15 exige React 19 e revisão do web inteiro, então fica em branch própria, com
+>   verificação manual no navegador.
+
 - Migrar `apps/web` para uma linha suportada do Next.js, em branch próprio (§9).
 - `next.config.js` com headers de segurança e CSP em modo `Report-Only`.
 - **Python:**
