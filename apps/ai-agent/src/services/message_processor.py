@@ -18,17 +18,24 @@ from .audit_service import audit_service
 from .clock import today_local
 from .confirmation_rules import needs_confirmation
 from .contact_service import contact_service
-from .conversation_manager import conversation_manager
+from .conversation_manager import ConversationState, conversation_manager
 from .intent_classifier import intent_classifier
 from .messenger import messenger
 from .metrics import metrics
+from .phone_verification import (
+    ALREADY_LINKED_MESSAGE,
+    NO_PENDING_CODE_MESSAGE,
+    extract_verification_code,
+    phone_verification_service,
+)
 from .subscription_gate import subscription_gate
 from .transaction_creator import transaction_creator
 
 logger = logging.getLogger(__name__)
 
 NOT_LINKED_MESSAGE = (
-    "Seu número não está vinculado a uma conta. Acesse o app para vincular."
+    "Seu número ainda não está vinculado a uma conta. No app, abra Minha Conta, "
+    "toque em \"Verificar WhatsApp\" e envie o código aqui."
 )
 HELP_MESSAGE = (
     "Posso registrar seus lançamentos! Ex.: 'gastei 100 no mercado' ou "
@@ -115,11 +122,31 @@ class MessageProcessor:
 
         metrics.incr("messages_processed")
 
+        # Código de verificação do número: a API decide se confere. O código
+        # com rótulo ("Código: 123456", como o app preenche) é conferido antes
+        # do contato, porque o número que o envia ainda não é vinculado.
+        code = extract_verification_code(message)
+        if code is not None and code.labeled:
+            outcome = await phone_verification_service.confirm(phone, code.value)
+            if outcome.reply is not None:
+                return await self._respond(phone, outcome.reply)
+
         contact = await contact_service.find_by_phone(phone)
         if contact is None:
+            if code is not None and not code.labeled:
+                # Número solto só vale como código para quem ainda não tem vínculo.
+                outcome = await phone_verification_service.confirm(phone, code.value)
+                if outcome.reply is not None:
+                    return await self._respond(phone, outcome.reply)
             metrics.incr("not_linked")
             logger.info("Contato não vinculado")
+            if code is not None:
+                return await self._respond(phone, NO_PENDING_CODE_MESSAGE)
             return await self._respond(phone, NOT_LINKED_MESSAGE)
+        if code is not None and code.labeled:
+            # Código sem desafio aberto vindo de um número já vinculado (ex.:
+            # reenvio da mesma mensagem). Não é um lançamento para o LLM.
+            return await self._respond(phone, ALREADY_LINKED_MESSAGE)
 
         user_id = contact["userId"]
 
@@ -135,6 +162,15 @@ class MessageProcessor:
             intent = FinancialIntent(**pre_extracted)
         else:
             state = await conversation_manager.get(phone)
+
+            if state.awaiting_confirmation and not state.belongs_to(contact):
+                # O número mudou de dono (ou foi revogado e reverificado) depois
+                # da pergunta: a resposta não pode concluir o lançamento de outra
+                # conta. Descarta e trata a mensagem como nova.
+                metrics.incr("pending_discarded_link_changed")
+                logger.info("Confirmação pendente descartada: vínculo do número mudou")
+                await conversation_manager.clear(phone)
+                state = ConversationState()
 
             if state.awaiting_confirmation and state.pending_intent is not None:
                 context = await self._build_context(user_id, contact, phone)
@@ -158,6 +194,7 @@ class MessageProcessor:
             force_confirm=force_confirm,
             confirm_question=confirm_question,
             idempotency_key=idempotency_key,
+            contact=contact,
         )
 
     async def handle_intent(
@@ -172,12 +209,14 @@ class MessageProcessor:
         force_confirm: bool = False,
         confirm_question: str | None = None,
         idempotency_key: str | None = None,
+        contact: dict | None = None,
     ) -> str:
         """Trata um ``FinancialIntent`` já extraído (texto, áudio ou imagem).
 
         ``response_prefix`` é prefixado na resposta final (ex.: eco da transcrição
         de áudio). ``force_confirm`` força o ramo de confirmação independentemente
-        das regras (usado para comprovantes/imagem).
+        das regras (usado para comprovantes/imagem). ``contact`` é o vínculo que
+        fica gravado junto de uma confirmação pendente.
         """
         # Intenções não-transacionais.
         if intent.intent == IntentType.help:
@@ -203,7 +242,7 @@ class MessageProcessor:
 
         if must_confirm:
             metrics.incr("confirmation_requested")
-            await conversation_manager.set_pending(phone, intent)
+            await conversation_manager.set_pending(phone, intent, contact)
             await audit_service.log_extraction(
                 user_id=user_id,
                 raw_input=raw_message,

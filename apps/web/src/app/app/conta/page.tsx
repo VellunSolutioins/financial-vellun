@@ -1,5 +1,6 @@
 'use client';
 import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -10,19 +11,20 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/components/ui/toast';
+import { useConfirm } from '@/components/ui/confirm';
+import { WhatsappCard } from '@/components/whatsapp/whatsapp-card';
 import {
   getProfile,
+  logoutAll,
   updateBusinessProfile,
   updateIndividualProfile,
   updateMe,
   updatePassword,
 } from '@/lib/auth';
 import {
-  PHONE_REGEX,
   CEP_REGEX,
   CPF_REGEX,
   CNPJ_REGEX,
-  maskPhone,
   maskCep,
   maskCpf,
   maskCnpj,
@@ -33,7 +35,8 @@ import {
 const schema = z.object({
   name: z.string().min(1, 'Nome obrigatório'),
   email: z.string().email('Email inválido'),
-  phone: z.string().regex(PHONE_REGEX, 'Telefone inválido').optional().or(z.literal('')),
+  // Exigida pela API só quando o e-mail muda (validado no envio).
+  currentPassword: z.string().optional().or(z.literal('')),
   postalCode: z.string().regex(CEP_REGEX, 'CEP inválido (00000-000)').optional().or(z.literal('')),
   street: z.string().optional().or(z.literal('')),
   addressNumber: z.string().optional().or(z.literal('')),
@@ -87,20 +90,24 @@ const profileTypeLabels: Record<string, string> = {
 export default function MinhaContaPage() {
   const { user, setUser } = useAuth();
   const toast = useToast();
+  const confirm = useConfirm();
+  const router = useRouter();
 
   const {
     register,
     handleSubmit,
     reset,
     setValue,
+    setError,
     trigger,
+    watch,
     formState: { errors, isSubmitting, isDirty },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: {
       name: '',
       email: '',
-      phone: '',
+      currentPassword: '',
       postalCode: '',
       street: '',
       addressNumber: '',
@@ -116,7 +123,7 @@ export default function MinhaContaPage() {
       reset({
         name: user.name,
         email: user.email,
-        phone: user.phone ? maskPhone(user.phone) : '',
+        currentPassword: '',
         postalCode: user.postalCode ? maskCep(user.postalCode) : '',
         street: user.street ?? '',
         addressNumber: user.addressNumber ?? '',
@@ -222,12 +229,20 @@ export default function MinhaContaPage() {
     }
   };
 
+  const emailValue = watch('email');
+  const emailChanged =
+    !!user && emailValue.trim().toLowerCase() !== user.email.trim().toLowerCase();
+
   const onSubmit = async (data: FormData) => {
+    if (emailChanged && !data.currentPassword) {
+      setError('currentPassword', { message: 'Informe a senha atual para trocar o e-mail' });
+      return;
+    }
     try {
       const updated = await updateMe({
         name: data.name,
         email: data.email,
-        phone: data.phone?.trim() ? data.phone.trim() : null,
+        currentPassword: emailChanged ? data.currentPassword : undefined,
         postalCode: data.postalCode?.trim() || undefined,
         street: data.street?.trim() || undefined,
         addressNumber: data.addressNumber?.trim() || undefined,
@@ -240,7 +255,7 @@ export default function MinhaContaPage() {
       reset({
         name: updated.name,
         email: updated.email,
-        phone: updated.phone ? maskPhone(updated.phone) : '',
+        currentPassword: '',
         postalCode: updated.postalCode ? maskCep(updated.postalCode) : '',
         street: updated.street ?? '',
         addressNumber: updated.addressNumber ?? '',
@@ -262,9 +277,27 @@ export default function MinhaContaPage() {
         newPassword: data.newPassword,
       });
       resetPwd({ currentPassword: '', newPassword: '', confirmNewPassword: '' });
-      toast.success('Senha atualizada com sucesso.');
+      toast.success('Senha atualizada. Os outros dispositivos foram desconectados.');
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Erro ao atualizar senha');
+    }
+  };
+
+  const onLogoutAll = async () => {
+    const ok = await confirm({
+      title: 'Sair de todos os dispositivos?',
+      description:
+        'Você será desconectado aqui e em qualquer outro navegador ou celular em que tenha entrado.',
+      confirmText: 'Sair de todos',
+      variant: 'destructive',
+    });
+    if (!ok) return;
+    try {
+      await logoutAll();
+      setUser(null);
+      router.push('/login');
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao encerrar as sessões');
     }
   };
 
@@ -304,20 +337,19 @@ export default function MinhaContaPage() {
               {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
             </div>
 
-            <div className="space-y-1">
-              <Label>Telefone</Label>
-              <Input
-                type="tel"
-                placeholder="(00) 00000-0000"
-                {...register('phone')}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                  const masked = maskPhone(e.target.value);
-                  e.target.value = masked;
-                  setValue('phone', masked, { shouldDirty: true });
-                }}
-              />
-              {errors.phone && <p className="text-xs text-destructive">{errors.phone.message}</p>}
-            </div>
+            {emailChanged && (
+              <div className="space-y-1">
+                <Label>Senha atual</Label>
+                <PasswordInput
+                  placeholder="Confirme sua senha para trocar o e-mail"
+                  autoComplete="current-password"
+                  {...register('currentPassword')}
+                />
+                {errors.currentPassword && (
+                  <p className="text-xs text-destructive">{errors.currentPassword.message}</p>
+                )}
+              </div>
+            )}
 
             <div className="border-t pt-4">
               <p className="text-sm font-medium">Endereço de cobrança</p>
@@ -396,6 +428,8 @@ export default function MinhaContaPage() {
           </form>
         </CardContent>
       </Card>
+
+      <WhatsappCard />
 
       <Card>
         <CardHeader>
@@ -523,6 +557,25 @@ export default function MinhaContaPage() {
               </Button>
             </div>
           </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Sessões</CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Perdeu um aparelho ou entrou num computador que não é seu? Encerre todas as sessões.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full sm:w-auto"
+            onClick={() => void onLogoutAll()}
+          >
+            Sair de todos os dispositivos
+          </Button>
         </CardContent>
       </Card>
     </div>

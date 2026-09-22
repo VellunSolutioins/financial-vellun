@@ -24,7 +24,10 @@ from .redis_client import RedisProvider, redis_provider
 
 logger = logging.getLogger(__name__)
 
-STATE_SCHEMA_VERSION = 1
+#: v2 acrescentou o vínculo (usuário, contato e versão do vínculo). Estados v1
+#: são descartados: sem o vínculo, não há como saber se o número ainda pertence
+#: a quem recebeu a pergunta.
+STATE_SCHEMA_VERSION = 2
 
 
 def _utcnow() -> datetime:
@@ -36,6 +39,20 @@ class ConversationState:
     pending_intent: FinancialIntent | None = None
     awaiting_confirmation: bool = False
     last_message_at: datetime = field(default_factory=_utcnow)
+    # Vínculo de quem recebeu a pergunta pendente (``userId``, ``contactId`` e
+    # ``linkVersion`` do contato). Se o número trocar de dono, a confirmação
+    # não pode ser concluída na conta de outra pessoa.
+    user_id: str | None = None
+    contact_id: str | None = None
+    link_version: int | None = None
+
+    def belongs_to(self, contact: dict) -> bool:
+        """``True`` se o vínculo atual do número é o mesmo da pergunta pendente."""
+        return (
+            self.user_id == contact.get("userId")
+            and self.contact_id == contact.get("contactId")
+            and self.link_version == contact.get("linkVersion")
+        )
 
     def to_json(self) -> str:
         return json.dumps(
@@ -48,6 +65,9 @@ class ConversationState:
                 ),
                 "awaitingConfirmation": self.awaiting_confirmation,
                 "lastMessageAt": self.last_message_at.isoformat(),
+                "userId": self.user_id,
+                "contactId": self.contact_id,
+                "linkVersion": self.link_version,
             },
             ensure_ascii=False,
         )
@@ -76,10 +96,14 @@ class ConversationState:
         except (KeyError, TypeError, ValueError):
             last = _utcnow()
 
+        link_version = data.get("linkVersion")
         return ConversationState(
             pending_intent=intent,
             awaiting_confirmation=bool(data.get("awaitingConfirmation")),
             last_message_at=last,
+            user_id=data.get("userId"),
+            contact_id=data.get("contactId"),
+            link_version=link_version if isinstance(link_version, int) else None,
         )
 
     def is_expired(self, ttl_seconds: int) -> bool:

@@ -473,6 +473,14 @@ def parse_args() -> argparse.Namespace:
 async def main() -> int:
     args = parse_args()
 
+    if not args.secret:
+        # O agente recusa webhook sem assinatura, exceto em ambiente local com
+        # WEBHOOK_ALLOW_UNSIGNED=true. Sem o segredo, toda requisição vira 401.
+        print(
+            "AVISO: sem --secret/WHATSAPP_WEBHOOK_SECRET os payloads vão sem assinatura; "
+            "só funciona com ENVIRONMENT=development e WEBHOOK_ALLOW_UNSIGNED=true."
+        )
+
     async with httpx.AsyncClient() as client:
         antes = await fetch_metrics(client, args.metrics, args.token)
         filas_antes = await fetch_queues(client, args.rabbit_api, args.rabbit_user, args.rabbit_pass)

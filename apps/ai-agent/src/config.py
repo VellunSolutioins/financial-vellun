@@ -1,6 +1,7 @@
 import os
 import time
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Fuso do processo em Brasília, para logs e bibliotecas que usam o horário local.
@@ -14,6 +15,13 @@ if hasattr(time, "tzset"):
     time.tzset()
 
 
+#: Valores de ENVIRONMENT tratados como ambiente local.
+LOCAL_ENVIRONMENTS = frozenset({"development", "dev", "local", "test"})
+
+#: Tamanho mínimo dos segredos compartilhados fora do ambiente local.
+MIN_SECRET_LENGTH = 16
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -25,7 +33,10 @@ class Settings(BaseSettings):
     )
 
     ai_agent_port: int = 8010
-    environment: str = "development"  # "development" | "production"
+    # Seguro por padrão: qualquer valor fora de `LOCAL_ENVIRONMENTS` (inclusive a
+    # variável ausente) é tratado como produção. Antes o padrão era
+    # "development", e um deploy sem ENVIRONMENT aceitava webhook sem assinatura.
+    environment: str = "production"  # "development" | "production"
     log_level: str = "INFO"  # nível dos logs da aplicação (DEBUG | INFO | WARNING | ...)
     main_api_url: str = "http://localhost:3001"
     web_url: str = "https://financial-vellun-web.vercel.app"  # base do link de regularização
@@ -33,14 +44,23 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     whatsapp_provider_token: str = ""
     whatsapp_webhook_secret: str = ""  # App Secret (valida X-Hub-Signature-256)
+    # Aceita webhook sem assinatura quando não há secret. Só tem efeito em
+    # ambiente local (simulação de mensagens); fora dele o boot recusa.
+    webhook_allow_unsigned: bool = False
     whatsapp_verify_token: str = ""  # token do handshake GET de verificação (Meta)
     whatsapp_provider: str = "log"  # "log" | "cloud-api" (Etapa 5)
     whatsapp_phone_number_id: str = ""
     whatsapp_api_base_url: str = "https://graph.facebook.com/v18.0"
 
     @property
+    def is_local(self) -> bool:
+        """Ambiente de desenvolvimento/teste, declarado explicitamente."""
+        return self.environment.strip().lower() in LOCAL_ENVIRONMENTS
+
+    @property
     def is_production(self) -> bool:
-        return self.environment.lower() in ("production", "prod")
+        """Tudo que não é declaradamente local recebe as regras de produção."""
+        return not self.is_local
 
     # LLM
     llm_provider: str = "rules"  # "openai" | "rules"
@@ -130,6 +150,38 @@ class Settings(BaseSettings):
     def is_broker_pipeline(self) -> bool:
         """`True` quando o webhook publica em fila (pipeline novo)."""
         return (self.message_pipeline or "broker").strip().lower() != "legacy"
+
+    @model_validator(mode="after")
+    def _recusar_configuracao_insegura(self) -> "Settings":
+        """Fora do ambiente local, configuração insegura impede o boot.
+
+        Falhar aqui, na importação, derruba o deploy antes de receber tráfego —
+        em vez de subir verde e recusar (ou pior, aceitar) cada requisição.
+        """
+        if self.is_local:
+            return self
+
+        problemas: list[str] = []
+        if not self.whatsapp_webhook_secret.strip():
+            problemas.append("WHATSAPP_WEBHOOK_SECRET vazio (assinatura do webhook)")
+        if self.webhook_allow_unsigned:
+            problemas.append("WEBHOOK_ALLOW_UNSIGNED=true só é permitido em ambiente local")
+        if len(self.internal_api_key.strip()) < MIN_SECRET_LENGTH:
+            problemas.append(
+                f"INTERNAL_API_KEY com menos de {MIN_SECRET_LENGTH} caracteres"
+            )
+        if not self.metrics_token.strip():
+            problemas.append("METRICS_TOKEN vazio (/metrics ficaria recusado)")
+        if (self.whatsapp_provider or "").strip().lower() in ("", "log", "none"):
+            problemas.append("WHATSAPP_PROVIDER=log não entrega respostas")
+
+        if problemas:
+            raise ValueError(
+                f"Configuração insegura para ENVIRONMENT={self.environment!r}: "
+                + "; ".join(problemas)
+                + ". Em desenvolvimento, use ENVIRONMENT=development."
+            )
+        return self
 
 
 settings = Settings()

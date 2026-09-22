@@ -11,11 +11,15 @@ import { CreateIndividualProfileDto } from './dto/create-individual-profile.dto'
 import { CreateBusinessProfileDto } from './dto/create-business-profile.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdatePasswordDto } from './dto/update-password.dto';
-import { normalizePhone } from '../common/phone.util';
+import { normalizeEmail } from '../common/email.util';
+import { SessionService } from '../auth/session.service';
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private sessions: SessionService,
+  ) {}
 
   async getProfile(userId: string) {
     const user = await this.prisma.user.findUnique({
@@ -76,7 +80,11 @@ export class UsersService {
     });
   }
 
-  async updatePassword(userId: string, dto: UpdatePasswordDto) {
+  /**
+   * Troca a senha e encerra as demais sessões do usuário: quem tinha um token
+   * roubado perde o acesso. A sessão que fez a troca continua ativa.
+   */
+  async updatePassword(userId: string, currentSessionId: string, dto: UpdatePasswordDto) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('Usuário não encontrado');
 
@@ -85,28 +93,41 @@ export class UsersService {
 
     const passwordHash = await bcrypt.hash(dto.newPassword, 12);
     await this.prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+    await this.sessions.revokeAllForUser(userId, currentSessionId);
 
     return { message: 'Senha atualizada com sucesso' };
   }
 
+  /**
+   * Atualiza os dados da conta. Trocar o e-mail exige a senha atual. O
+   * telefone não muda por aqui: ele só é gravado quando o número novo é
+   * verificado (`/users/me/phone/verification`).
+   */
   async updateUser(userId: string, dto: UpdateUserDto) {
-    if (dto.email) {
-      const emailOwner = await this.prisma.user.findUnique({ where: { email: dto.email } });
-      if (emailOwner && emailOwner.id !== userId) {
-        throw new ConflictException('Email já cadastrado');
-      }
-    }
+    const email = dto.email !== undefined ? normalizeEmail(dto.email) : undefined;
 
-    if (dto.phone !== undefined) {
-      await this.linkWhatsappContact(userId, dto.phone);
+    if (email !== undefined) {
+      const current = await this.prisma.user.findUnique({ where: { id: userId } });
+      if (!current) throw new NotFoundException('Usuário não encontrado');
+
+      if (email !== normalizeEmail(current.email)) {
+        const valid =
+          !!dto.currentPassword &&
+          (await bcrypt.compare(dto.currentPassword, current.passwordHash));
+        if (!valid) throw new UnauthorizedException('Senha atual incorreta');
+
+        const emailOwner = await this.prisma.user.findFirst({
+          where: { email: { equals: email, mode: 'insensitive' }, id: { not: userId } },
+        });
+        if (emailOwner) throw new ConflictException('Email já cadastrado');
+      }
     }
 
     return this.prisma.user.update({
       where: { id: userId },
       data: {
         name: dto.name,
-        email: dto.email,
-        phone: dto.phone,
+        email,
         postalCode: dto.postalCode,
         street: dto.street,
         addressNumber: dto.addressNumber,
@@ -131,27 +152,6 @@ export class UsersService {
         createdAt: true,
         updatedAt: true,
       },
-    });
-  }
-
-  /**
-   * Mantém o número informado em "Minha Conta" vinculado ao usuário na tabela
-   * `whatsapp_contacts` (formato canônico E.164), que é a fonte usada pelo
-   * webhook do WhatsApp para identificar o remetente.
-   */
-  private async linkWhatsappContact(userId: string, rawPhone: string) {
-    const phoneNumber = normalizePhone(rawPhone);
-    if (!phoneNumber) return;
-
-    const existing = await this.prisma.whatsappContact.findUnique({ where: { phoneNumber } });
-    if (existing && existing.userId && existing.userId !== userId) {
-      throw new ConflictException('Número de WhatsApp já vinculado a outra conta');
-    }
-
-    await this.prisma.whatsappContact.upsert({
-      where: { phoneNumber },
-      update: { userId, isVerified: true },
-      create: { phoneNumber, userId, isVerified: true },
     });
   }
 }

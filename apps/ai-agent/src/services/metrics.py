@@ -69,6 +69,12 @@ KNOWN_COUNTERS = (
     "inbound_buffered",
     "inbound_duplicate",
     "not_linked",
+    # Verificação de posse do número (código enviado ao bot)
+    "phone_verified",
+    "phone_verification_invalid",
+    "phone_verification_expired",
+    # Confirmação pendente descartada porque o número mudou de dono
+    "pending_discarded_link_changed",
     "message_too_long",
     "subscription_blocked",
     # Mídia

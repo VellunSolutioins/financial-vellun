@@ -171,8 +171,8 @@ model User {
   city          String?
   state         String?
 
-  createdAt    DateTime    @default(now()) @map("created_at")
-  updatedAt    DateTime    @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   individualProfile       IndividualProfile?
   businessProfile         BusinessProfile?
@@ -185,8 +185,58 @@ model User {
   aiExtractedTransactions AiExtractedTransaction[]
   subscriptions           Subscription[]
   payments                Payment[]
+  sessions                UserSession[]
+  phoneVerifications      PhoneVerification[]
 
   @@map("users")
+}
+
+// Sessão de login revogável. Cada login cria uma linha; o refresh token gira
+// nela mesma (uso único). `previousTokenHash` + `rotatedAt` toleram duas abas
+// renovando ao mesmo tempo; fora dessa janela, apresentar um token antigo é
+// reutilização e revoga a sessão. Os tokens nunca são guardados, só o hash.
+model UserSession {
+  id                String    @id @default(uuid())
+  userId            String    @map("user_id")
+  refreshTokenHash  String    @map("refresh_token_hash")
+  previousTokenHash String?   @map("previous_token_hash")
+  rotatedAt         DateTime? @map("rotated_at")
+  userAgent         String?   @map("user_agent")
+  ip                String?
+  createdAt         DateTime  @default(now()) @map("created_at")
+  lastUsedAt        DateTime  @default(now()) @map("last_used_at")
+  // Expiração deslizante (renovada a cada refresh) e prazo absoluto do login.
+  expiresAt         DateTime  @map("expires_at")
+  absoluteExpiresAt DateTime  @map("absolute_expires_at")
+  revokedAt         DateTime? @map("revoked_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_sessions")
+}
+
+// Desafio de posse do número de WhatsApp (reverse OTP): o usuário envia o
+// código ao bot a partir do número informado. Só o hash do código é guardado.
+// O vínculo em `whatsapp_contacts` só é criado quando o desafio é concluído.
+model PhoneVerification {
+  id           String    @id @default(uuid())
+  userId       String    @map("user_id")
+  // E.164 do número informado pelo usuário (chave da busca feita pelo agente).
+  phoneNumber  String    @map("phone_number")
+  // Número como o usuário digitou, gravado em `users.phone` ao verificar.
+  displayPhone String    @map("display_phone")
+  codeHash     String    @map("code_hash")
+  attempts     Int       @default(0)
+  expiresAt    DateTime  @map("expires_at")
+  consumedAt   DateTime? @map("consumed_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([phoneNumber])
+  @@map("phone_verifications")
 }
 
 model IndividualProfile {
@@ -311,17 +361,26 @@ model Contact {
 // ── WhatsApp ──────────────────────────────────────────────────────────────────
 
 model WhatsappContact {
-  id          String   @id @default(uuid())
-  userId      String?  @map("user_id")
-  phoneNumber String   @unique @map("phone_number")
+  id          String    @id @default(uuid())
+  userId      String?   @map("user_id")
+  phoneNumber String    @unique @map("phone_number")
   provider    String?
-  isVerified  Boolean  @default(false) @map("is_verified")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  // Só um contato verificado e não revogado identifica o usuário no WhatsApp.
+  isVerified  Boolean   @default(false) @map("is_verified")
+  verifiedAt  DateTime? @map("verified_at")
+  // Número desvinculado (troca de telefone ou posse comprovada por outra
+  // conta). `userId` é mantido para auditoria.
+  revokedAt   DateTime? @map("revoked_at")
+  // Incrementa a cada mudança de dono ou revogação. O agente guarda este valor
+  // junto da confirmação pendente e a descarta se ele mudar.
+  linkVersion Int       @default(0) @map("link_version")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
 
   user            User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
   aiConversations AiConversation[]
 
+  @@index([userId])
   @@map("whatsapp_contacts")
 }
 
@@ -421,8 +480,8 @@ model Subscription {
   createdAt              DateTime           @default(now()) @map("created_at")
   updatedAt              DateTime           @updatedAt @map("updated_at")
 
-  user     User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  plan     Plan                @relation(fields: [planId], references: [id])
+  user          User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan          Plan                  @relation(fields: [planId], references: [id])
   payments      Payment[]
   audits        SubscriptionAudit[]
   webhookEvents PaymentWebhookEvent[]
@@ -633,8 +692,8 @@ model OpsFailedMessage {
   retentionUntil DateTime @map("retention_until")
 
   /// Preenchidos pelo reprocessamento (Entrega 7).
-  reprocessedAt  DateTime? @map("reprocessed_at")
-  lastOperationId String?  @map("last_operation_id")
+  reprocessedAt   DateTime? @map("reprocessed_at")
+  lastOperationId String?   @map("last_operation_id")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

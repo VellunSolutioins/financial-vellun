@@ -2,6 +2,7 @@ import { Body, Controller, Get, Patch, Post, Req, UseGuards } from '@nestjs/comm
 import { ApiCookieAuth, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { AuthenticatedUser } from '../auth/session.service';
 import { UsersService } from './users.service';
 import { CreateIndividualProfileDto } from './dto/create-individual-profile.dto';
 import { CreateBusinessProfileDto } from './dto/create-business-profile.dto';
@@ -41,7 +42,7 @@ export class UsersController {
 
   @Patch('me/password')
   updatePassword(@Req() req: Request, @Body() dto: UpdatePasswordDto) {
-    const user = req.user as any;
-    return this.usersService.updatePassword(user.id, dto);
+    const user = req.user as AuthenticatedUser;
+    return this.usersService.updatePassword(user.id, user.sessionId, dto);
   }
 }

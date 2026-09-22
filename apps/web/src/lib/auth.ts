@@ -17,6 +17,8 @@ export interface User extends Address {
   phone?: string | null;
   profileType: 'individual' | 'business';
   hasProfile: boolean;
+  /** `true` quando há um número de WhatsApp verificado ligado à conta. */
+  whatsappVerified?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -51,14 +53,23 @@ export async function logout(): Promise<void> {
   await apiClient.post('/auth/logout', {});
 }
 
+/** Encerra a sessão em todos os dispositivos, inclusive neste. */
+export async function logoutAll(): Promise<void> {
+  await apiClient.post('/auth/logout-all', {});
+}
+
 export async function getMe(): Promise<User> {
   return apiClient.get<User>('/auth/me');
 }
 
+/**
+ * Atualiza os dados da conta. O telefone não muda por aqui: só pela verificação
+ * do WhatsApp (`lib/whatsapp.ts`). Trocar o e-mail exige `currentPassword`.
+ */
 export async function updateMe(data: {
   name?: string;
   email?: string;
-  phone?: string | null;
+  currentPassword?: string;
   postalCode?: string;
   street?: string;
   addressNumber?: string;

@@ -15,6 +15,11 @@ import { AiEventDto } from './dto/ai-event.dto';
 import { normalizePhone } from '../common/phone.util';
 import { parseDateOnly } from '../common/date.util';
 
+/** Vínculo que identifica o usuário: verificado e não revogado. */
+function isLinked(contact: { userId: string | null; isVerified: boolean; revokedAt: Date | null }) {
+  return contact.userId !== null && contact.isVerified && contact.revokedAt === null;
+}
+
 @Injectable()
 export class InternalService {
   private readonly logger = new Logger(InternalService.name);
@@ -37,14 +42,21 @@ export class InternalService {
     }
   }
 
-  /** Busca um usuário pelo número de telefone vinculado no WhatsApp. */
+  /**
+   * Usuário identificado pelo número de WhatsApp.
+   *
+   * Só um vínculo **verificado e ativo** identifica alguém: número apenas
+   * declarado no cadastro, ou revogado numa troca de telefone, responde `404`
+   * como não vinculado. `contactId` e `linkVersion` deixam o agente perceber
+   * que o número mudou de dono entre uma pergunta e a resposta do usuário.
+   */
   async findContactByPhone(phone: string) {
     const contact = await this.prisma.whatsappContact.findUnique({
       where: { phoneNumber: normalizePhone(phone) },
       include: { user: true },
     });
 
-    if (!contact || !contact.user) {
+    if (!contact || !contact.user || !isLinked(contact)) {
       throw new NotFoundException('Contato não vinculado a uma conta');
     }
 
@@ -53,10 +65,11 @@ export class InternalService {
       name: contact.user.name,
       profileType: contact.user.profileType,
       isVerified: contact.isVerified,
+      contactId: contact.id,
+      linkVersion: contact.linkVersion,
     };
   }
 
-  /** Lista as categorias disponíveis para o usuário (próprias + padrão do seu perfil). */
   async listCategories(userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('Usuário não encontrado');
@@ -381,7 +394,12 @@ export class InternalService {
    * índice criado só em SQL aparece como drift na próxima `prisma migrate dev`
    * — que geraria uma migration para removê-lo.
    */
-  private resolveActiveConversation(contact: { id: string; userId: string | null }) {
+  private resolveActiveConversation(contact: {
+    id: string;
+    userId: string | null;
+    isVerified: boolean;
+    revokedAt: Date | null;
+  }) {
     return this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM whatsapp_contacts WHERE id = ${contact.id} FOR UPDATE`;
 
@@ -401,7 +419,9 @@ export class InternalService {
       return tx.aiConversation.create({
         data: {
           whatsappContactId: contact.id,
-          userId: contact.userId,
+          // Número revogado mantém o userId antigo só para auditoria: a conversa
+          // de quem tem o número agora não pode ser atribuída ao dono anterior.
+          userId: isLinked(contact) ? contact.userId : null,
           status: 'active',
           lastMessageAt: new Date(),
         },

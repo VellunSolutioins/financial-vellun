@@ -84,7 +84,7 @@ pnpm --filter @financial-vellun/api db:seed                      # categorias pa
 | API                  | http://localhost:3001                      |
 | Swagger              | http://localhost:3001/api/docs             |
 | AI Agent             | http://localhost:8010                      |
-| RabbitMQ             | http://localhost:15672 (guest/guest)       |
+| RabbitMQ             | http://localhost:15672 (credenciais em `infra/docker/.env`) |
 
 **Observabilidade** — os três serviços expõem o mesmo trio. `/metrics` é texto
 Prometheus e exige `Authorization: Bearer ${METRICS_TOKEN}`; `/metrics.json` (só

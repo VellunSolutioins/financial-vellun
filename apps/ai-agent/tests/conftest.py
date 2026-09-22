@@ -17,6 +17,9 @@ os.environ["GROUP_STORE_BACKEND"] = "memory"
 os.environ["CONVERSATION_STATE_BACKEND"] = "memory"
 os.environ["RUN_CONSUMERS_IN_API"] = "false"
 os.environ["ENVIRONMENT"] = "development"
+# Os testes de webhook postam sem assinatura; em ambiente local isso só é
+# aceito com a opção explícita (plano de segurança, S1.4).
+os.environ["WEBHOOK_ALLOW_UNSIGNED"] = "true"
 # Variável de ambiente vence o `.env`: sem esta linha, o `LOKI_PUSH_URL` do
 # `.env` do desenvolvedor ligava o envio de log na suíte, que passava a mandar
 # linhas de teste para o Alloy local (ou a falhar com URLError, sem ele no ar).

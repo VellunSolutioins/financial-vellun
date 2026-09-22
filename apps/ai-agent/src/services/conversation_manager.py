@@ -59,10 +59,24 @@ class ConversationManager:
             return ConversationState()
         return state
 
-    async def set_pending(self, phone: str, intent: FinancialIntent) -> None:
+    async def set_pending(
+        self, phone: str, intent: FinancialIntent, contact: dict | None = None
+    ) -> None:
+        """Guarda a pergunta pendente junto do vínculo de quem a recebeu.
+
+        ``contact`` é o retorno de ``contact_service.find_by_phone``. Sem ele o
+        estado fica sem dono e nenhuma resposta o conclui (ver ``belongs_to``).
+        """
+        contact = contact or {}
         await self.store.save(
             phone,
-            ConversationState(pending_intent=intent, awaiting_confirmation=True),
+            ConversationState(
+                pending_intent=intent,
+                awaiting_confirmation=True,
+                user_id=contact.get("userId"),
+                contact_id=contact.get("contactId"),
+                link_version=contact.get("linkVersion"),
+            ),
         )
 
     async def clear(self, phone: str) -> None:
@@ -73,6 +87,9 @@ class ConversationManager:
         await self.store.save(phone, ConversationState(
             pending_intent=state.pending_intent,
             awaiting_confirmation=state.awaiting_confirmation,
+            user_id=state.user_id,
+            contact_id=state.contact_id,
+            link_version=state.link_version,
         ))
 
 

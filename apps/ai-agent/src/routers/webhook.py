@@ -57,14 +57,14 @@ def _verify_signature(raw_body: bytes, signature: str | None) -> bool:
     """Valida assinatura HMAC-SHA256.
 
     A Meta envia ``X-Hub-Signature-256: sha256=<hex>`` calculada sobre o corpo
-    bruto com o **App Secret**. Sem secret configurado, aceita (dev/simulado).
+    bruto com o **App Secret**. Sem secret, recusa — exceto em ambiente local
+    com ``WEBHOOK_ALLOW_UNSIGNED=true``, para simular mensagens.
     """
     if not settings.whatsapp_webhook_secret:
-        if settings.is_production:
-            # Em produção o secret é obrigatório (§13/Etapa 5).
-            logger.error("WHATSAPP_WEBHOOK_SECRET ausente em produção")
-            return False
-        return True
+        if settings.is_local and settings.webhook_allow_unsigned:
+            return True
+        logger.error("WHATSAPP_WEBHOOK_SECRET ausente: webhook recusado")
+        return False
     if not signature:
         return False
     expected = hmac.new(

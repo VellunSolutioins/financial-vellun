@@ -45,6 +45,21 @@ function SubscriptionBanner({
   return null;
 }
 
+const VERIFICAR_WHATSAPP_PATH = '/app/verificar-whatsapp';
+
+/** Aviso enquanto o WhatsApp não é verificado: sem ele, o bot não reconhece o usuário. */
+function WhatsappBanner({ verified, pathname }: { verified?: boolean; pathname: string }) {
+  if (verified || pathname === VERIFICAR_WHATSAPP_PATH || pathname === '/app/conta') return null;
+  return (
+    <div className="mb-4 rounded-md border border-blue-300 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+      Seu WhatsApp ainda não está verificado: o bot só registra lançamentos depois disso.{' '}
+      <Link href={VERIFICAR_WHATSAPP_PATH} className="font-semibold underline">
+        Verificar agora
+      </Link>
+    </div>
+  );
+}
+
 const navItems = {
   individual: [
     { href: '/app/pessoal/dashboard', label: 'Dashboard' },
@@ -198,6 +213,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <main className="flex-1 overflow-auto bg-gray-50 min-w-0 lg:h-screen lg:min-h-0">
         <div className="mx-auto max-w-6xl p-4 sm:p-6 lg:p-8">
           <SubscriptionBanner access={subscriptionAccess} pathname={pathname} />
+          <WhatsappBanner verified={user.whatsappVerified} pathname={pathname} />
           {children}
         </div>
       </main>

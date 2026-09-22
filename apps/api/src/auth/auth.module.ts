@@ -3,14 +3,14 @@ import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
+import { SessionService } from './session.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
-import { JwtRefreshStrategy } from './strategies/jwt-refresh.strategy';
-import { NotificationsModule } from '../notifications/notifications.module';
+import { WhatsappLinkModule } from '../whatsapp-link/whatsapp-link.module';
 
 @Module({
-  imports: [PassportModule, JwtModule.register({}), NotificationsModule],
+  imports: [PassportModule, JwtModule.register({}), WhatsappLinkModule],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, JwtRefreshStrategy],
-  exports: [AuthService],
+  providers: [AuthService, SessionService, JwtStrategy],
+  exports: [AuthService, SessionService],
 })
 export class AuthModule {}

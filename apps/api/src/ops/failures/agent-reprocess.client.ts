@@ -38,8 +38,8 @@ export interface ReprocessRequest {
  * e duplicar a camada de mensageria em TypeScript significaria manter duas
  * implementações de *publisher confirm*, topologia e contratos.
  *
- * Ao contrário de {@link WelcomeNotificationService}, este cliente **não** é
- * best-effort: o resultado decide o estado de uma linha do catálogo.
+ * Este cliente **não** é best-effort: o resultado decide o estado de uma linha
+ * do catálogo.
  */
 @Injectable()
 export class AgentReprocessClient {

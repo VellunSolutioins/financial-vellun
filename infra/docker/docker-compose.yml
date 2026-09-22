@@ -1,3 +1,6 @@
+# Portas publicadas só em 127.0.0.1: banco, broker e Redis ficam acessíveis a
+# esta máquina, nunca à rede (plano de segurança, S1.5). Credenciais vêm de
+# infra/docker/.env e são obrigatórias — sem fallback para senha padrão.
 services:
   postgres:
     image: postgres:16-alpine
@@ -8,7 +11,7 @@ services:
       TZ: America/Sao_Paulo
       PGTZ: America/Sao_Paulo
     ports:
-      - '5432:5432'
+      - '127.0.0.1:5432:5432'
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -20,7 +23,9 @@ services:
     restart: unless-stopped
 
   # Broker durável do pipeline WhatsApp (whatsapp.inbound.v1 / whatsapp.processing.v1).
-  # Painel de administração em http://localhost:15672 (guest/guest).
+  # Painel de administração em http://localhost:15672 (RABBITMQ_USER/RABBITMQ_PASSWORD).
+  # O usuário padrão só é criado na primeira subida do volume: trocar as
+  # variáveis depois exige recriar o usuário no painel (ou o volume).
   #
   # `rabbitmq_prometheus` é habilitado via `enabled_plugins` montado abaixo, e
   # expõe /metrics na 15692. Preferimos o plugin nativo a um exporter externo:
@@ -31,12 +36,12 @@ services:
     container_name: financial-vellun-rabbitmq
     environment:
       TZ: America/Sao_Paulo
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?defina RABBITMQ_USER em infra/docker/.env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?defina RABBITMQ_PASSWORD em infra/docker/.env}
     ports:
-      - '5672:5672'
-      - '15672:15672'
-      - '15692:15692'
+      - '127.0.0.1:5672:5672'
+      - '127.0.0.1:15672:15672'
+      - '127.0.0.1:15692:15692'
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
       - ../observability/rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
@@ -50,14 +55,24 @@ services:
 
   # Estado distribuído: agrupamento por telefone, locks e estado de conversa.
   # `appendonly` garante que confirmações pendentes sobrevivam a restart.
+  # `requirepass` exige REDIS_PASSWORD; os clientes usam
+  # redis://:<senha>@localhost:6379/0.
   redis:
     image: redis:7-alpine
     container_name: financial-vellun-redis
-    command: ['redis-server', '--appendonly', 'yes']
+    command:
+      [
+        'redis-server',
+        '--appendonly',
+        'yes',
+        '--requirepass',
+        '${REDIS_PASSWORD:?defina REDIS_PASSWORD em infra/docker/.env}',
+      ]
     environment:
       TZ: America/Sao_Paulo
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
     ports:
-      - '6379:6379'
+      - '127.0.0.1:6379:6379'
     volumes:
       - redis_data:/data
     healthcheck:

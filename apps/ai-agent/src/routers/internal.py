@@ -14,10 +14,8 @@ from ..bootstrap import pipeline
 from ..config import settings
 from ..messaging.base import ROUTE_INBOUND, ROUTE_PROCESSING, PublishError
 from ..messaging.contracts import InboundMessageV1, ProcessingJobV1
-from ..schemas.notifications import WelcomeNotification
 from ..schemas.ops import ReprocessRequest
 from ..services.metrics import metrics
-from ..services.welcome_service import welcome_service
 
 logger = logging.getLogger(__name__)
 
@@ -39,20 +37,6 @@ def _require_internal_key(x_internal_api_key: str | None = Header(default=None))
     expected = settings.internal_api_key
     if not x_internal_api_key or not hmac.compare_digest(x_internal_api_key, expected):
         raise HTTPException(status_code=401, detail="Chave de API interna inválida")
-
-
-@router.post("/notifications/welcome")
-async def send_welcome(payload: WelcomeNotification, x_internal_api_key: str | None = Header(default=None)) -> dict:
-    _require_internal_key(x_internal_api_key)
-    if not payload.phone:
-        raise HTTPException(status_code=400, detail="phone é obrigatório")
-    try:
-        await welcome_service.send_welcome(payload.phone, payload.name)
-    except Exception as exc:  # noqa: BLE001 - a API trata não-2xx como best-effort
-        raise HTTPException(
-            status_code=502, detail="Não foi possível entregar as boas-vindas"
-        ) from exc
-    return {"status": "sent"}
 
 
 @router.post("/ops/reprocess")

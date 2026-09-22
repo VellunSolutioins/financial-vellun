@@ -74,7 +74,8 @@ lê este arquivo (`env_file`) e o `pnpm db:up` falha sem ele.
 | Variável                                           | Descrição                                                              |
 | -------------------------------------------------- | ---------------------------------------------------------------------- |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Credenciais do Postgres. Precisam bater com o `DATABASE_URL` da API |
-| `RABBITMQ_USER` / `RABBITMQ_PASSWORD`              | Usuário do broker (padrão `guest`/`guest`). Precisam bater com `RABBITMQ_URL` do agente |
+| `RABBITMQ_USER` / `RABBITMQ_PASSWORD`              | Usuário do broker. Obrigatórios (sem padrão). Precisam bater com `RABBITMQ_URL` do agente |
+| `REDIS_PASSWORD`                                   | Senha do Redis (`requirepass`). Obrigatória. Precisa bater com `REDIS_URL` do agente |
 | `GRAFANA_CLOUD_*`                                  | Só para `pnpm obs:up` (Alloy local). Podem ficar vazios               |
 
 > As credenciais do Postgres só valem na **primeira** subida do volume. Se trocar
@@ -152,7 +153,7 @@ Pipeline de mensageria (broker durável):
 | --------------------------------- | -------------------------------------- | ------------------------------------------------------------------------- |
 | `MESSAGE_PIPELINE`                | `broker`                               | `broker` (webhook publica em fila) \| `legacy` (buffer em processo, rollback) |
 | `MESSAGE_BROKER`                  | `rabbitmq`                             | `rabbitmq` \| `inmemory` (dev sem Docker; **não é durável**)              |
-| `RABBITMQ_URL`                    | `amqp://guest:guest@localhost:5672/`   | Conexão com o broker                                                       |
+| `RABBITMQ_URL`                    | `amqp://<user>:<senha>@localhost:5672/` | Conexão com o broker (credenciais de `infra/docker/.env`)                 |
 | `RABBITMQ_INBOUND_QUEUE`          | `whatsapp.inbound.v1`                  | Fila das mensagens individuais                                             |
 | `RABBITMQ_PROCESSING_QUEUE`       | `whatsapp.processing.v1`               | Fila dos jobs consolidados por telefone                                    |
 | `RABBITMQ_PREFETCH`               | `10`                                   | Mensagens não ackadas entregues por canal de consumo                       |
@@ -171,7 +172,7 @@ Estado distribuído (Redis) — agrupamento, locks e estado de conversa:
 
 | Variável                          | Padrão                     | Descrição                                                     |
 | --------------------------------- | -------------------------- | ------------------------------------------------------------- |
-| `REDIS_URL`                       | `redis://localhost:6379/0` | Conexão Redis                                                  |
+| `REDIS_URL`                       | `redis://:<senha>@localhost:6379/0` | Conexão Redis (senha = `REDIS_PASSWORD` de `infra/docker/.env`) |
 | `GROUP_STORE_BACKEND`             | `redis`                    | `redis` \| `memory` (agrupamento, locks e marcadores de job)  |
 | `CONVERSATION_STATE_BACKEND`      | `redis`                    | `redis` \| `memory` (confirmações pendentes)                  |
 | `CONVERSATION_STATE_TTL_SECONDS`  | `1800`                     | TTL da confirmação pendente                                    |
@@ -222,7 +223,7 @@ docker compose -f infra/docker/docker-compose.yml ps
 # financial-vellun-redis      Up (healthy)
 ```
 
-O painel do RabbitMQ fica em http://localhost:15672 (`guest`/`guest`), e é por
+O painel do RabbitMQ fica em http://localhost:15672, e é por
 onde você inspeciona filas, retries e DLQ. Usuário e senha vêm de
 `RABBITMQ_USER`/`RABBITMQ_PASSWORD` em `infra/docker/.env`.
 
@@ -337,7 +338,7 @@ pnpm agent:dev
 | API                | http://localhost:3001               |
 | Swagger            | http://localhost:3001/api/docs      |
 | AI Agent           | http://localhost:8010               |
-| Painel do RabbitMQ | http://localhost:15672 (guest/guest) |
+| Painel do RabbitMQ | http://localhost:15672 (`RABBITMQ_USER`/`RABBITMQ_PASSWORD`) |
 
 Health e métricas — o mesmo trio nos três processos. `/metrics` exige o header
 `Authorization` com o `METRICS_TOKEN` configurado nos `.env`:
@@ -479,7 +480,7 @@ curl -i -X POST http://localhost:8010/webhook/whatsapp \
   -H "Content-Type: application/json" -H "X-Hub-Signature-256: sha256=$SIG" -d "$BODY"
 ```
 
-Acompanhe o caminho da mensagem em http://localhost:15672 (guest/guest) e em
+Acompanhe o caminho da mensagem em http://localhost:15672 e em
 `GET /metrics`.
 
 ### Runbook: DLQ, retries e reprocesso

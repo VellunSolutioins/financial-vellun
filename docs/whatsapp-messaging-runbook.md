@@ -371,7 +371,7 @@ Pelo painel: **Exchanges → `whatsapp.x` → Publish message**, com
 histórico do shell:
 
 ```bash
-curl -u guest:guest -H 'content-type: application/json' \
+curl -u "$RABBITMQ_USER:$RABBITMQ_PASSWORD" -H 'content-type: application/json' \
   -X POST http://localhost:15672/api/exchanges/%2F/whatsapp.x/publish \
   -d '{
         "properties": { "delivery_mode": 2 },

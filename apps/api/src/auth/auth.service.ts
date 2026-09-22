@@ -1,11 +1,10 @@
 import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
-import { ConfigService } from '@nestjs/config';
 import { AccountType, ProfileType } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
-import { normalizePhone } from '../common/phone.util';
-import { WelcomeNotificationService } from '../notifications/welcome-notification.service';
+import { normalizeEmail } from '../common/email.util';
+import { WhatsappLinkService } from '../whatsapp-link/whatsapp-link.service';
+import { SessionMeta, SessionService } from './session.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 
@@ -13,18 +12,23 @@ import { LoginDto } from './dto/login.dto';
 export class AuthService {
   constructor(
     private prisma: PrismaService,
-    private jwtService: JwtService,
-    private config: ConfigService,
-    private welcomeNotification: WelcomeNotificationService,
+    private sessions: SessionService,
+    private whatsappLink: WhatsappLinkService,
   ) {}
 
+  /**
+   * Cria a conta. O telefone fica só como dado de cadastro: o vínculo com o
+   * WhatsApp exige o desafio de posse (`/users/me/phone/verification`), e a
+   * boas-vindas passou a ser a resposta do bot a esse desafio — enviá-la aqui
+   * mandava mensagem, com o nome do cadastrante, a um número não comprovado.
+   *
+   * Também não se consulta mais se o telefone já pertence a outra conta: isso
+   * revelava quais números têm cadastro, e quem provar a posse leva o vínculo.
+   */
   async register(dto: RegisterDto) {
-    const exists = await this.prisma.user.findUnique({ where: { email: dto.email } });
+    const email = normalizeEmail(dto.email);
+    const exists = await this.findUserByEmail(email);
     if (exists) throw new ConflictException('Email já cadastrado');
-
-    const phoneNumber = normalizePhone(dto.phone);
-    const phoneExists = await this.prisma.whatsappContact.findUnique({ where: { phoneNumber } });
-    if (phoneExists?.userId) throw new ConflictException('Celular já vinculado a outra conta');
 
     if (dto.profileType === ProfileType.individual) {
       const cpfExists = await this.prisma.individualProfile.findUnique({ where: { cpf: dto.cpf } });
@@ -41,7 +45,7 @@ export class AuthService {
       const createdUser = await tx.user.create({
         data: {
           name: dto.name,
-          email: dto.email,
+          email,
           phone: dto.phone,
           passwordHash,
           profileType: dto.profileType,
@@ -85,79 +89,52 @@ export class AuthService {
         },
       });
 
-      await tx.whatsappContact.upsert({
-        where: { phoneNumber },
-        update: {
-          userId: createdUser.id,
-          provider: 'cloud-api',
-          isVerified: true,
-        },
-        create: {
-          userId: createdUser.id,
-          phoneNumber,
-          provider: 'cloud-api',
-          isVerified: true,
-        },
-      });
-
       return createdUser;
-    });
-
-    // Após o commit do cadastro: dispara (best-effort, sem bloquear a resposta)
-    // a mensagem de boas-vindas no WhatsApp com instruções de uso. O novo
-    // cliente não conhece o número do app — esta é a primeira mensagem dele.
-    void this.welcomeNotification.sendWelcome({
-      phone: phoneNumber,
-      name: dto.name,
-      profileType: dto.profileType,
     });
 
     const { passwordHash: _, ...result } = user;
     return result;
   }
 
-  async login(dto: LoginDto) {
-    const user = await this.prisma.user.findUnique({ where: { email: dto.email } });
+  async login(dto: LoginDto, meta: SessionMeta = {}) {
+    const user = await this.findUserByEmail(normalizeEmail(dto.email));
     if (!user) throw new UnauthorizedException('Credenciais inválidas');
 
     const valid = await bcrypt.compare(dto.password, user.passwordHash);
     if (!valid) throw new UnauthorizedException('Credenciais inválidas');
 
-    const tokens = await this.generateTokens(user.id, user.email);
+    const [tokens, whatsappVerified] = await Promise.all([
+      this.sessions.createSession(user.id, meta),
+      this.whatsappLink.hasLinkedPhone(user.id),
+    ]);
     const { passwordHash: _, ...result } = user;
-    return { user: result, ...tokens };
-  }
-
-  async refresh(userId: string, email: string) {
-    return this.generateTokens(userId, email);
+    return { user: { ...result, whatsappVerified }, tokens };
   }
 
   async me(userId: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      include: { individualProfile: true, businessProfile: true },
-    });
+    const [user, whatsappVerified] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        include: { individualProfile: true, businessProfile: true },
+      }),
+      this.whatsappLink.hasLinkedPhone(userId),
+    ]);
     if (!user) throw new UnauthorizedException();
 
     const hasProfile =
       user.profileType === 'individual' ? !!user.individualProfile : !!user.businessProfile;
 
     const { passwordHash: _, individualProfile, businessProfile, ...rest } = user;
-    return { ...rest, hasProfile };
+    return { ...rest, hasProfile, whatsappVerified };
   }
 
-  private async generateTokens(userId: string, email: string) {
-    const payload = { sub: userId, email };
-    const [accessToken, refreshToken] = await Promise.all([
-      this.jwtService.signAsync(payload, {
-        secret: this.config.get('JWT_SECRET'),
-        expiresIn: '15m',
-      }),
-      this.jwtService.signAsync(payload, {
-        secret: this.config.get('JWT_REFRESH_SECRET'),
-        expiresIn: '7d',
-      }),
-    ]);
-    return { accessToken, refreshToken };
+  /**
+   * Busca por e-mail sem diferenciar maiúsculas: contas antigas foram gravadas
+   * como digitadas, antes de o e-mail passar a ser normalizado.
+   */
+  private findUserByEmail(email: string) {
+    return this.prisma.user.findFirst({
+      where: { email: { equals: email, mode: 'insensitive' } },
+    });
   }
 }

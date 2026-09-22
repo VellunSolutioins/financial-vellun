@@ -1,4 +1,4 @@
-import { IsEmail, IsOptional, IsString, Matches, MinLength } from 'class-validator';
+import { IsEmail, IsOptional, IsString, Matches, MaxLength, MinLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class UpdateUserDto {
@@ -13,13 +13,14 @@ export class UpdateUserDto {
   @IsEmail({}, { message: 'Email inválido' })
   email?: string;
 
-  @ApiProperty({ required: false, example: '(11) 99999-9999' })
+  @ApiProperty({
+    required: false,
+    description: 'Senha atual. Obrigatória quando o e-mail muda.',
+  })
   @IsOptional()
   @IsString()
-  @Matches(/^\(\d{2}\) \d{4,5}-\d{4}$/, {
-    message: 'Telefone inválido (formato: (00) 00000-0000)',
-  })
-  phone?: string;
+  @MaxLength(200)
+  currentPassword?: string;
 
   // ── Endereço de cobrança (opcional na edição) ──
   @ApiProperty({ required: false, example: '80240-000' })

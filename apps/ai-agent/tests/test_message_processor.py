@@ -199,9 +199,11 @@ def test_pending_category_reply_uses_user_categories():
     rec = _Recorder()
     phone = "+5511"
 
+    contact = {"userId": "u1", "profileType": "personal", "contactId": "c1", "linkVersion": 1}
+
     class FakeContact:
         async def find_by_phone(self, phone):
-            return {"userId": "u1", "profileType": "personal"}
+            return contact
 
     class FakeTxCreator:
         async def create_from_intent(self, intent, user_id, raw, **kwargs):
@@ -245,7 +247,7 @@ def test_pending_category_reply_uses_user_categories():
         confidence=0.6,
         needs_confirmation=True,
     )
-    asyncio.run(mp.conversation_manager.set_pending(phone, pending))
+    asyncio.run(mp.conversation_manager.set_pending(phone, pending, contact))
     try:
         reply = asyncio.run(mp.message_processor.process_buffered_message(phone, "Outros", ["m2"]))
     finally:
