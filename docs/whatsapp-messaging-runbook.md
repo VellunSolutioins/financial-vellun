@@ -182,8 +182,25 @@ segundo terminal.
 > uma resposta ao usuário. Use `WHATSAPP_PROVIDER=log`, ou a carga vira centenas
 > de chamadas reais à API da Meta.
 
+> **Os telefones precisam estar verificados.** Desde a verificação de posse do
+> número, um telefone sem vínculo verificado recebe "seu número ainda não está
+> vinculado" e o job termina ali — sem LLM, sem lançamento, sem contexto. A
+> carga passaria com folga medindo o caminho errado. Semeie antes:
+>
+> ```bash
+> LOADTEST_PHONES=50 pnpm prisma:seed:loadtest
+> # e ao terminar
+> LOADTEST_CLEANUP=true pnpm prisma:seed:loadtest
+> ```
+>
+> O seed recusa rodar com `NODE_ENV=production` ou contra um banco que não seja
+> local.
+
 ```bash
 cd apps/ai-agent
+
+# perfis do capacity review: 10, 100, 500 e 1000 mensagens/minuto
+.venv/Scripts/python.exe scripts/loadtest.py --profile 100/min
 
 # 500 requests, 50 em paralelo, espalhados por 50 telefones,
 # esperando o pipeline drenar e com veredito no fim
@@ -236,6 +253,52 @@ Duas leituras que confundem se você não souber:
   agrupamento no Redis e só vira job quando o debounce vence. Por isso o
   `--wait-drain` também olha `ZCARD group:due` e compara
   `jobs_published`/`jobs_processed`.
+
+### Capacity review
+
+Os números acima são do **webhook**: quantos `202` ele aceita. Eles nunca foram
+o gargalo. O que o capacity review mede é o pipeline inteiro, por perfil de
+carga, e o custo de **uma** mensagem em cada recurso.
+
+Rode os quatro perfis em sequência, com o LLM mockado (`LLM_PROVIDER=rules`) e
+depois com o real (`LLM_PROVIDER=openai`). A diferença entre os dois é a fatia
+da OpenAI no p95 — e é ela que decide se `PROCESSING_CONSUMER_CONCURRENCY` está
+alta ou baixa demais.
+
+| Perfil   | p95 fim a fim | Dreno | Backlog máx. | CPU | Memória | Conexões PG | p95 OpenAI |
+| -------- | ------------- | ----- | ------------ | --- | ------- | ----------- | ---------- |
+| 10/min   | _a preencher_ |       |              |     |         |             |            |
+| 100/min  | _a preencher_ |       |              |     |         |             |            |
+| 500/min  | _a preencher_ |       |              |     |         |             |            |
+| 1000/min | _a preencher_ |       |              |     |         |             |            |
+
+O p95 fim a fim sai do histograma em `/metrics`
+(`vellun_agent_message_end_to_end_seconds`) ou do painel "Fim a fim" do
+dashboard; o `/metrics.json` que o script lê só tem média.
+
+**Custo por mensagem** — o que multiplica quando a carga multiplica:
+
+| Recurso                  | Por mensagem                                              | Onde conferir                                     |
+| ------------------------ | --------------------------------------------------------- | ------------------------------------------------- |
+| Operações no Redis       | ~8: buffer, lock (acquire/extend/release), dedupe, estado | `redis_commands_processed_total`                  |
+| Chamadas à API principal | 3–5: contato, assinatura, categorias, contas, lançamento  | `vellun_agent_internal_api_*_seconds_count`       |
+| Queries no Postgres      | as das chamadas acima, todas pelo pool da API             | `pg_stat_statements`, `docs/connection-budget.md` |
+| Chamadas à OpenAI        | 1 por mensagem de texto; +1 para áudio; +1 para imagem    | `vellun_agent_llm_latency_seconds_count`          |
+| Publicações no broker    | 3: inbound, processing, outbound                          | `vellun_agent_publish_confirmed_total`            |
+| Chamadas à Meta          | 1 por resposta entregue                                   | `vellun_agent_outbound_sent_total`                |
+
+A linha das categorias e contas é a que se paga primeiro: elas são buscadas
+duas vezes por job (contexto do LLM e resolução do lançamento). A memo por job
+elimina a segunda — ver P6 do plano de performance.
+
+**O que observar durante cada perfil:**
+
+- `whatsapp.outbound.v1` crescendo sozinha significa que o gargalo é a Meta, não
+  o pipeline: os lançamentos estão sendo registrados;
+- `jobs_deferred` alto significa contenção por telefone — mais réplicas não
+  ajudam, mais telefones sim (é por isso que os perfis espalham);
+- conexões do Postgres acima de 80% do limite invalidam o resultado: o que está
+  sendo medido passa a ser a fila do pool.
 
 ---
 

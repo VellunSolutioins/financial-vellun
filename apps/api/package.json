@@ -13,7 +13,8 @@
     "db:repair:categories": "ts-node prisma/repair-uncategorized-transactions.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:studio": "prisma studio"
+    "prisma:studio": "prisma studio",
+    "db:seed:loadtest": "ts-node prisma/seed-loadtest.ts"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"

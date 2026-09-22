@@ -18,6 +18,7 @@
     "prisma:migrate": "pnpm --filter @financial-vellun/api prisma:migrate",
     "prisma:studio": "pnpm --filter @financial-vellun/api prisma:studio",
     "prisma:seed": "pnpm --filter @financial-vellun/api db:seed",
+    "prisma:seed:loadtest": "pnpm --filter @financial-vellun/api db:seed:loadtest",
     "lint": "eslint . --ext .ts,.tsx,.js,.jsx",
     "typecheck": "pnpm --filter @financial-vellun/api exec tsc --noEmit -p tsconfig.build.json",
     "test": "pnpm --filter @financial-vellun/api test && pnpm test:agent",
