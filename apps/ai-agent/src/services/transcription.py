@@ -24,7 +24,13 @@ class TranscriptionService:
             try:
                 from openai import AsyncOpenAI
 
-                self._client = AsyncOpenAI(api_key=settings.openai_api_key)
+                # Áudio move mais bytes que texto e tolera mais espera, mas
+                # não os 600s do padrão do SDK.
+                self._client = AsyncOpenAI(
+                    api_key=settings.openai_api_key,
+                    timeout=settings.openai_media_timeout_seconds,
+                    max_retries=settings.openai_max_retries,
+                )
             except Exception:  # noqa: BLE001
                 logger.warning("Não foi possível inicializar o cliente de transcrição", exc_info=True)
 

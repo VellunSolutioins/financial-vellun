@@ -388,23 +388,17 @@ class MessageProcessor:
         return None
 
     async def _build_context(self, user_id: str, contact: dict, phone: str) -> dict:
-        """Contexto para o LLM: categorias, contas, data e histórico recente."""
-        from ..services.api_client import api_client
-        from ..services.conversation_history_service import conversation_history_service
+        """Contexto para o LLM: categorias, contas, data e histórico recente.
 
-        categories: list[str] = []
-        accounts: list[str] = []
-        try:
-            cat_resp = await api_client.get(f"/internal/users/{user_id}/categories")
-            if cat_resp.status_code == 200:
-                categories = [c["name"] for c in cat_resp.json()]
-            acc_resp = await api_client.get(f"/internal/users/{user_id}/accounts")
-            if acc_resp.status_code == 200:
-                accounts = [a["name"] for a in acc_resp.json()]
-        except Exception:  # noqa: BLE001
-            logger.warning(
-                "Não foi possível carregar contexto do usuário %s", user_id, exc_info=True
-            )
+        As listas vêm do ``user_catalog``, que as memoriza pelo tempo do job: a
+        criação do lançamento precisa das mesmas duas, e antes cada uma era
+        buscada duas vezes por mensagem.
+        """
+        from ..services.conversation_history_service import conversation_history_service
+        from ..services.user_catalog import user_catalog
+
+        categories = [c["name"] for c in await user_catalog.categories(user_id)]
+        accounts = [a["name"] for a in await user_catalog.accounts(user_id)]
 
         recent_messages = await conversation_history_service.get_recent_messages(
             phone, settings.conversation_context_message_limit

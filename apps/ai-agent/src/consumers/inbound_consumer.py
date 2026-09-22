@@ -55,6 +55,7 @@ from ..services.message_processor import NOT_LINKED_MESSAGE, message_processor
 from ..services.metrics import metrics
 from ..services.subscription_gate import subscription_gate
 from ..services.usage_limiter import DAILY_LIMIT_MESSAGE, usage_limiter
+from ..services.user_catalog import user_catalog
 
 logger = logging.getLogger(__name__)
 
@@ -148,11 +149,15 @@ class InboundMessageConsumer:
             await message_processor.respond(message.phone, DAILY_LIMIT_MESSAGE)
             return
 
-        context = (
-            await message_processor._build_context(user_id, contact, message.phone)
-            if message.kind == "image"
-            else {}
-        )
+        # Comprovante (imagem) monta o contexto aqui e o job seguinte resolve
+        # conta e categoria; o memo dura só esta montagem, porque o job roda em
+        # outra mensagem do broker.
+        with user_catalog.memo():
+            context = (
+                await message_processor._build_context(user_id, contact, message.phone)
+                if message.kind == "image"
+                else {}
+            )
         metrics.incr(f"media_{message.kind}")
         resolution = await media_resolver.resolve(
             kind=message.kind,

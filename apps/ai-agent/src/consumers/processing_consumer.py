@@ -40,6 +40,7 @@ from ..services.distributed_state import StateStore, get_state_store
 from ..services.message_processor import job_identity, message_processor
 from ..services.metrics import metrics
 from ..services.outbound import outbound_dispatcher
+from ..services.user_catalog import user_catalog
 
 logger = logging.getLogger(__name__)
 
@@ -151,8 +152,12 @@ class MessageProcessingConsumer:
         identidade: dict[str, str | None] = {}
         if reply is None:
             token = job_identity.set(identidade)
+            # O escopo do memo é o job: categorias e contas são buscadas uma vez
+            # e reaproveitadas pela criação do lançamento. Fora daqui não existe
+            # memo, e nada fica cacheado entre mensagens.
             try:
-                reply = await message_processor.process_job(job)
+                with user_catalog.memo():
+                    reply = await message_processor.process_job(job)
             finally:
                 job_identity.reset(token)
             await self.store.put(chave_resposta, reply, settings.job_dedupe_ttl_seconds)

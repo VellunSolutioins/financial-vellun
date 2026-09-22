@@ -221,6 +221,9 @@ Em modo edição, converter o valor vindo da API para display antes de passar ao
 
 - [ADRs — decisões arquiteturais](docs/adrs/README.md)
 - [Runbook do pipeline WhatsApp](docs/whatsapp-messaging-runbook.md)
+- [Connection budget do PostgreSQL](docs/connection-budget.md)
+- [Tuning e escala](docs/tuning-e-escala.md)
+- [Serviços no Railway](infra/railway/README.md)
 - [Retenção de dados e backups](docs/retencao-e-backups.md)
 - [Requisitos técnicos](docs/technical-requirements.md)
 - [Prompts de implementação](docs/implementation-prompts.md)

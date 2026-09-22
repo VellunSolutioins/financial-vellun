@@ -110,6 +110,11 @@ KNOWN_COUNTERS = (
     # LLM e efeitos
     "llm_success",
     "llm_fallback",
+    # Memo por job de categorias e contas: mede quantas chamadas à API
+    # principal deixaram de acontecer. Zero aqui, com jobs criando
+    # lançamentos, significa que o escopo do memo não está sendo aberto.
+    "catalog_categories_memo_hit",
+    "catalog_accounts_memo_hit",
     "transactions_created",
     "transactions_idempotent_hit",
     "extractions_idempotent_hit",

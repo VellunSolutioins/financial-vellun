@@ -99,7 +99,20 @@ services:
     restart: unless-stopped
 
   # Estado distribuído: agrupamento por telefone, locks e estado de conversa.
-  # `appendonly` garante que confirmações pendentes sobrevivam a restart.
+  #
+  # **Não é cache.** O que vive aqui não tem outra cópia em lugar nenhum: o lock
+  # que garante a ordem das mensagens de um telefone, a confirmação pendente que
+  # o usuário está respondendo agora, o buffer de agrupamento, a marca de job
+  # concluído que impede lançamento duplicado. Daí as duas opções abaixo:
+  #
+  # - `appendonly yes` — o estado sobrevive a restart. Sem ele, um restart
+  #   apagaria confirmações pendentes e as marcas de idempotência, e uma
+  #   reentrega criaria o lançamento de novo;
+  # - `maxmemory-policy noeviction` — sob pressão de memória, o Redis **recusa
+  #   escrita** em vez de escolher uma chave para descartar. Escrita recusada é
+  #   um erro alto, que vira retry e alerta. Chave descartada em silêncio é um
+  #   lock que some no meio de um job.
+  #
   # `requirepass` exige REDIS_PASSWORD; os clientes usam
   # redis://:<senha>@localhost:6379/0.
   redis:
@@ -110,6 +123,8 @@ services:
         'redis-server',
         '--appendonly',
         'yes',
+        '--maxmemory-policy',
+        'noeviction',
         '--requirepass',
         '${REDIS_PASSWORD:?defina REDIS_PASSWORD em infra/docker/.env}',
       ]

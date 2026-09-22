@@ -84,6 +84,14 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o-mini"
     openai_vision_model: str = ""  # vazio → usa openai_model (gpt-4o-mini é multimodal)
     openai_transcription_model: str = "whisper-1"
+    # Timeout e tentativas **explícitos**: o SDK da OpenAI usa 600s e 2 retries
+    # por padrão. Dez minutos preso numa chamada segura um slot de concorrência
+    # do processamento por dez minutos — e o lock do telefone junto. O usuário
+    # prefere "não consegui entender, tente de novo" em 30s a silêncio.
+    openai_timeout_seconds: float = 30.0
+    openai_max_retries: int = 2
+    # Transcrição e visão movem mais bytes e toleram mais espera que texto.
+    openai_media_timeout_seconds: float = 60.0
 
     # Mídia (áudio/imagem) recebida no WhatsApp
     media_max_bytes: int = 16 * 1024 * 1024  # 16 MB (limite da Cloud API)
