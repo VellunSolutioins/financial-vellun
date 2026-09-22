@@ -16,6 +16,7 @@ financial-vellun/
   infra/
     docker/         # Docker Compose: PostgreSQL + RabbitMQ + Redis
     observability/  # Alloy, alertas, dashboards (ver infra/observability/README.md)
+    railway/        # configuração declarativa por serviço (ver infra/railway/README.md)
   docs/             # requisitos, runbook, observabilidade e ADRs (docs/adrs/)
   plan/             # planos de implementação
   Dockerfile.ai-agent  # imagem do agente (produção)

@@ -1,0 +1,38 @@
+# Serviço `financial-vellun-ai-agent` — camada HTTP do agente (webhook).
+#
+# Aponte o campo "Config as code" deste serviço no Railway para
+# `infra/railway/ai-agent.toml`. Os caminhos abaixo são relativos à raiz do
+# repositório, que é o root directory do serviço.
+#
+# Variáveis que este serviço PRECISA ter (as demais estão no README):
+#   RUN_CONSUMERS_IN_API=false   ← separa HTTP de consumo (P1)
+#   PORT=8010                    ← o Alloy scrapa porta fixa
+#
+# `RUN_CONSUMERS_IN_API=false` aqui e o serviço `ai-agent-worker` são as duas
+# metades da mesma decisão: sem ele, um pico de chamadas à OpenAI competiria
+# com o ack do webhook, e escalar o processamento exigiria escalar o HTTP junto.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile.ai-agent"
+
+[deploy]
+# O publisher sobe sempre, mesmo sem consumers: sem ele o webhook não responde 202.
+startCommand = "uvicorn src.main:app --host :: --port ${PORT:-8010}"
+
+# Readiness, não liveness: o deploy só recebe tráfego quando o agente consegue
+# publicar no broker. Com o RabbitMQ fora, a versão nova não entra no lugar da
+# antiga — que ao menos ainda tem conexão.
+healthcheckPath = "/health/ready"
+healthcheckTimeout = 60
+
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+# Escalar o HTTP é escalar o ack do webhook. O trabalho está no worker.
+numReplicas = 1
+
+# Acima de SHUTDOWN_DRAIN_SECONDS (20s): o container precisa sobreviver ao
+# drain, senão o SIGKILL chega no meio e o que estava em voo volta por
+# redelivery em vez de por nack.
+overlapSeconds = 30

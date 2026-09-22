@@ -22,3 +22,13 @@ class Messenger(ABC):
         Quem chama decide se a falha é fatal (consumer) ou tolerável (auditoria).
         """
         raise NotImplementedError
+
+    async def aclose(self) -> None:
+        """Libera o que o provider mantiver aberto (pool HTTP, sockets).
+
+        No-op por padrão — o ``LogMessenger`` não abre nada. O provider de
+        produção sobrescreve. Fica no contrato, e não só na implementação
+        concreta, para que o ``bootstrap`` feche o messenger sem perguntar qual
+        provider está ativo.
+        """
+        return None

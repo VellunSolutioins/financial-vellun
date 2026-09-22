@@ -132,11 +132,16 @@ class Pipeline:
             self.publisher = None
 
         from .services.api_client import api_client
+        from .services.messenger import messenger
         from .services.redis_client import redis_provider
         from .services.whatsapp_media import whatsapp_media
 
         await api_client.aclose()
         await whatsapp_media.aclose()
+        # O pool do messenger de produção nunca era fechado: a cada ciclo de
+        # lifespan (reload em dev, testes em sequência) sobrava um pool com
+        # conexões abertas para a Graph API.
+        await messenger.aclose()
         await redis_provider.close()
         logger.info("Pipeline encerrado")
 
