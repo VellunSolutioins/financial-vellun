@@ -40,6 +40,33 @@ afirma que o alerta dispara — e que **não** dispara nos casos que não deveri
 Conferir "Pending → Firing" na UI prova uma vez, num navegador; o teste prova a
 cada execução e pega quem ajustar um limiar sem perceber o efeito.
 
+## Subir a stack local
+
+Pré-requisito: `infra/docker/.env` criado a partir do `.env.example` (é de lá que
+o Compose lê os `GRAFANA_CLOUD_*`; vazios, o Alloy sobe, coleta e só falha o
+envio).
+
+```bash
+pnpm obs:up     # infra (Postgres, RabbitMQ, Redis) + Alloy + exporters
+
+# Usuário somente-leitura do postgres-exporter — uma vez por volume do Postgres.
+# Sem ele o exporter não autentica e o alvo fica `down`.
+docker exec -i financial-vellun-db psql -U vellun -d financial_vellun \
+  < infra/observability/alloy/postgres-monitoring-user.sql
+```
+
+| Porta | O quê |
+| --- | --- |
+| `12345` | UI do Alloy: componentes, alvos e último erro |
+| `3100` | recebimento de logs — `LOKI_PUSH_URL=http://localhost:3100` na API e no agente |
+| `9187` / `9121` | postgres-exporter / redis-exporter |
+
+O Alloy local coleta a API, o agente e o worker rodando no host, com o
+`METRICS_TOKEN` padrão (`local-dev-metrics-token`) — se trocar o token nos
+`.env`, exporte o mesmo valor antes do `obs:up`. Para derrubar: `pnpm obs:down`.
+O roteiro completo de verificação está em
+[docs/observability.md](../../docs/observability.md#verificação-local).
+
 ## Verificar
 
 ```bash
