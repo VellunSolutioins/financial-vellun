@@ -6,7 +6,7 @@ export const CategorySchema = z.object({
   id: z.string().uuid(),
   user_id: z.string().uuid().nullable(),
   name: z.string().min(1).max(100),
-  type: z.enum([TransactionType.INCOME, TransactionType.EXPENSE, TransactionType.TRANSFER]),
+  type: z.enum([TransactionType.INCOME, TransactionType.EXPENSE]),
   color: z
     .string()
     .regex(/^#[0-9A-Fa-f]{6}$/, 'Cor deve estar no formato hex #RRGGBB')
@@ -19,7 +19,7 @@ export const CategorySchema = z.object({
 
 export const CreateCategorySchema = z.object({
   name: z.string().min(1).max(100),
-  type: z.enum([TransactionType.INCOME, TransactionType.EXPENSE, TransactionType.TRANSFER]),
+  type: z.enum([TransactionType.INCOME, TransactionType.EXPENSE]),
   color: z
     .string()
     .regex(/^#[0-9A-Fa-f]{6}$/, 'Cor deve estar no formato hex #RRGGBB')

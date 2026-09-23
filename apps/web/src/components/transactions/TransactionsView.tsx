@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Dialog } from '@/components/ui/dialog';
 import { Pagination } from '@/components/ui/pagination';
-import { TransactionForm } from '@/components/transactions/TransactionForm';
+import { TransactionForm, recurrenceLabels } from '@/components/transactions/TransactionForm';
 import { useTransactions, type Transaction } from '@/hooks/useTransactions';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ui/toast';
@@ -24,7 +24,6 @@ function formatCurrency(v: number) {
 
 const statusLabels: Record<string, string> = {
   confirmed: 'Confirmado',
-  pending: 'Pendente',
   cancelled: 'Cancelado',
 };
 const sourceLabels: Record<string, string> = {
@@ -38,8 +37,14 @@ const sourceLabels: Record<string, string> = {
 const typeStyle = {
   income: { icon: TrendingUp, tone: 'text-emerald-600 bg-emerald-50', sign: '+' },
   expense: { icon: TrendingDown, tone: 'text-rose-600 bg-rose-50', sign: '-' },
-  transfer: { icon: ArrowLeftRight, tone: 'text-blue-600 bg-blue-50', sign: '' },
 } as const;
+
+/** Transferências antigas: o tipo não é mais criado, mas o registro ainda pode aparecer. */
+const legacyStyle = { icon: ArrowLeftRight, tone: 'text-blue-600 bg-blue-50', sign: '' };
+
+function styleOf(type: string) {
+  return typeStyle[type as keyof typeof typeStyle] ?? legacyStyle;
+}
 
 /**
  * Origens que recebem o selo de destaque: o que foi registrado pela IA. O
@@ -90,7 +95,6 @@ function TransacoesContent({ recurringOnly = false }: { recurringOnly?: boolean 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingTx, setEditingTx] = useState<Transaction | undefined>();
   const [viewingTx, setViewingTx] = useState<Transaction | undefined>();
-  const [newType, setNewType] = useState<'income' | 'expense'>('expense');
   const selectedMonth = searchParams.get('month') ?? currentMonth();
   const { start: monthStart, end: monthEnd } = monthRange(selectedMonth);
 
@@ -117,9 +121,8 @@ function TransacoesContent({ recurringOnly = false }: { recurringOnly?: boolean 
     router.push(`?${params.toString()}`);
   };
 
-  const openNew = (type: 'income' | 'expense') => {
+  const openNew = () => {
     setEditingTx(undefined);
-    setNewType(type);
     setModalOpen(true);
   };
   const openEdit = (tx: Transaction) => {
@@ -169,21 +172,9 @@ function TransacoesContent({ recurringOnly = false }: { recurringOnly?: boolean 
             onChange={(e) => e.target.value && setParam('month', e.target.value)}
             className="h-9 w-auto text-sm"
           />
-          <Button
-            size="sm"
-            onClick={() => openNew('income')}
-            className="bg-emerald-600 text-white hover:bg-emerald-600/90"
-          >
+          <Button size="sm" onClick={openNew}>
             <Plus className="mr-1 h-4 w-4" />
-            Entrada
-          </Button>
-          <Button
-            size="sm"
-            onClick={() => openNew('expense')}
-            className="bg-rose-600 text-white hover:bg-rose-600/90"
-          >
-            <Plus className="mr-1 h-4 w-4" />
-            Saída
+            Lançamento
           </Button>
         </div>
       </div>
@@ -201,7 +192,6 @@ function TransacoesContent({ recurringOnly = false }: { recurringOnly?: boolean 
             <option value="">Todos os tipos</option>
             <option value="income">Receita</option>
             <option value="expense">Despesa</option>
-            <option value="transfer">Transferência</option>
           </Select>
           <Select
             defaultValue={filters.status}
@@ -209,7 +199,6 @@ function TransacoesContent({ recurringOnly = false }: { recurringOnly?: boolean 
           >
             <option value="">Todos os status</option>
             <option value="confirmed">Confirmado</option>
-            <option value="pending">Pendente</option>
             <option value="cancelled">Cancelado</option>
           </Select>
           <Select
@@ -252,7 +241,7 @@ function TransacoesContent({ recurringOnly = false }: { recurringOnly?: boolean 
               </thead>
               <tbody className="divide-y divide-border">
                 {data.map((tx) => {
-                  const style = typeStyle[tx.type];
+                  const style = styleOf(tx.type);
                   const Icon = style.icon;
                   return (
                     <tr
@@ -359,7 +348,6 @@ function TransacoesContent({ recurringOnly = false }: { recurringOnly?: boolean 
       >
         <TransactionForm
           transaction={editingTx}
-          defaultType={newType}
           fixedOnly={recurringOnly}
           onSuccess={handleSuccess}
           onCancel={closeModal}
@@ -394,7 +382,7 @@ function TransacoesContent({ recurringOnly = false }: { recurringOnly?: boolean 
               ['Descrição', viewingTx.description],
               [
                 'Valor',
-                `${typeStyle[viewingTx.type].sign}${formatCurrency(Number(viewingTx.amount))}`,
+                `${styleOf(viewingTx.type).sign}${formatCurrency(Number(viewingTx.amount))}`,
               ],
               ['Data', formatDateBR(viewingTx.transactionDate)],
               ['Categoria', viewingTx.category?.name ?? '—'],
@@ -405,9 +393,7 @@ function TransacoesContent({ recurringOnly = false }: { recurringOnly?: boolean 
                 'Recorrência',
                 viewingTx.recurrenceType === 'parcelado' && viewingTx.installmentTotal
                   ? `Parcelado (${viewingTx.installmentNumber}/${viewingTx.installmentTotal})`
-                  : viewingTx.recurrenceType === 'fixo'
-                    ? 'Fixo (repete todo mês)'
-                    : 'Avulso',
+                  : recurrenceLabels[viewingTx.recurrenceType],
               ],
             ].map(([label, value]) => (
               <div

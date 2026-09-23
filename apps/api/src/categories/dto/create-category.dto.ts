@@ -1,15 +1,15 @@
-import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { IsIn, IsOptional, IsString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { TransactionType } from '@prisma/client';
+import { ENTRY_TYPES, EntryType } from '../../transactions/entry-types';
 
 export class CreateCategoryDto {
   @ApiProperty()
   @IsString()
   name!: string;
 
-  @ApiProperty({ enum: TransactionType })
-  @IsEnum(TransactionType)
-  type!: TransactionType;
+  @ApiProperty({ enum: ENTRY_TYPES })
+  @IsIn(ENTRY_TYPES)
+  type!: EntryType;
 
   @ApiProperty({ required: false })
   @IsOptional()

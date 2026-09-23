@@ -5,11 +5,11 @@ import { apiClient } from '@/lib/api-client';
 
 export interface Transaction {
   id: string;
-  type: 'income' | 'expense' | 'transfer';
+  type: 'income' | 'expense';
   amount: number;
   description: string;
   transactionDate: string;
-  status: 'confirmed' | 'pending' | 'cancelled';
+  status: 'confirmed' | 'cancelled';
   source: 'manual' | 'whatsapp' | 'ai' | 'import' | 'recurring';
   categoryId?: string;
   accountId: string;

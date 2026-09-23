@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { dateOnlyString, endOfDayUtc, todaySaoPaulo } from '../common/date.util';
 import { CreateAccountDto } from './dto/create-account.dto';
 import { UpdateAccountDto } from './dto/update-account.dto';
 
@@ -60,17 +61,24 @@ export class AccountsService {
     return this.prisma.account.update({ where: { id: account.id }, data: { isActive: false } });
   }
 
+  /**
+   * Saldo = inicial + confirmados com data até hoje. Lançamento futuro (parcela
+   * ou mensalidade dos próximos meses) não entra: ele ainda não aconteceu. Por
+   * depender do dia, o saldo também é recomposto pelo `AccountBalanceScheduler`
+   * quando um lançamento futuro chega à sua data.
+   */
   async recalculateBalance(accountId: string) {
     const account = await this.prisma.account.findUnique({ where: { id: accountId } });
     if (!account) return;
 
+    const upToToday = { lte: endOfDayUtc(dateOnlyString(todaySaoPaulo())) };
     const [income, expense] = await Promise.all([
       this.prisma.transaction.aggregate({
-        where: { accountId, type: 'income', status: 'confirmed' },
+        where: { accountId, type: 'income', status: 'confirmed', transactionDate: upToToday },
         _sum: { amount: true },
       }),
       this.prisma.transaction.aggregate({
-        where: { accountId, type: 'expense', status: 'confirmed' },
+        where: { accountId, type: 'expense', status: 'confirmed', transactionDate: upToToday },
         _sum: { amount: true },
       }),
     ]);

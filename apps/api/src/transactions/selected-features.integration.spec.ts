@@ -75,22 +75,23 @@ integration('selected features with PostgreSQL', () => {
       description: 'Monthly subscription',
       type: 'expense',
       amount: 100,
-      transactionDate: '2028-01-31',
+      transactionDate: '2024-01-31',
       recurrenceType: 'fixo',
       recurrenceMonths: 3,
     });
-    const filters = { periodStart: '2028-01-01', periodEnd: '2028-03-31', order: 'asc' as const };
+    const filters = { periodStart: '2024-01-01', periodEnd: '2024-03-31', order: 'asc' as const };
     const all = await transactions.findAll(userId, filters);
     const recurring = await transactions.findAll(userId, { ...filters, recurrenceType: 'fixo' });
     expect(recurring.data.map((t) => t.id)).toEqual(all.data.map((t) => t.id));
     expect(recurring.data.map((t) => t.transactionDate.toISOString().slice(0, 10))).toEqual([
-      '2028-01-31',
-      '2028-02-29',
-      '2028-03-31',
+      '2024-01-31',
+      '2024-02-29',
+      '2024-03-31',
     ]);
-    expect(recurring.data.map((t) => t.status)).toEqual(['confirmed', 'pending', 'pending']);
+    expect(recurring.data.map((t) => t.status)).toEqual(['confirmed', 'confirmed', 'confirmed']);
     expect(new Set(recurring.data.map((t) => t.seriesId)).size).toBe(1);
-    expect(Number((await accounts.findOne(userId, accountId)).currentBalance)).toBe(900);
+    // As três datas já passaram: todas entram no saldo.
+    expect(Number((await accounts.findOne(userId, accountId)).currentBalance)).toBe(700);
     expect((await transactions.findAll(otherId, { recurrenceType: 'fixo' })).meta.total).toBe(0);
     await expect(transactions.update(otherId, first.id, { amount: 999 })).rejects.toThrow();
 
@@ -101,11 +102,26 @@ integration('selected features with PostgreSQL', () => {
     expect((await transactions.findAll(userId, filters)).data[0].description).toBe(
       'Updated from recurring view',
     );
-    expect(Number((await accounts.findOne(userId, accountId)).currentBalance)).toBe(880);
+    expect(Number((await accounts.findOne(userId, accountId)).currentBalance)).toBe(680);
     await transactions.remove(userId, first.id, true);
     expect(
       (await transactions.findAll(userId, { ...filters, recurrenceType: 'fixo' })).meta.total,
     ).toBe(2);
+    expect(Number((await accounts.findOne(userId, accountId)).currentBalance)).toBe(800);
+    await prisma.transaction.deleteMany({ where: { seriesId: first.seriesId } });
+    await accounts.recalculateBalance(accountId);
+  });
+
+  it('keeps future occurrences out of the balance until their date', async () => {
+    await transactions.create(userId, {
+      accountId,
+      description: 'Future purchase',
+      type: 'expense',
+      amount: 100,
+      transactionDate: '2028-01-10',
+      recurrenceType: 'parcelado',
+      installments: 2,
+    });
     expect(Number((await accounts.findOne(userId, accountId)).currentBalance)).toBe(1000);
   });
 

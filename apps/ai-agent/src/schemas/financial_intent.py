@@ -18,7 +18,6 @@ class IntentType(str, Enum):
 class TransactionTypeEnum(str, Enum):
     income = "income"
     expense = "expense"
-    transfer = "transfer"
 
 
 class FinancialIntent(BaseModel):

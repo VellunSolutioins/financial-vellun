@@ -240,7 +240,7 @@ function PendingWidget({
       <CardContent>
         <p className={`text-2xl font-bold mb-3 ${accent}`}>{formatCurrency(total)}</p>
         {items.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nada pendente.</p>
+          <p className="text-sm text-muted-foreground">Nada a vencer.</p>
         ) : (
           <div className="space-y-2">
             {items.map((t) => (

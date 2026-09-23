@@ -263,12 +263,12 @@ describe('InternalService', () => {
       expect(accounts.recalculateBalance).toHaveBeenCalledWith('a1');
     });
 
-    it('não recalcula o saldo de lançamento existente que ainda não foi confirmado', async () => {
+    it('não recalcula o saldo de lançamento existente que foi cancelado', async () => {
       prisma.transaction.findUnique.mockResolvedValue({
         id: 't1',
         userId: 'u1',
         accountId: 'a1',
-        status: 'pending',
+        status: 'cancelled',
       });
       const accounts = { recalculateBalance: jest.fn() };
       service = new InternalService(prisma as any, accounts as any, access as any);
@@ -351,11 +351,16 @@ describe('InternalService', () => {
 
     it('grava lançamento e extração na mesma transação de banco', async () => {
       prisma.transaction.findUnique.mockResolvedValue(null);
-      prisma.transaction.create.mockResolvedValue({ id: 't1', status: 'pending' });
+      prisma.transaction.create.mockResolvedValue({
+        id: 't1',
+        accountId: 'a1',
+        status: 'confirmed',
+      });
+      const accounts = { recalculateBalance: jest.fn() };
+      service = new InternalService(prisma as any, accounts as any, access as any);
 
       await service.createTransactionFromAi({
         ...dto,
-        status: 'pending',
         aiExtractedTransactionId: 'ext1',
       });
 

@@ -144,9 +144,9 @@ export class TransactionsService {
             ...baseData,
             amount: amountFor(i),
             transactionDate: i === 0 ? firstDate : addMonthsUtc(firstDate, i),
-            // A primeira ocorrência respeita o status escolhido; as futuras
-            // nascem pendentes, já que ainda não aconteceram.
-            status: i === 0 ? (dto.status ?? 'confirmed') : 'pending',
+            // Todas nascem confirmadas: as futuras ficam fora do saldo pela data,
+            // não por status (ver AccountsService.recalculateBalance).
+            status: 'confirmed',
             seriesId,
             installmentNumber: seriesId ? i + 1 : null,
             installmentTotal: seriesId ? occurrences : null,

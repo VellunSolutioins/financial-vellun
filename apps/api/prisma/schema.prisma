@@ -27,15 +27,18 @@ enum ProfileType {
   business
 }
 
+/// `transfer` não é mais aceito pela API nem oferecido nas telas; o valor fica
+/// no enum só para não invalidar registros antigos.
 enum TransactionType {
   income
   expense
   transfer
 }
 
+/// Não existe "pendente": o que ainda vai acontecer é definido pela data do
+/// lançamento (futuro = data depois de hoje), não por um status.
 enum TransactionStatus {
   confirmed
-  pending
   cancelled
 }
 
@@ -389,8 +392,8 @@ model Transaction {
   // Listagem (ordenada por data) e série diária do dashboard.
   @@index([userId, transactionDate])
   // Agregações do dashboard (soma por tipo no período) e as listas de contas a
-  // pagar/receber, que filtram por `status: pending`. `status` antes de `type`
-  // porque toda consulta deste grupo fixa os dois.
+  // pagar/receber (confirmados com data a partir de hoje). `status` antes de
+  // `type` porque toda consulta deste grupo fixa os dois.
   @@index([userId, status, type, transactionDate])
   // "Lançamentos recentes" do dashboard: ordena por `createdAt`, não por
   // `transactionDate` — um lançamento de ontem registrado agora aparece no topo.

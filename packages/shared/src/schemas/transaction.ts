@@ -7,15 +7,11 @@ export const TransactionSchema = z.object({
   user_id: z.string().uuid(),
   account_id: z.string().uuid(),
   category_id: z.string().uuid().nullable().optional(),
-  type: z.enum([TransactionType.INCOME, TransactionType.EXPENSE, TransactionType.TRANSFER]),
+  type: z.enum([TransactionType.INCOME, TransactionType.EXPENSE]),
   amount: z.number().positive(),
   description: z.string().max(500).optional(),
   transaction_date: z.coerce.date(),
-  status: z.enum([
-    TransactionStatus.CONFIRMED,
-    TransactionStatus.PENDING,
-    TransactionStatus.CANCELLED,
-  ]),
+  status: z.enum([TransactionStatus.CONFIRMED, TransactionStatus.CANCELLED]),
   source: z.enum([
     TransactionSource.MANUAL,
     TransactionSource.WHATSAPP,
@@ -31,12 +27,12 @@ export const TransactionSchema = z.object({
 export const CreateTransactionSchema = z.object({
   account_id: z.string().uuid(),
   category_id: z.string().uuid().nullable().optional(),
-  type: z.enum([TransactionType.INCOME, TransactionType.EXPENSE, TransactionType.TRANSFER]),
+  type: z.enum([TransactionType.INCOME, TransactionType.EXPENSE]),
   amount: z.number().positive(),
   description: z.string().max(500).optional(),
   transaction_date: z.coerce.date(),
   status: z
-    .enum([TransactionStatus.CONFIRMED, TransactionStatus.PENDING, TransactionStatus.CANCELLED])
+    .enum([TransactionStatus.CONFIRMED, TransactionStatus.CANCELLED])
     .default(TransactionStatus.CONFIRMED),
   source: z
     .enum([
@@ -55,14 +51,10 @@ export const UpdateTransactionSchema = CreateTransactionSchema.partial();
 export const TransactionFiltersSchema = z.object({
   period_start: z.coerce.date().optional(),
   period_end: z.coerce.date().optional(),
-  type: z
-    .enum([TransactionType.INCOME, TransactionType.EXPENSE, TransactionType.TRANSFER])
-    .optional(),
+  type: z.enum([TransactionType.INCOME, TransactionType.EXPENSE]).optional(),
   category_id: z.string().uuid().optional(),
   account_id: z.string().uuid().optional(),
-  status: z
-    .enum([TransactionStatus.CONFIRMED, TransactionStatus.PENDING, TransactionStatus.CANCELLED])
-    .optional(),
+  status: z.enum([TransactionStatus.CONFIRMED, TransactionStatus.CANCELLED]).optional(),
   source: z
     .enum([
       TransactionSource.MANUAL,

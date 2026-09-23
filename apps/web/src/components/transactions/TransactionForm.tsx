@@ -12,10 +12,11 @@ import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
 import type { Transaction } from '@/hooks/useTransactions';
 import { CURRENCY_REGEX, currencyToNumber, formatCurrencyInput, maskCurrency } from '@/lib/masks';
+import { cn } from '@/lib/utils';
 
 const schema = z
   .object({
-    type: z.enum(['income', 'expense', 'transfer']),
+    type: z.enum(['income', 'expense'], { message: 'Selecione despesa ou receita' }),
     amount: z
       .string()
       .min(1, 'Valor obrigatório')
@@ -25,7 +26,6 @@ const schema = z
     accountId: z.string().min(1, 'Conta obrigatória'),
     categoryId: z.string().optional(),
     transactionDate: z.string().min(1, 'Data obrigatória'),
-    status: z.enum(['confirmed', 'pending']),
     recurrenceType: z.enum(['avulso', 'fixo', 'parcelado']),
     installments: z.string().optional(),
     recurrenceMonths: z.string().optional(),
@@ -44,27 +44,25 @@ const schema = z
   );
 type FormData = z.infer<typeof schema>;
 
-const recurrenceLabels: Record<FormData['recurrenceType'], string> = {
-  avulso: 'Avulso',
+export const recurrenceLabels: Record<FormData['recurrenceType'], string> = {
+  avulso: 'Única vez',
   fixo: 'Fixo (repete todo mês)',
   parcelado: 'Parcelado',
 };
 
+const typeOptions = [
+  { value: 'expense', label: 'Despesa', active: 'border-rose-600 bg-rose-600 text-white' },
+  { value: 'income', label: 'Receita', active: 'border-emerald-600 bg-emerald-600 text-white' },
+] as const;
+
 interface Props {
   transaction?: Transaction;
-  defaultType?: 'income' | 'expense';
   fixedOnly?: boolean;
   onSuccess: () => void;
   onCancel: () => void;
 }
 
-export function TransactionForm({
-  transaction,
-  defaultType,
-  fixedOnly = false,
-  onSuccess,
-  onCancel,
-}: Props) {
+export function TransactionForm({ transaction, fixedOnly = false, onSuccess, onCancel }: Props) {
   const [accounts, setAccounts] = useState<{ id: string; name: string }[]>([]);
   const [categories, setCategories] = useState<{ id: string; name: string; type: string }[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -80,7 +78,7 @@ export function TransactionForm({
   } = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: {
-      type: transaction?.type ?? defaultType ?? 'expense',
+      type: transaction?.type ?? 'expense',
       amount: transaction ? formatCurrencyInput(Number(transaction.amount)) : '',
       description: transaction?.description ?? '',
       accountId: transaction?.accountId ?? '',
@@ -88,7 +86,6 @@ export function TransactionForm({
       transactionDate: transaction?.transactionDate
         ? new Date(transaction.transactionDate).toISOString().slice(0, 10)
         : new Date().toISOString().slice(0, 10),
-      status: (transaction?.status as 'confirmed' | 'pending') ?? 'confirmed',
       recurrenceType: !transaction && fixedOnly ? 'fixo' : 'avulso',
       installments: '',
       recurrenceMonths: '',
@@ -179,29 +176,45 @@ export function TransactionForm({
     }
   };
 
-  const filteredCategories = categories.filter(
-    (c) => selectedType === 'transfer' || c.type === selectedType,
-  );
+  const filteredCategories = categories.filter((c) => c.type === selectedType);
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-1">
-          <Label>Tipo</Label>
-          <Select {...register('type')}>
-            <option value="income">Receita</option>
-            <option value="expense">Despesa</option>
-            <option value="transfer">Transferência</option>
-          </Select>
-          {errors.type && <p className="text-xs text-destructive">{errors.type.message}</p>}
+      <div className="space-y-1">
+        <Label id="transaction-type-label">Tipo</Label>
+        <input type="hidden" {...register('type')} />
+        <div
+          role="radiogroup"
+          aria-labelledby="transaction-type-label"
+          className="grid grid-cols-2 gap-2"
+        >
+          {typeOptions.map((option) => {
+            const selected = selectedType === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                onClick={() => {
+                  if (selected) return;
+                  setValue('type', option.value, { shouldDirty: true, shouldValidate: true });
+                  // Categoria de despesa não serve para receita (e vice-versa).
+                  setValue('categoryId', '', { shouldDirty: true });
+                }}
+                className={cn(
+                  'h-10 rounded-md border text-sm font-medium transition-colors',
+                  selected
+                    ? option.active
+                    : 'border-input bg-background text-muted-foreground hover:bg-muted',
+                )}
+              >
+                {option.label}
+              </button>
+            );
+          })}
         </div>
-        <div className="space-y-1">
-          <Label>Status</Label>
-          <Select {...register('status')}>
-            <option value="confirmed">Confirmado</option>
-            <option value="pending">Pendente</option>
-          </Select>
-        </div>
+        {errors.type && <p className="text-xs text-destructive">{errors.type.message}</p>}
       </div>
       <div className="space-y-1">
         <Label>{isInstallment ? 'Valor total da compra (R$)' : 'Valor (R$)'}</Label>
@@ -260,7 +273,7 @@ export function TransactionForm({
       </div>
       {!transaction && (
         <div className="space-y-1">
-          <Label>Tipo de lançamento</Label>
+          <Label>Recorrência</Label>
           <Select {...register('recurrenceType')}>
             {Object.entries(recurrenceLabels)
               .filter(([value]) => !fixedOnly || value === 'fixo')

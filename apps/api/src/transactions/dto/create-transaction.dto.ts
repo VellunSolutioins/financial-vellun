@@ -1,14 +1,22 @@
 import { IsInt, Max, Min } from 'class-validator';
 import { RecurrenceType } from '@prisma/client';
-import { IsDateString, IsEnum, IsNumber, IsOptional, IsPositive, IsString } from 'class-validator';
+import {
+  IsDateString,
+  IsEnum,
+  IsIn,
+  IsNumber,
+  IsOptional,
+  IsPositive,
+  IsString,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { TransactionStatus, TransactionType } from '@prisma/client';
 import { Type } from 'class-transformer';
+import { ENTRY_TYPES, EntryType } from '../entry-types';
 
 export class CreateTransactionDto {
-  @ApiProperty({ enum: TransactionType })
-  @IsEnum(TransactionType)
-  type!: TransactionType;
+  @ApiProperty({ enum: ENTRY_TYPES })
+  @IsIn(ENTRY_TYPES)
+  type!: EntryType;
 
   @ApiProperty()
   @Type(() => Number)
@@ -33,12 +41,12 @@ export class CreateTransactionDto {
   @IsDateString()
   transactionDate!: string;
 
-  @ApiProperty({ enum: TransactionStatus, default: TransactionStatus.confirmed })
-  @IsOptional()
-  @IsEnum(TransactionStatus)
-  status?: TransactionStatus;
-
-  @ApiProperty({ enum: RecurrenceType, default: RecurrenceType.avulso, required: false })
+  @ApiProperty({
+    enum: RecurrenceType,
+    default: RecurrenceType.avulso,
+    required: false,
+    description: 'Recorrência: avulso (única vez), fixo (repete todo mês) ou parcelado.',
+  })
   @IsOptional()
   @IsEnum(RecurrenceType)
   recurrenceType?: RecurrenceType;

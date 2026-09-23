@@ -17,6 +17,7 @@ import { useConfirm } from '@/components/ui/confirm';
 interface Category {
   id: string;
   name: string;
+  // `transfer` só em categorias antigas; não é mais aceito.
   type: 'income' | 'expense' | 'transfer';
   color?: string;
   icon?: string;
@@ -27,7 +28,7 @@ interface Category {
 
 const schema = z.object({
   name: z.string().min(1, 'Nome obrigatório'),
-  type: z.enum(['income', 'expense', 'transfer']),
+  type: z.enum(['income', 'expense'], { message: 'Selecione despesa ou receita' }),
   color: z.string().optional(),
   icon: z.string().optional(),
   costCenter: z.string().optional(),
@@ -37,6 +38,7 @@ type FormData = z.infer<typeof schema>;
 const typeLabels: Record<string, string> = {
   income: 'Receita',
   expense: 'Despesa',
+  // Só para exibir categorias antigas: o tipo não é mais aceito.
   transfer: 'Transferência',
 };
 
@@ -83,7 +85,8 @@ export function CategoriesView({ showCostCenter = false }: Props) {
     setEditing(c);
     reset({
       name: c.name,
-      type: c.type,
+      // Categoria antiga de transferência cai na validação e pede novo tipo.
+      type: c.type as FormData['type'],
       color: c.color ?? '',
       icon: c.icon ?? '',
       costCenter: c.costCenter ?? '',
@@ -245,8 +248,8 @@ export function CategoriesView({ showCostCenter = false }: Props) {
             <Select {...register('type')}>
               <option value="expense">Despesa</option>
               <option value="income">Receita</option>
-              <option value="transfer">Transferência</option>
             </Select>
+            {errors.type && <p className="text-xs text-destructive">{errors.type.message}</p>}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">

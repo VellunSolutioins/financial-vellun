@@ -46,7 +46,6 @@ IMAGE_FALLBACK = (
 _TYPE_LABEL = {
     TransactionTypeEnum.income: "receita",
     TransactionTypeEnum.expense: "despesa",
-    TransactionTypeEnum.transfer: "transferência",
 }
 
 

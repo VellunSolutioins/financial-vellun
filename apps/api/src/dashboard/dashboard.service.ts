@@ -84,7 +84,7 @@ export class DashboardService {
           where: {
             userId,
             type: 'expense',
-            status: 'pending',
+            status: 'confirmed',
             transactionDate: { gte: startOfDayUtc(dateOnlyString(todaySaoPaulo())) },
           },
           include: { category: true, account: true },
@@ -135,6 +135,12 @@ export class DashboardService {
     const end = periodEnd
       ? endOfDayUtc(periodEnd)
       : endOfMonthUtc(now.getFullYear(), now.getMonth());
+    // A pagar/receber = o que ainda vai acontecer: confirmado com data de hoje
+    // em diante. Não existe status pendente.
+    const upcoming = {
+      status: 'confirmed' as const,
+      transactionDate: { gte: startOfDayUtc(dateOnlyString(todaySaoPaulo())) },
+    };
 
     const [
       accounts,
@@ -171,13 +177,13 @@ export class DashboardService {
         take: 5,
       }),
       this.prisma.transaction.findMany({
-        where: { userId, type: 'income', status: 'pending' },
+        where: { userId, type: 'income', ...upcoming },
         include: { category: true, account: true },
         orderBy: { transactionDate: 'asc' },
         take: PENDING_PREVIEW_LIMIT,
       }),
       this.prisma.transaction.findMany({
-        where: { userId, type: 'expense', status: 'pending' },
+        where: { userId, type: 'expense', ...upcoming },
         include: { category: true, account: true },
         orderBy: { transactionDate: 'asc' },
         take: PENDING_PREVIEW_LIMIT,
@@ -187,7 +193,7 @@ export class DashboardService {
       // só cobre receber e pagar, e é ela que conta quantos existem.
       this.prisma.transaction.groupBy({
         by: ['type'],
-        where: { userId, status: 'pending', type: { in: ['income', 'expense'] } },
+        where: { userId, ...upcoming, type: { in: ['income', 'expense'] } },
         _sum: { amount: true },
         _count: { _all: true },
       }),

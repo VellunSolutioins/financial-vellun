@@ -1,10 +1,8 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { apiClient } from '@/lib/api-client';
-import { useToast } from '@/components/ui/toast';
 import { DataTable, type DataTableColumn } from '@/components/ui/table';
 import { useTransactions, type Transaction } from '@/hooks/useTransactions';
 import { formatDateBR } from '@/lib/utils';
@@ -17,17 +15,24 @@ interface Props {
   /** `expense` → contas a pagar; `income` → contas a receber */
   type: 'expense' | 'income';
   title: string;
-  /** Texto do botão de ação, ex.: "Marcar como pago" */
-  actionLabel: string;
 }
 
-export function PendingTransactionsView({ type, title, actionLabel }: Props) {
+function todayLocal() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
+    now.getDate(),
+  ).padStart(2, '0')}`;
+}
+
+/**
+ * Contas a pagar/receber: lançamentos com data de hoje em diante. Não existe
+ * status pendente — o que ainda vai acontecer é definido pela data.
+ */
+export function PendingTransactionsView({ type, title }: Props) {
   const [categories, setCategories] = useState<{ id: string; name: string; type: string }[]>([]);
   const [accounts, setAccounts] = useState<{ id: string; name: string }[]>([]);
-  const [updatingId, setUpdatingId] = useState<string | null>(null);
-  const toast = useToast();
 
-  const [periodStart, setPeriodStart] = useState('');
+  const [periodStart, setPeriodStart] = useState(todayLocal);
   const [periodEnd, setPeriodEnd] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [accountId, setAccountId] = useState('');
@@ -35,8 +40,9 @@ export function PendingTransactionsView({ type, title, actionLabel }: Props) {
   const filters = useMemo(
     () => ({
       type,
-      status: 'pending',
+      status: 'confirmed',
       limit: 500,
+      order: 'asc' as const,
       periodStart: periodStart || undefined,
       periodEnd: periodEnd || undefined,
       categoryId: categoryId || undefined,
@@ -45,7 +51,7 @@ export function PendingTransactionsView({ type, title, actionLabel }: Props) {
     [type, periodStart, periodEnd, categoryId, accountId],
   );
 
-  const { data, loading, refetch } = useTransactions(filters);
+  const { data, loading } = useTransactions(filters);
 
   useEffect(() => {
     Promise.all([
@@ -60,19 +66,6 @@ export function PendingTransactionsView({ type, title, actionLabel }: Props) {
   }, [type]);
 
   const total = data.reduce((sum, t) => sum + Number(t.amount), 0);
-
-  const markConfirmed = async (id: string) => {
-    setUpdatingId(id);
-    try {
-      await apiClient.patch(`/transactions/${id}`, { status: 'confirmed' });
-      toast.success(type === 'income' ? 'Recebimento confirmado.' : 'Pagamento confirmado.');
-      await refetch();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Erro ao confirmar lançamento');
-    } finally {
-      setUpdatingId(null);
-    }
-  };
 
   const columns: DataTableColumn<Transaction>[] = [
     {
@@ -106,15 +99,6 @@ export function PendingTransactionsView({ type, title, actionLabel }: Props) {
       cellClassName: `font-semibold ${type === 'income' ? 'text-green-600' : 'text-red-600'}`,
       cell: (tx) => formatCurrency(Number(tx.amount)),
     },
-    {
-      key: 'acoes',
-      align: 'right',
-      cell: (tx) => (
-        <Button size="sm" disabled={updatingId === tx.id} onClick={() => markConfirmed(tx.id)}>
-          {updatingId === tx.id ? '...' : actionLabel}
-        </Button>
-      ),
-    },
   ];
 
   return (
@@ -123,7 +107,7 @@ export function PendingTransactionsView({ type, title, actionLabel }: Props) {
 
       {/* Total em destaque */}
       <div className="bg-white rounded-lg border p-6">
-        <p className="text-sm text-muted-foreground">Total pendente</p>
+        <p className="text-sm text-muted-foreground">Total a vencer</p>
         <p
           className={`text-3xl font-bold ${type === 'income' ? 'text-green-600' : 'text-red-600'}`}
         >
@@ -160,7 +144,7 @@ export function PendingTransactionsView({ type, title, actionLabel }: Props) {
         rowKey={(tx) => tx.id}
         loading={loading}
         minWidth={640}
-        empty="Nada pendente."
+        empty="Nada a vencer no período."
       />
     </div>
   );

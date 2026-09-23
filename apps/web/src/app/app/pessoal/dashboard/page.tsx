@@ -444,13 +444,13 @@ export default function DashboardPage() {
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
             <CardTitle className="text-base">Próximas Contas a Pagar</CardTitle>
             {data.upcomingBills.length > 0 && (
-              <Badge variant="secondary">{data.upcomingBills.length} pendentes</Badge>
+              <Badge variant="secondary">{data.upcomingBills.length} a vencer</Badge>
             )}
           </CardHeader>
           <CardContent>
             {data.upcomingBills.length === 0 ? (
               <div className="flex h-[120px] items-center justify-center text-sm text-muted-foreground">
-                Nenhuma conta pendente 🎉
+                Nenhuma conta a vencer 🎉
               </div>
             ) : (
               <ul className="divide-y divide-border">
