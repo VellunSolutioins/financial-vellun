@@ -288,6 +288,33 @@ async function main() {
     );
   }
 
+  await seedDemoUser();
+}
+
+/**
+ * Fixture de desenvolvimento: usuário demo, conta e vínculo de WhatsApp.
+ *
+ * **Nunca em produção.** Três motivos, cada um suficiente sozinho:
+ *
+ * - o `upsert` reescreve o `passwordHash` a cada execução, então uma conta real
+ *   com este e-mail teria a senha reposta para uma conhecida;
+ * - a senha sai em texto puro no log, que em produção vai para o Loki;
+ * - o `whatsappContact` nasce `isVerified: true` — exatamente o vínculo que a
+ *   verificação de posse (plano de segurança, S1.1) passou a exigir prova para
+ *   conceder. Quem controlasse o número registraria lançamentos e leria dados
+ *   da conta pelo WhatsApp, sem nunca provar nada.
+ *
+ * Os blocos acima (categorias padrão e planos) continuam rodando em qualquer
+ * ambiente: são dado de **referência**, não fixture. É o que torna o seed
+ * seguro de rodar sob demanda em produção quando uma categoria nova é
+ * acrescentada ao código.
+ */
+async function seedDemoUser() {
+  if (process.env.NODE_ENV === 'production') {
+    console.log('Usuario demo ignorado (NODE_ENV=production).');
+    return;
+  }
+
   console.log('Criando usuario demo...');
 
   const passwordHash = await bcrypt.hash(demoUser.password, 12);
