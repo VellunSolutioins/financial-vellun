@@ -1,4 +1,5 @@
-import { TransactionsView } from '@/components/transactions/TransactionsView';
+import { RecurrencesView } from '@/components/transactions/RecurrencesView';
+
 export default function RecorrenciasPage() {
-  return <TransactionsView recurringOnly />;
+  return <RecurrencesView />;
 }

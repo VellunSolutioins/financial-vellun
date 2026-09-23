@@ -16,6 +16,7 @@ export interface Transaction {
   category?: { id: string; name: string };
   account?: { id: string; name: string };
   recurrenceType: 'avulso' | 'fixo' | 'parcelado';
+  recurrenceFrequency?: 'monthly' | 'bimonthly' | 'semiannual' | 'annual' | null;
   seriesId?: string | null;
   installmentNumber?: number | null;
   installmentTotal?: number | null;

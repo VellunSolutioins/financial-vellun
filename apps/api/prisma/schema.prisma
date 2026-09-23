@@ -355,6 +355,9 @@ model Category {
 
 model Transaction {
   recurrenceType    RecurrenceType    @default(avulso) @map("recurrence_type")
+  // Só em "fixo". Uma recorrência não é outra entidade: é a série de
+  // lançamentos fixos com o mesmo `seriesId`.
+  recurrenceFrequency RecurrenceFrequency? @map("recurrence_frequency")
   seriesId          String?           @map("series_id")
   installmentNumber Int?              @map("installment_number")
   installmentTotal  Int?              @map("installment_total")
@@ -782,6 +785,14 @@ enum RecurrenceType {
   avulso
   fixo
   parcelado
+}
+
+/// Espaçamento entre as ocorrências de um lançamento fixo.
+enum RecurrenceFrequency {
+  monthly
+  bimonthly
+  semiannual
+  annual
 }
 
 enum ReminderStatus {

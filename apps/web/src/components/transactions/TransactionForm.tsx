@@ -27,6 +27,7 @@ const schema = z
     categoryId: z.string().optional(),
     transactionDate: z.string().min(1, 'Data obrigatória'),
     recurrenceType: z.enum(['avulso', 'fixo', 'parcelado']),
+    recurrenceFrequency: z.enum(['monthly', 'bimonthly', 'semiannual', 'annual']),
     installments: z.string().optional(),
     recurrenceMonths: z.string().optional(),
   })
@@ -40,14 +41,21 @@ const schema = z
     (data) =>
       data.recurrenceType !== 'fixo' ||
       (Number(data.recurrenceMonths) >= 2 && Number(data.recurrenceMonths) <= 120),
-    { message: 'Informe entre 2 e 120 meses', path: ['recurrenceMonths'] },
+    { message: 'Informe entre 2 e 120 repetições', path: ['recurrenceMonths'] },
   );
 type FormData = z.infer<typeof schema>;
 
 export const recurrenceLabels: Record<FormData['recurrenceType'], string> = {
   avulso: 'Única vez',
-  fixo: 'Fixo (repete todo mês)',
+  fixo: 'Fixo (repete)',
   parcelado: 'Parcelado',
+};
+
+export const frequencyLabels: Record<FormData['recurrenceFrequency'], string> = {
+  monthly: 'Mensal',
+  bimonthly: 'Bimestral',
+  semiannual: 'Semestral',
+  annual: 'Anual',
 };
 
 const typeOptions = [
@@ -87,6 +95,7 @@ export function TransactionForm({ transaction, fixedOnly = false, onSuccess, onC
         ? new Date(transaction.transactionDate).toISOString().slice(0, 10)
         : new Date().toISOString().slice(0, 10),
       recurrenceType: !transaction && fixedOnly ? 'fixo' : 'avulso',
+      recurrenceFrequency: 'monthly',
       installments: '',
       recurrenceMonths: '',
     },
@@ -131,7 +140,7 @@ export function TransactionForm({ transaction, fixedOnly = false, onSuccess, onC
 
   const onSubmit = async (data: FormData) => {
     setSubmitting(true);
-    const { installments, recurrenceMonths, recurrenceType, ...rest } = data;
+    const { installments, recurrenceMonths, recurrenceType, recurrenceFrequency, ...rest } = data;
     const payload = transaction
       ? { ...rest, amount: currencyToNumber(data.amount) }
       : {
@@ -139,7 +148,10 @@ export function TransactionForm({ transaction, fixedOnly = false, onSuccess, onC
           recurrenceType,
           amount: currencyToNumber(data.amount),
           ...(recurrenceType === 'parcelado' && { installments: Number(installments) }),
-          ...(recurrenceType === 'fixo' && { recurrenceMonths: Number(recurrenceMonths) }),
+          ...(recurrenceType === 'fixo' && {
+            recurrenceFrequency,
+            recurrenceMonths: Number(recurrenceMonths),
+          }),
         };
     try {
       if (transaction) {
@@ -273,16 +285,19 @@ export function TransactionForm({ transaction, fixedOnly = false, onSuccess, onC
       </div>
       {!transaction && (
         <div className="space-y-1">
-          <Label>Recorrência</Label>
-          <Select {...register('recurrenceType')}>
-            {Object.entries(recurrenceLabels)
-              .filter(([value]) => !fixedOnly || value === 'fixo')
-              .map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-          </Select>
+          {/* Na tela de Recorrências o tipo já é "fixo" (valor padrão do form): o seletor sai. */}
+          {!fixedOnly && (
+            <>
+              <Label>Recorrência</Label>
+              <Select {...register('recurrenceType')}>
+                {Object.entries(recurrenceLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </Select>
+            </>
+          )}
           {selectedRecurrenceType === 'parcelado' && (
             <div className="pt-1">
               <Input
@@ -301,16 +316,33 @@ export function TransactionForm({ transaction, fixedOnly = false, onSuccess, onC
             </div>
           )}
           {selectedRecurrenceType === 'fixo' && (
-            <div className="pt-1">
-              <Input
-                type="number"
-                min={2}
-                max={120}
-                placeholder="Repetir por quantos meses"
-                {...register('recurrenceMonths')}
-              />
+            <div className="grid grid-cols-2 gap-4 pt-1">
+              <div className="space-y-1">
+                <Label htmlFor="recurrence-frequency">Frequência</Label>
+                <Select id="recurrence-frequency" {...register('recurrenceFrequency')}>
+                  {Object.entries(frequencyLabels).map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="recurrence-count">Repetições</Label>
+                <Input
+                  id="recurrence-count"
+                  type="number"
+                  inputMode="numeric"
+                  min={2}
+                  max={120}
+                  placeholder="Ex: 12"
+                  {...register('recurrenceMonths')}
+                />
+              </div>
               {errors.recurrenceMonths && (
-                <p className="text-xs text-destructive">{errors.recurrenceMonths.message}</p>
+                <p className="col-span-2 text-xs text-destructive">
+                  {errors.recurrenceMonths.message}
+                </p>
               )}
             </div>
           )}
@@ -318,7 +350,13 @@ export function TransactionForm({ transaction, fixedOnly = false, onSuccess, onC
       )}
       <div className="flex gap-2 pt-2">
         <Button type="submit" disabled={submitting} className="flex-1">
-          {submitting ? 'Salvando...' : transaction ? 'Salvar alterações' : 'Criar lançamento'}
+          {submitting
+            ? 'Salvando...'
+            : transaction
+              ? 'Salvar alterações'
+              : fixedOnly
+                ? 'Criar recorrência'
+                : 'Criar lançamento'}
         </Button>
         {transaction && (
           <Button type="button" variant="destructive" onClick={handleCancel}>

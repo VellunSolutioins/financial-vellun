@@ -12,6 +12,7 @@ import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { ListTransactionsDto } from './dto/list-transactions.dto';
 import { parseDateOnly, startOfDayUtc, endOfDayUtc, addMonthsUtc } from '../common/date.util';
+import { FREQUENCY_STEP_MONTHS } from './recurrence-frequency';
 
 @Injectable()
 export class TransactionsService {
@@ -100,6 +101,10 @@ export class TransactionsService {
     await this.validateOwnership(userId, dto.accountId, dto.categoryId);
 
     const recurrenceType = dto.recurrenceType ?? 'avulso';
+    const recurrenceFrequency =
+      recurrenceType === 'fixo' ? (dto.recurrenceFrequency ?? 'monthly') : null;
+    // Parcelas são sempre mensais; o fixo segue a frequência escolhida.
+    const stepMonths = recurrenceFrequency ? FREQUENCY_STEP_MONTHS[recurrenceFrequency] : 1;
     const firstDate = parseDateOnly(dto.transactionDate);
     const baseData = {
       userId,
@@ -110,6 +115,7 @@ export class TransactionsService {
       description: dto.description,
       source: 'manual' as const,
       recurrenceType,
+      recurrenceFrequency,
     };
 
     let occurrences: number;
@@ -120,7 +126,7 @@ export class TransactionsService {
       occurrences = dto.installments;
     } else if (recurrenceType === 'fixo') {
       if (!dto.recurrenceMonths || dto.recurrenceMonths < 2 || dto.recurrenceMonths > 120) {
-        throw new BadRequestException('Quantidade de meses inválida (mínimo 2, máximo 120)');
+        throw new BadRequestException('Quantidade de ocorrências inválida (mínimo 2, máximo 120)');
       }
       occurrences = dto.recurrenceMonths;
     } else {
@@ -143,7 +149,7 @@ export class TransactionsService {
           data: {
             ...baseData,
             amount: amountFor(i),
-            transactionDate: i === 0 ? firstDate : addMonthsUtc(firstDate, i),
+            transactionDate: i === 0 ? firstDate : addMonthsUtc(firstDate, i * stepMonths),
             // Todas nascem confirmadas: as futuras ficam fora do saldo pela data,
             // não por status (ver AccountsService.recalculateBalance).
             status: 'confirmed',
@@ -222,7 +228,8 @@ export class TransactionsService {
     return extractions;
   }
 
-  private async validateOwnership(userId: string, accountId?: string, categoryId?: string) {
+  /** Conta e categoria precisam ser do usuário. Usado também pelas recorrências. */
+  async validateOwnership(userId: string, accountId?: string, categoryId?: string) {
     if (accountId !== undefined) {
       if (!accountId) throw new BadRequestException('Conta inválida');
       const account = await this.prisma.account.findUnique({ where: { id: accountId } });

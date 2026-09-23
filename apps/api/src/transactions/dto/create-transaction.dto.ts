@@ -1,5 +1,5 @@
 import { IsInt, Max, Min } from 'class-validator';
-import { RecurrenceType } from '@prisma/client';
+import { RecurrenceFrequency, RecurrenceType } from '@prisma/client';
 import {
   IsDateString,
   IsEnum,
@@ -45,11 +45,21 @@ export class CreateTransactionDto {
     enum: RecurrenceType,
     default: RecurrenceType.avulso,
     required: false,
-    description: 'Recorrência: avulso (única vez), fixo (repete todo mês) ou parcelado.',
+    description: 'Recorrência: avulso (única vez), fixo (repete) ou parcelado.',
   })
   @IsOptional()
   @IsEnum(RecurrenceType)
   recurrenceType?: RecurrenceType;
+
+  @ApiProperty({
+    enum: RecurrenceFrequency,
+    default: RecurrenceFrequency.monthly,
+    required: false,
+    description: 'Frequência das ocorrências quando recurrenceType = fixo.',
+  })
+  @IsOptional()
+  @IsEnum(RecurrenceFrequency)
+  recurrenceFrequency?: RecurrenceFrequency;
 
   @ApiProperty({
     required: false,
@@ -66,7 +76,8 @@ export class CreateTransactionDto {
   @ApiProperty({
     required: false,
     description:
-      'Quantidade de meses a gerar — obrigatório quando recurrenceType = fixo (mínimo 2, máximo 120).',
+      'Quantidade de ocorrências a gerar — obrigatório quando recurrenceType = fixo (mínimo 2, ' +
+      'máximo 120). No mensal, equivale ao número de meses.',
   })
   @IsOptional()
   @Type(() => Number)

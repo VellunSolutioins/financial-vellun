@@ -10,7 +10,11 @@ import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Dialog } from '@/components/ui/dialog';
 import { Pagination } from '@/components/ui/pagination';
-import { TransactionForm, recurrenceLabels } from '@/components/transactions/TransactionForm';
+import {
+  TransactionForm,
+  frequencyLabels,
+  recurrenceLabels,
+} from '@/components/transactions/TransactionForm';
 import { useTransactions, type Transaction } from '@/hooks/useTransactions';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ui/toast';
@@ -78,7 +82,7 @@ function monthRange(month: string) {
   return { start, end };
 }
 
-function TransacoesContent({ recurringOnly = false }: { recurringOnly?: boolean }) {
+function TransacoesContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const toast = useToast();
@@ -106,7 +110,6 @@ function TransacoesContent({ recurringOnly = false }: { recurringOnly?: boolean 
     source: searchParams.get('source') ?? undefined,
     categoryId: searchParams.get('categoryId') ?? undefined,
     search: searchParams.get('search') ?? undefined,
-    recurrenceType: recurringOnly ? 'fixo' : undefined,
     periodStart: monthStart,
     periodEnd: monthEnd,
   };
@@ -155,14 +158,8 @@ function TransacoesContent({ recurringOnly = false }: { recurringOnly?: boolean 
     <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold sm:text-2xl">
-            {recurringOnly ? 'Recorrências' : 'Lançamentos'}
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {recurringOnly
-              ? 'Seus lançamentos fixos do período.'
-              : 'Suas receitas e despesas do período.'}
-          </p>
+          <h1 className="text-xl font-bold sm:text-2xl">Lançamentos</h1>
+          <p className="text-sm text-muted-foreground">Suas receitas e despesas do período.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Input
@@ -346,12 +343,7 @@ function TransacoesContent({ recurringOnly = false }: { recurringOnly?: boolean 
         onClose={closeModal}
         title={editingTx ? 'Editar lançamento' : 'Novo lançamento'}
       >
-        <TransactionForm
-          transaction={editingTx}
-          fixedOnly={recurringOnly}
-          onSuccess={handleSuccess}
-          onCancel={closeModal}
-        />
+        <TransactionForm transaction={editingTx} onSuccess={handleSuccess} onCancel={closeModal} />
         {editingTx && (
           <div className="mt-2 flex justify-end">
             <Button
@@ -393,7 +385,9 @@ function TransacoesContent({ recurringOnly = false }: { recurringOnly?: boolean 
                 'Recorrência',
                 viewingTx.recurrenceType === 'parcelado' && viewingTx.installmentTotal
                   ? `Parcelado (${viewingTx.installmentNumber}/${viewingTx.installmentTotal})`
-                  : recurrenceLabels[viewingTx.recurrenceType],
+                  : viewingTx.recurrenceType === 'fixo'
+                    ? `Fixo · ${frequencyLabels[viewingTx.recurrenceFrequency ?? 'monthly']}`
+                    : recurrenceLabels[viewingTx.recurrenceType],
               ],
             ].map(([label, value]) => (
               <div
@@ -411,10 +405,10 @@ function TransacoesContent({ recurringOnly = false }: { recurringOnly?: boolean 
   );
 }
 
-export function TransactionsView({ recurringOnly = false }: { recurringOnly?: boolean }) {
+export function TransactionsView() {
   return (
     <Suspense>
-      <TransacoesContent recurringOnly={recurringOnly} />
+      <TransacoesContent />
     </Suspense>
   );
 }
