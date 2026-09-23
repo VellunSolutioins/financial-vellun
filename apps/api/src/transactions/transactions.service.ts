@@ -21,9 +21,18 @@ export class TransactionsService {
 
   async findAll(userId: string, filters: ListTransactionsDto) {
     const {
-      periodStart, periodEnd, type, categoryId, accountId,
-      status, source, search, page = 1, limit = 20,
-      sortBy = 'transactionDate', order = 'desc',
+      periodStart,
+      periodEnd,
+      type,
+      categoryId,
+      accountId,
+      status,
+      source,
+      search,
+      page = 1,
+      limit = 10,
+      sortBy = 'transactionDate',
+      order = 'desc',
     } = filters;
 
     const where: Prisma.TransactionWhereInput = {

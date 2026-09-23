@@ -45,9 +45,9 @@ groups:
         # consumidor por construção (o TTL devolve a mensagem), e a DLQ tem o
         # alerta próprio abaixo.
         expr: |
-          rabbitmq_detailed_queue_messages_ready{queue=~"whatsapp\\.(inbound|processing)\\.v1"} > 0
+          rabbitmq_detailed_queue_messages_ready{queue=~"whatsapp\\.(inbound|processing|outbound)\\.v1"} > 0
             and on(queue)
-          rabbitmq_detailed_queue_consumers{queue=~"whatsapp\\.(inbound|processing)\\.v1"} == 0
+          rabbitmq_detailed_queue_consumers{queue=~"whatsapp\\.(inbound|processing|outbound)\\.v1"} == 0
         for: 2m
         labels:
           severity: critical
@@ -66,9 +66,9 @@ groups:
         # crescimento de 20/min por 15 minutos é problema — o limiar absoluto
         # confundiria os dois.
         expr: |
-          deriv(rabbitmq_detailed_queue_messages_ready{queue=~"whatsapp\\.(inbound|processing)\\.v1"}[10m]) > 0.3
+          deriv(rabbitmq_detailed_queue_messages_ready{queue=~"whatsapp\\.(inbound|processing|outbound)\\.v1"}[10m]) > 0.3
             and
-          rabbitmq_detailed_queue_messages_ready{queue=~"whatsapp\\.(inbound|processing)\\.v1"} > 100
+          rabbitmq_detailed_queue_messages_ready{queue=~"whatsapp\\.(inbound|processing|outbound)\\.v1"} > 100
         for: 15m
         labels:
           severity: warning
@@ -79,6 +79,59 @@ groups:
             {{ $labels.queue }} acumula mensagens de forma sustentada (mais de 100
             pendentes e crescendo). Os consumidores não estão dando conta da taxa
             de entrada.
+          dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
+          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#backlog-crescendo'
+
+      - alert: RespostaLentaFimAFim
+        # O SLO do produto, e a única latência que corresponde ao que o usuário
+        # sente: do webhook até a resposta sair. A soma das etapas não serve —
+        # ela não inclui o tempo parado em fila, que é o primeiro a crescer.
+        #
+        # Só enxerga mensagens que **completaram**. Uma fila totalmente travada
+        # não aparece aqui (nada completa); é o alerta de idade abaixo que
+        # cobre esse caso. Os dois são complementares, não redundantes.
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(vellun_agent_message_end_to_end_seconds_bucket[10m]))
+          ) > 30
+        for: 10m
+        labels:
+          severity: warning
+          service: ai-agent-worker
+        annotations:
+          summary: 'p95 fim a fim acima de 30s'
+          description: >-
+            95% das mensagens estão levando mais de 30 segundos entre chegar no
+            webhook e a resposta sair. Veja em qual etapa: receive_to_process,
+            processing_duration, llm_latency ou outbound_send.
+          dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
+          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#backlog-crescendo'
+
+      - alert: MensagemEsperandoHaMuitoTempo
+        # Profundidade responde "quanto"; **idade da mais antiga** responde "há
+        # quanto tempo alguém está sem resposta", que é a pergunta do SLO. As
+        # duas divergem em dois casos reais: uma fila curta parada (um
+        # consumidor travado num telefone) não dispara limiar de profundidade, e
+        # uma fila funda drenando rápido dispara sem ninguém estar esperando.
+        #
+        # `queue_head_message_timestamp` é a propriedade `timestamp` (unix, em
+        # segundos) da mensagem na cabeça da fila. Ela só existe porque o
+        # publisher a define — ver `rabbitmq/publisher.py`; sem isso o plugin
+        # reporta 0 e o alerta dispararia para sempre. Fila vazia não tem
+        # série, então fila vazia não alerta.
+        expr: |
+          time() - rabbitmq_detailed_queue_head_message_timestamp{queue=~"whatsapp\\.(inbound|processing|outbound)\\.v1"} > 300
+        for: 5m
+        labels:
+          severity: warning
+          service: ai-agent-worker
+        annotations:
+          summary: 'Mensagem parada há mais de 5 minutos em {{ $labels.queue }}'
+          description: >-
+            A mensagem mais antiga de {{ $labels.queue }} está esperando há mais de
+            5 minutos. Se a fila for whatsapp.outbound.v1, o problema é entrega (a
+            Meta), não processamento — os lançamentos estão sendo registrados.
           dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
           runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#backlog-crescendo'
 

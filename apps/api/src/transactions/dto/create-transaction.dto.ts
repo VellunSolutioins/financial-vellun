@@ -1,11 +1,4 @@
-import {
-  IsDateString,
-  IsEnum,
-  IsNumber,
-  IsOptional,
-  IsPositive,
-  IsString,
-} from 'class-validator';
+import { IsDateString, IsEnum, IsNumber, IsOptional, IsPositive, IsString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { TransactionStatus, TransactionType } from '@prisma/client';
 import { Type } from 'class-transformer';

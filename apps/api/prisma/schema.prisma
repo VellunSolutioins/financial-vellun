@@ -4,7 +4,20 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+  // Caminho da aplicação: pode passar por pooler (PgBouncer em transaction
+  // mode), e por isso carrega `pgbouncer=true`, `connection_limit` e
+  // `pool_timeout` — ver docs/connection-budget.md.
+  url       = env("DATABASE_URL")
+  // Caminho das migrations e do `prisma db push`: conexão direta, sem pooler.
+  // `migrate deploy` usa advisory lock e prepared statements nomeados, que um
+  // pooler em transaction mode não preserva entre comandos — a migration
+  // falharia de formas difíceis de diagnosticar (contrato C7).
+  //
+  // Declarada, a variável passa a ser **obrigatória**: o Prisma recusa o schema
+  // sem ela, inclusive em desenvolvimento. É de propósito — em dev ela aponta
+  // para o mesmo Postgres de `DATABASE_URL`, e o que não queremos é alguém
+  // descobrir em produção que a migration foi pelo pooler.
+  directUrl = env("DIRECT_URL")
 }
 
 // ── Enums ─────────────────────────────────────────────────────────────────────
@@ -134,6 +147,7 @@ enum OpsAuditResult {
 enum OpsFailureSource {
   whatsapp_inbound
   whatsapp_processing
+  whatsapp_outbound
 }
 
 /// Ciclo de vida de uma falha no catálogo.
@@ -171,8 +185,8 @@ model User {
   city          String?
   state         String?
 
-  createdAt    DateTime    @default(now()) @map("created_at")
-  updatedAt    DateTime    @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   individualProfile       IndividualProfile?
   businessProfile         BusinessProfile?
@@ -185,8 +199,81 @@ model User {
   aiExtractedTransactions AiExtractedTransaction[]
   subscriptions           Subscription[]
   payments                Payment[]
+  sessions                UserSession[]
+  securityEvents          UserSecurityEvent[]
+  phoneVerifications      PhoneVerification[]
 
   @@map("users")
+}
+
+// Sessão de login revogável. Cada login cria uma linha; o refresh token gira
+// nela mesma (uso único). `previousTokenHash` + `rotatedAt` toleram duas abas
+// renovando ao mesmo tempo; fora dessa janela, apresentar um token antigo é
+// reutilização e revoga a sessão. Os tokens nunca são guardados, só o hash.
+model UserSession {
+  id                String    @id @default(uuid())
+  userId            String    @map("user_id")
+  refreshTokenHash  String    @map("refresh_token_hash")
+  previousTokenHash String?   @map("previous_token_hash")
+  rotatedAt         DateTime? @map("rotated_at")
+  userAgent         String?   @map("user_agent")
+  ip                String?
+  createdAt         DateTime  @default(now()) @map("created_at")
+  lastUsedAt        DateTime  @default(now()) @map("last_used_at")
+  // Expiração deslizante (renovada a cada refresh) e prazo absoluto do login.
+  expiresAt         DateTime  @map("expires_at")
+  absoluteExpiresAt DateTime  @map("absolute_expires_at")
+  revokedAt         DateTime? @map("revoked_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_sessions")
+}
+
+/// Trilha das mudanças de identidade da conta: senha, e-mail, telefone e
+/// encerramento de sessões. Append-only no banco (trigger, como
+/// `ops_audit_log`): serve para o usuário e o suporte reconstruírem o que
+/// aconteceu, e uma sessão roubada não pode apagar o próprio rastro.
+///
+/// Nunca guarda credencial em claro; e-mails ficam mascarados.
+model UserSecurityEvent {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  /// `password_changed`, `email_changed`, `phone_verified`, `sessions_revoked`.
+  type      String
+  ip        String?
+  userAgent String?  @map("user_agent")
+  metadata  Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("user_security_events")
+}
+
+// Desafio de posse do número de WhatsApp (reverse OTP): o usuário envia o
+// código ao bot a partir do número informado. Só o hash do código é guardado.
+// O vínculo em `whatsapp_contacts` só é criado quando o desafio é concluído.
+model PhoneVerification {
+  id           String    @id @default(uuid())
+  userId       String    @map("user_id")
+  // E.164 do número informado pelo usuário (chave da busca feita pelo agente).
+  phoneNumber  String    @map("phone_number")
+  // Número como o usuário digitou, gravado em `users.phone` ao verificar.
+  displayPhone String    @map("display_phone")
+  codeHash     String    @map("code_hash")
+  attempts     Int       @default(0)
+  expiresAt    DateTime  @map("expires_at")
+  consumedAt   DateTime? @map("consumed_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([phoneNumber])
+  @@map("phone_verifications")
 }
 
 model IndividualProfile {
@@ -281,9 +368,24 @@ model Transaction {
 
   aiExtractedTransactions AiExtractedTransaction[]
 
-  @@index([userId])
-  @@index([transactionDate])
-  @@index([type])
+  // Todo acesso a lançamento é escopado por usuário — não existe consulta que
+  // varra a tabela inteira. Por isso os índices úteis começam em `userId`, e os
+  // de coluna única que existiam antes (`userId`, `transactionDate`, `type`)
+  // eram, na prática, o mesmo índice pior: o planner escolhia um deles e
+  // filtrava o resto lendo heap.
+  //
+  // Listagem (ordenada por data) e série diária do dashboard.
+  @@index([userId, transactionDate])
+  // Agregações do dashboard (soma por tipo no período) e as listas de contas a
+  // pagar/receber, que filtram por `status: pending`. `status` antes de `type`
+  // porque toda consulta deste grupo fixa os dois.
+  @@index([userId, status, type, transactionDate])
+  // "Lançamentos recentes" do dashboard: ordena por `createdAt`, não por
+  // `transactionDate` — um lançamento de ontem registrado agora aparece no topo.
+  @@index([userId, createdAt])
+  // Mantidos: são os lados "um" das relações, usados por join e pela checagem
+  // de integridade ao excluir conta/categoria. Nenhum começa por `userId`, então
+  // nenhum composto acima os cobre.
   @@index([categoryId])
   @@index([accountId])
   @@map("transactions")
@@ -311,17 +413,26 @@ model Contact {
 // ── WhatsApp ──────────────────────────────────────────────────────────────────
 
 model WhatsappContact {
-  id          String   @id @default(uuid())
-  userId      String?  @map("user_id")
-  phoneNumber String   @unique @map("phone_number")
+  id          String    @id @default(uuid())
+  userId      String?   @map("user_id")
+  phoneNumber String    @unique @map("phone_number")
   provider    String?
-  isVerified  Boolean  @default(false) @map("is_verified")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  // Só um contato verificado e não revogado identifica o usuário no WhatsApp.
+  isVerified  Boolean   @default(false) @map("is_verified")
+  verifiedAt  DateTime? @map("verified_at")
+  // Número desvinculado (troca de telefone ou posse comprovada por outra
+  // conta). `userId` é mantido para auditoria.
+  revokedAt   DateTime? @map("revoked_at")
+  // Incrementa a cada mudança de dono ou revogação. O agente guarda este valor
+  // junto da confirmação pendente e a descarta se ele mudar.
+  linkVersion Int       @default(0) @map("link_version")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
 
   user            User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
   aiConversations AiConversation[]
 
+  @@index([userId])
   @@map("whatsapp_contacts")
 }
 
@@ -340,6 +451,10 @@ model AiConversation {
   whatsappContact WhatsappContact @relation(fields: [whatsappContactId], references: [id], onDelete: Cascade)
   messages        AiMessage[]
 
+  // A conversa ativa de um contato é lida em toda mensagem recebida — inclusive
+  // dentro do `SELECT ... FOR UPDATE` que serializa a criação. Sem índice
+  // nenhum, isso era um seq scan por mensagem, e a tabela só cresce.
+  @@index([whatsappContactId, status, createdAt])
   @@map("ai_conversations")
 }
 
@@ -421,8 +536,8 @@ model Subscription {
   createdAt              DateTime           @default(now()) @map("created_at")
   updatedAt              DateTime           @updatedAt @map("updated_at")
 
-  user     User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  plan     Plan                @relation(fields: [planId], references: [id])
+  user          User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan          Plan                  @relation(fields: [planId], references: [id])
   payments      Payment[]
   audits        SubscriptionAudit[]
   webhookEvents PaymentWebhookEvent[]
@@ -633,8 +748,8 @@ model OpsFailedMessage {
   retentionUntil DateTime @map("retention_until")
 
   /// Preenchidos pelo reprocessamento (Entrega 7).
-  reprocessedAt  DateTime? @map("reprocessed_at")
-  lastOperationId String?  @map("last_operation_id")
+  reprocessedAt   DateTime? @map("reprocessed_at")
+  lastOperationId String?   @map("last_operation_id")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

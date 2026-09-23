@@ -1,8 +1,10 @@
 import { AgentReprocessClient } from './agent-reprocess.client';
 
+const CHAVE_INTERNA = 'chave-interna';
+
 const config = {
-  get: (chave: string) => (chave === 'AI_AGENT_URL' ? 'http://agente:8010' : undefined),
-  getOrThrow: () => 'chave-interna',
+  get: (chave: string) =>
+    ({ AI_AGENT_URL: 'http://agente:8010', INTERNAL_API_KEY: CHAVE_INTERNA })[chave],
 } as any;
 
 function resposta(status: number, corpo = ''): Response {

@@ -40,6 +40,27 @@ import httpx
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+#: Perfis do capacity review (P5 do plano de performance), em mensagens/minuto.
+#:
+#: Cada um roda por ``PERFIL_DURACAO_SEGUNDOS`` e espera o dreno. A concorrência
+#: acompanha a taxa porque o que se quer medir é a taxa sustentada, não uma
+#: rajada: com concorrência baixa demais o próprio gerador vira o gargalo, e a
+#: medição diria mais sobre o script que sobre o pipeline.
+#:
+#: Os telefones são muitos de propósito (contrato C12): o rate limit por
+#: telefone e o limite diário de IA são calibrados por número, e uma carga
+#: concentrada mediria o limitador, não o pipeline.
+PERFIS: dict[str, dict[str, float]] = {
+    "10/min": {"rps": 10 / 60, "concurrency": 2, "phones": 10},
+    "100/min": {"rps": 100 / 60, "concurrency": 10, "phones": 50},
+    "500/min": {"rps": 500 / 60, "concurrency": 25, "phones": 200},
+    "1000/min": {"rps": 1000 / 60, "concurrency": 50, "phones": 500},
+}
+
+#: Duração de cada perfil. Curto o suficiente para caber numa sessão, longo o
+#: suficiente para o agrupamento (debounce de 5s) e o autovacuum não dominarem.
+PERFIL_DURACAO_SEGUNDOS = 120
+
 DEFAULT_URL = "http://localhost:8010/webhook/whatsapp"
 DEFAULT_METRICS = "http://localhost:8010/metrics.json"
 DEFAULT_RABBIT_API = "http://localhost:15672/api/queues/%2F"
@@ -323,7 +344,9 @@ def print_queues(filas: dict) -> None:
             )
 
 
-async def wait_drain(args: argparse.Namespace, segundos: float) -> tuple[dict, int | None]:
+async def wait_drain(
+    args: argparse.Namespace, segundos: float
+) -> tuple[dict, int | None, float]:
     """Espera o pipeline **inteiro** terminar.
 
     Fila vazia não basta: uma mensagem consumida vai para o buffer de
@@ -335,10 +358,14 @@ async def wait_drain(args: argparse.Namespace, segundos: float) -> tuple[dict, i
     print("=" * 62)
     print(f"DRENANDO (até {segundos:.0f}s)")
     print("=" * 62)
-    principais = (args.inbound_queue, args.processing_queue)
+    # A fila de saída entra na conta: sem ela, o dreno declararia vitória com
+    # as respostas ainda enfileiradas, e o tempo de dreno mediria só metade do
+    # caminho.
+    principais = (args.inbound_queue, args.processing_queue, args.outbound_queue)
 
     async with httpx.AsyncClient() as client:
-        limite = time.perf_counter() + segundos
+        comeco = time.perf_counter()
+        limite = comeco + segundos
         ultimo: dict = {}
         grupos: int | None = None
         while time.perf_counter() < limite:
@@ -356,14 +383,17 @@ async def wait_drain(args: argparse.Namespace, segundos: float) -> tuple[dict, i
             print(
                 f"  filas={pendente:<5} grupos={grupos if grupos is not None else '?':<5}"
                 f" consumidas={contadores.get('messages_consumed', 0):<7}"
-                f" jobs={processados}/{publicados:<6} dlq={contadores.get('dlq_messages', 0)}"
+                f" jobs={processados}/{publicados:<6}"
+                f" saida={ultimo.get(args.outbound_queue, {}).get('ready', 0):<5}"
+                f" entregues={contadores.get('outbound_sent', 0):<6}"
+                f" dlq={contadores.get('dlq', 0)}"
             )
 
             if pendente == 0 and (grupos or 0) == 0 and processados >= publicados:
-                print("  pipeline drenado.")
+                print(f"  pipeline drenado em {time.perf_counter() - comeco:.1f}s.")
                 break
             await asyncio.sleep(2.0)
-        return ultimo, grupos
+        return ultimo, grupos, time.perf_counter() - comeco
 
 
 def veredito(
@@ -403,7 +433,7 @@ def veredito(
     if args.wait_drain:
         pendente = sum(
             filas.get(nome, {}).get("ready", 0) + filas.get(nome, {}).get("unacked", 0)
-            for nome in (args.inbound_queue, args.processing_queue)
+            for nome in (args.inbound_queue, args.processing_queue, args.outbound_queue)
         )
         checagens.append(("filas principais drenadas", pendente == 0, f"{pendente} pendente(s)"))
 
@@ -421,6 +451,16 @@ def veredito(
         processados = delta.get("jobs_processed", 0)
         checagens.append(
             ("todos os jobs processados", processados >= publicados, f"{processados}/{publicados}")
+        )
+
+        enfileiradas = delta.get("outbound_published", 0)
+        entregues = delta.get("outbound_sent", 0) + delta.get("outbound_duplicated", 0)
+        checagens.append(
+            (
+                "todas as respostas entregues",
+                entregues >= enfileiradas,
+                f"{entregues}/{enfileiradas}",
+            )
         )
 
         na_dlq = sum(
@@ -447,6 +487,15 @@ def parse_args() -> argparse.Namespace:
         default=os.getenv("METRICS_TOKEN", ""),
         help="Bearer de /metrics.json (padrão: METRICS_TOKEN do ambiente)",
     )
+    parser.add_argument(
+        "--profile",
+        choices=sorted(PERFIS),
+        help=(
+            "perfil do capacity review: ajusta --rps, --concurrency e --phones, "
+            f"e roda por {PERFIL_DURACAO_SEGUNDOS}s. Os telefones precisam estar "
+            "verificados (prisma/seed-loadtest.ts)."
+        ),
+    )
     parser.add_argument("--total", type=int, default=200, help="número de requests")
     parser.add_argument("--concurrency", type=int, default=25, help="requests simultâneos")
     parser.add_argument("--phones", type=int, default=50, help="telefones distintos (1 = contenção)")
@@ -466,12 +515,46 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--rabbit-pass", default=os.getenv("RABBITMQ_PASSWORD", "guest"))
     parser.add_argument("--inbound-queue", default="whatsapp.inbound.v1")
     parser.add_argument("--processing-queue", default="whatsapp.processing.v1")
+    parser.add_argument("--outbound-queue", default="whatsapp.outbound.v1")
     parser.add_argument("--redis-url", default=os.getenv("REDIS_URL", "redis://localhost:6379/0"))
     return parser.parse_args()
 
 
+def aplicar_perfil(args: argparse.Namespace) -> None:
+    """Sobrescreve taxa, concorrência e telefones a partir do perfil escolhido."""
+    if not args.profile:
+        return
+    perfil = PERFIS[args.profile]
+    args.rps = perfil["rps"]
+    args.concurrency = int(perfil["concurrency"])
+    args.phones = int(perfil["phones"])
+    args.total = max(int(perfil["rps"] * PERFIL_DURACAO_SEGUNDOS), 1)
+    if not args.wait_drain:
+        # Sem esperar o dreno, o perfil mede só a aceitação no webhook — que é
+        # a parte que nunca foi o gargalo.
+        args.wait_drain = 180.0
+    print(
+        f"Perfil {args.profile}: {args.total} mensagens em ~{PERFIL_DURACAO_SEGUNDOS}s, "
+        f"{args.concurrency} em paralelo, {args.phones} telefones."
+    )
+    print(
+        "Confirme que estes telefones estão verificados: "
+        f"LOADTEST_PHONES={args.phones} pnpm --filter @financial-vellun/api "
+        "exec ts-node prisma/seed-loadtest.ts"
+    )
+
+
 async def main() -> int:
     args = parse_args()
+    aplicar_perfil(args)
+
+    if not args.secret:
+        # O agente recusa webhook sem assinatura, exceto em ambiente local com
+        # WEBHOOK_ALLOW_UNSIGNED=true. Sem o segredo, toda requisição vira 401.
+        print(
+            "AVISO: sem --secret/WHATSAPP_WEBHOOK_SECRET os payloads vão sem assinatura; "
+            "só funciona com ENVIRONMENT=development e WEBHOOK_ALLOW_UNSIGNED=true."
+        )
 
     async with httpx.AsyncClient() as client:
         antes = await fetch_metrics(client, args.metrics, args.token)
@@ -489,8 +572,9 @@ async def main() -> int:
 
     filas: dict = {}
     grupos: int | None = None
+    drenagem = 0.0
     if args.wait_drain:
-        filas, grupos = await wait_drain(args, args.wait_drain)
+        filas, grupos, drenagem = await wait_drain(args, args.wait_drain)
 
     async with httpx.AsyncClient() as client:
         depois = await fetch_metrics(client, args.metrics, args.token)
@@ -506,6 +590,27 @@ async def main() -> int:
         print(f"  {nome:<32} {valor:>8}")
     for nome, dados in (depois.get("timings") or {}).items():
         print(f"  {nome:<32} {dados['avg_ms']:>8} ms (média de {dados['count']})")
+
+    print()
+    print("=" * 62)
+    print("PIPELINE")
+    print("=" * 62)
+    # A latência do webhook (acima) mede só o ack. Esta é a que corresponde ao
+    # que o usuário sente: inclui o debounce do agrupamento, a fila, a IA e a
+    # entrega. O `/metrics.json` só expõe média — o p95 sai do histograma em
+    # `/metrics`, e o dashboard é o lugar de olhá-lo.
+    fim_a_fim = (depois.get("timings") or {}).get("message_end_to_end_ms") or {}
+    if fim_a_fim.get("count"):
+        print(f"  fim a fim (média) .. {fim_a_fim['avg_ms']:.0f} ms em {fim_a_fim['count']} mensagem(ns)")
+    else:
+        print("  fim a fim .......... sem medida (nenhuma resposta entregue nesta rodada)")
+    envio = (depois.get("timings") or {}).get("outbound_send_ms") or {}
+    if envio.get("count"):
+        print(f"  envio ao WhatsApp .. {envio['avg_ms']:.0f} ms em {envio['count']} entrega(s)")
+    if args.wait_drain:
+        print(f"  tempo de dreno ..... {drenagem:.1f}s")
+        if drenagem > 0:
+            print(f"  vazão do pipeline .. {results.published / max(drenagem, 0.001):.1f} msg/s")
 
     print()
     print("=" * 62)

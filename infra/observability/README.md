@@ -23,16 +23,16 @@ docker-compose.observability.yml   stack local (Alloy + exporters)
 ## Por que estes formatos, e não "provisionamento por arquivo"
 
 O Grafana Cloud **não suporta provisionamento por arquivo** — a documentação é
-explícita: *"Provisioning with configuration files is not available in Grafana
-Cloud"*. Não existe diretório de provisioning numa instância gerenciada.
+explícita: _"Provisioning with configuration files is not available in Grafana
+Cloud"_. Não existe diretório de provisioning numa instância gerenciada.
 
 Cada recurso tem, então, o seu caminho:
 
-| Recurso | Formato aqui | Como aplica |
-| --- | --- | --- |
-| Regras de alerta | regra do **Prometheus** | `mimirtool rules load` → ruler do Grafana Cloud Metrics |
-| Dashboards | JSON do Grafana | API de dashboards, `grafanactl`, ou Terraform |
-| Canais e roteamento | export do Grafana | Terraform ou API de provisionamento de alerting |
+| Recurso             | Formato aqui            | Como aplica                                             |
+| ------------------- | ----------------------- | ------------------------------------------------------- |
+| Regras de alerta    | regra do **Prometheus** | `mimirtool rules load` → ruler do Grafana Cloud Metrics |
+| Dashboards          | JSON do Grafana         | API de dashboards, `grafanactl`, ou Terraform           |
+| Canais e roteamento | export do Grafana       | Terraform ou API de provisionamento de alerting         |
 
 A escolha de regra em formato Prometheus tem um benefício que vale mais que a
 conveniência: ela é **testável**. `promtool test rules` monta séries sintéticas e
@@ -55,11 +55,11 @@ docker exec -i financial-vellun-db psql -U vellun -d financial_vellun \
   < infra/observability/alloy/postgres-monitoring-user.sql
 ```
 
-| Porta | O quê |
-| --- | --- |
-| `12345` | UI do Alloy: componentes, alvos e último erro |
-| `3100` | recebimento de logs — `LOKI_PUSH_URL=http://localhost:3100` na API e no agente |
-| `9187` / `9121` | postgres-exporter / redis-exporter |
+| Porta           | O quê                                                                          |
+| --------------- | ------------------------------------------------------------------------------ |
+| `12345`         | UI do Alloy: componentes, alvos e último erro                                  |
+| `3100`          | recebimento de logs — `LOKI_PUSH_URL=http://localhost:3100` na API e no agente |
+| `9187` / `9121` | postgres-exporter / redis-exporter                                             |
 
 O Alloy local coleta a API, o agente e o worker rodando no host, com o
 `METRICS_TOKEN` padrão (`local-dev-metrics-token`) — se trocar o token nos

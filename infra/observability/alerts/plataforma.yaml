@@ -137,9 +137,13 @@ groups:
           service: postgres
         annotations:
           summary: 'Postgres acima de 80% das conexões'
-          description: '{{ $value | humanizePercentage }} do limite de conexões em uso.'
+          description: >-
+            {{ $value | humanizePercentage }} do limite de conexões em uso. Durante
+            um deploy a API existe em dobro por alguns segundos (overlapSeconds),
+            e é quando isto costuma estourar — o connection budget dimensiona
+            para esse pico.
           dashboard: 'DASHBOARD_BASE/d/vellun-overview/visao-geral'
-          runbook: 'RUNBOOK_BASE/observability.md'
+          runbook: 'RUNBOOK_BASE/connection-budget.md'
 
   # ── API ──────────────────────────────────────────────────────────────────
   - name: api

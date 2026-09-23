@@ -234,6 +234,35 @@ prometheus.scrape "rabbitmq_consumidores" {
   scrape_timeout  = "15s"
 }
 
+// Idade da mensagem mais antiga, por fila.
+//
+// Uma terceira família, e ela se paga: profundidade responde "quantas
+// mensagens", idade responde "há quanto tempo alguém está sem resposta" — a
+// pergunta do SLO. As duas divergem nos casos que mais importam: uma fila curta
+// e **parada** (um consumidor travado) não passa de nenhum limiar de
+// profundidade, e uma fila funda drenando rápido passa sem ninguém esperando.
+//
+// `queue_metrics` custa mais séries que as duas anteriores (algumas dezenas por
+// fila). Se o orçamento de séries apertar, esta é a primeira a cair — e o que
+// se perde é a idade, não o backlog.
+//
+// Depende de o publisher definir a propriedade AMQP `timestamp`; ver
+// `apps/ai-agent/src/messaging/rabbitmq/publisher.py`.
+prometheus.scrape "rabbitmq_idade_da_fila" {
+  targets = [
+    {
+      __address__      = "rabbitmq.railway.internal:15692",
+      __metrics_path__ = "/metrics/detailed",
+      __param_family   = "queue_metrics",
+      job              = "rabbitmq",
+    },
+  ]
+
+  forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+  scrape_interval = "30s"
+  scrape_timeout  = "15s"
+}
+
 // Descarte de famílias de métrica que não usamos.
 //
 // **Isto é necessário, não zelo excessivo.** O free tier do Grafana Cloud dá

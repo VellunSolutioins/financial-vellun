@@ -1,7 +1,7 @@
 import { ForbiddenException } from '@nestjs/common';
 import { OpsRole } from '@prisma/client';
 
-import { OPS_SESSION_TTL_SECONDS } from '../../ops.constants';
+import { OPS_SESSION_ABSOLUTE_TTL_SECONDS, OPS_SESSION_TTL_SECONDS } from '../../ops.constants';
 import { OpsAuthGuard } from './ops-auth.guard';
 
 function context(cookies: Record<string, string> = {}) {
@@ -21,15 +21,22 @@ const now = () => Math.floor(Date.now() / 1000);
 function setup(options: {
   payload?: Record<string, unknown> | null;
   operator?: Record<string, unknown> | null;
+  /** Resposta da checagem de organização no GitHub (`null` = não deu para saber). */
+  member?: boolean | null;
 }) {
+  // Sessões de teste começaram há um minuto, salvo quando o teste define `auth`.
+  const payload = options.payload ? { auth: now() - 60, ...options.payload } : null;
   const session = {
-    verify: jest.fn().mockResolvedValue(options.payload ?? null),
+    verify: jest.fn().mockResolvedValue(payload),
     issueSessionCookie: jest.fn().mockResolvedValue(undefined),
     clearSessionCookie: jest.fn(),
   } as any;
   const auth = { findById: jest.fn().mockResolvedValue(options.operator ?? null) } as any;
+  const github = {
+    isOrgMemberByLogin: jest.fn().mockResolvedValue(options.member ?? null),
+  } as any;
 
-  return { guard: new OpsAuthGuard(session, auth), session, auth };
+  return { guard: new OpsAuthGuard(session, auth, github), session, auth, github };
 }
 
 const operadorAtivo = {
@@ -137,6 +144,70 @@ describe('OpsAuthGuard', () => {
       login: 'alguem',
       role: OpsRole.operator,
       cvs: false,
+      // O momento do login atravessa a renovação: é dele que conta o prazo.
+      auth: expect.any(Number),
     });
+  });
+
+  // ── Prazo absoluto e organização ────────────────────────────────────────
+  it('recusa a sessão que passou do prazo absoluto, mesmo renovada', async () => {
+    const { guard, session } = setup({
+      payload: {
+        sub: 'op-1',
+        exp: now() + OPS_SESSION_TTL_SECONDS,
+        auth: now() - OPS_SESSION_ABSOLUTE_TTL_SECONDS - 1,
+      },
+      operator: operadorAtivo,
+    });
+    const { ctx, response } = context({ ops_session: 'antiga' });
+
+    await expect(guard.canActivate(ctx)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(session.clearSessionCookie).toHaveBeenCalledWith(response);
+  });
+
+  it('recusa sessão emitida antes do prazo absoluto existir (sem auth)', async () => {
+    const { guard } = setup({
+      payload: { sub: 'op-1', exp: now() + OPS_SESSION_TTL_SECONDS, auth: undefined },
+      operator: operadorAtivo,
+    });
+
+    await expect(guard.canActivate(context({ ops_session: 'legado' }).ctx)).rejects.toBeInstanceOf(
+      ForbiddenException,
+    );
+  });
+
+  it('na renovação, derruba quem saiu da organização no GitHub', async () => {
+    const { guard, session, github } = setup({
+      payload: { sub: 'op-1', exp: now() + 60 },
+      operator: operadorAtivo,
+      member: false,
+    });
+    const { ctx, response } = context({ ops_session: 'quase-expirado' });
+
+    await expect(guard.canActivate(ctx)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(github.isOrgMemberByLogin).toHaveBeenCalledWith('alguem');
+    expect(session.issueSessionCookie).not.toHaveBeenCalled();
+    expect(session.clearSessionCookie).toHaveBeenCalledWith(response);
+  });
+
+  it('sem resposta do GitHub, renova e segue até o prazo absoluto', async () => {
+    const { guard, session } = setup({
+      payload: { sub: 'op-1', exp: now() + 60 },
+      operator: operadorAtivo,
+      member: null,
+    });
+
+    await expect(guard.canActivate(context({ ops_session: 'x' }).ctx)).resolves.toBe(true);
+    expect(session.issueSessionCookie).toHaveBeenCalled();
+  });
+
+  it('fora da janela de renovação, não consulta o GitHub', async () => {
+    const { guard, github } = setup({
+      payload: { sub: 'op-1', exp: now() + OPS_SESSION_TTL_SECONDS },
+      operator: operadorAtivo,
+    });
+
+    await guard.canActivate(context({ ops_session: 'x' }).ctx);
+    expect(github.isOrgMemberByLogin).not.toHaveBeenCalled();
   });
 });

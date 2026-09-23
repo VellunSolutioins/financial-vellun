@@ -1,9 +1,8 @@
-import { timingSafeEqual } from 'node:crypto';
-
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
 import { Request } from 'express';
 
 import { OPS_SESSION_COOKIE } from '../../ops/ops.constants';
+import { safeEqual } from '../crypto.util';
 import { CSRF_COOKIE, CSRF_HEADER } from '../csrf.util';
 import { isAllowedWebOrigin } from '../http-origin.util';
 
@@ -17,9 +16,13 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
  */
 const SESSION_COOKIES = ['access_token', 'refresh_token', OPS_SESSION_COOKIE];
 /**
- * Rotas que **criam** sessão, e por isso não têm o que proteger: antes delas não
- * há sessão a sequestrar. A isenção vale mesmo quando o navegador ainda envia um
- * cookie antigo, que não pode impedir alguém de entrar de novo.
+ * Rotas que **criam** sessão. Dispensam o token CSRF — antes delas não há sessão
+ * a sequestrar, e um cookie antigo não pode impedir alguém de entrar de novo —,
+ * mas não a origem: se o navegador informa `Origin`, ela precisa ser permitida.
+ * Sem isso, uma página de terceiro fazia *login CSRF*, entrando o visitante na
+ * conta do atacante para que ele registrasse ali seus dados. Chamada sem
+ * `Origin` (cliente fora do navegador) continua aceita: o ataque depende do
+ * navegador, que sempre envia `Origin` num POST cross-origin.
  *
  * `/auth/logout` e `/auth/refresh` ficam **fora** de propósito: elas agem sobre
  * uma sessão que já existe. Isentas, uma página de terceiro conseguia forçar
@@ -41,7 +44,10 @@ export class CsrfGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<Request>();
 
     if (SAFE_METHODS.has(request.method.toUpperCase())) return true;
-    if (this.isAuthCsrfExemptPath(request)) return true;
+    if (this.isAuthCsrfExemptPath(request)) {
+      if (request.headers.origin === undefined || this.hasAllowedOrigin(request)) return true;
+      throw this.csrfFailed();
+    }
 
     const cookies = (request.cookies ?? {}) as Record<string, string | undefined>;
     const hasSession = SESSION_COOKIES.some((name) => Boolean(cookies[name]));
@@ -50,11 +56,7 @@ export class CsrfGuard implements CanActivate {
     const cookieToken = cookies[CSRF_COOKIE];
     const headerToken = request.headers[CSRF_HEADER];
 
-    if (
-      cookieToken &&
-      typeof headerToken === 'string' &&
-      this.safeEqual(headerToken, cookieToken)
-    ) {
+    if (cookieToken && typeof headerToken === 'string' && safeEqual(headerToken, cookieToken)) {
       return true;
     }
 
@@ -62,18 +64,15 @@ export class CsrfGuard implements CanActivate {
       return true;
     }
 
-    throw new ForbiddenException({
+    throw this.csrfFailed();
+  }
+
+  private csrfFailed(): ForbiddenException {
+    return new ForbiddenException({
       statusCode: 403,
       code: 'CSRF_FAILED',
       message: 'Falha na validação CSRF.',
     });
-  }
-
-  private safeEqual(a: string, b: string): boolean {
-    const bufA = Buffer.from(a);
-    const bufB = Buffer.from(b);
-    if (bufA.length !== bufB.length) return false;
-    return timingSafeEqual(bufA, bufB);
   }
 
   private isAuthCsrfExemptPath(request: Request): boolean {

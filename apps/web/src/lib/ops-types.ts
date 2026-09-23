@@ -14,7 +14,7 @@ export interface Paginated<T> {
 }
 
 export type OpsFailureStatus = 'pending' | 'reprocessing' | 'reprocessed' | 'discarded';
-export type OpsFailureSource = 'whatsapp_inbound' | 'whatsapp_processing';
+export type OpsFailureSource = 'whatsapp_inbound' | 'whatsapp_processing' | 'whatsapp_outbound';
 export type WebhookEventStatus = 'received' | 'processing' | 'processed' | 'failed' | 'exhausted';
 export type OpsAuditResult = 'success' | 'failure' | 'denied';
 
@@ -159,6 +159,7 @@ export const failureStatusLabels: Record<OpsFailureStatus, string> = {
 export const failureSourceLabels: Record<OpsFailureSource, string> = {
   whatsapp_inbound: 'Entrada',
   whatsapp_processing: 'Processamento',
+  whatsapp_outbound: 'Entrega',
 };
 
 /**

@@ -8,6 +8,7 @@ from ..schemas.financial_intent import FinancialIntent
 from .api_client import api_client
 from .clock import today_local
 from .metrics import metrics
+from .user_catalog import user_catalog
 
 logger = logging.getLogger(__name__)
 
@@ -100,12 +101,9 @@ class TransactionCreator:
         return {"ok": True, "message": message, "transaction": transaction}
 
     async def _resolve_account(self, user_id: str, account_name: str | None) -> str | None:
-        try:
-            response = await api_client.get(f"/internal/users/{user_id}/accounts")
-            accounts = response.json() if response.status_code == 200 else []
-        except Exception:  # noqa: BLE001
-            logger.exception("Erro ao listar contas do usuário %s", user_id)
-            return None
+        # Mesma lista que o contexto do LLM já carregou neste job; dentro do
+        # escopo de memo isto não gera chamada nova.
+        accounts = await user_catalog.accounts(user_id)
 
         if not accounts:
             return None
@@ -122,12 +120,7 @@ class TransactionCreator:
     async def _resolve_category(self, user_id: str, category_name: str | None) -> str | None:
         if not category_name:
             return None
-        try:
-            response = await api_client.get(f"/internal/users/{user_id}/categories")
-            categories = response.json() if response.status_code == 200 else []
-        except Exception:  # noqa: BLE001
-            logger.exception("Erro ao listar categorias do usuário %s", user_id)
-            return None
+        categories = await user_catalog.categories(user_id)
 
         target = _normalize(category_name)
         for cat in categories:

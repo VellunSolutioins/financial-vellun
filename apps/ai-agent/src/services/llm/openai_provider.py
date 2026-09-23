@@ -75,7 +75,14 @@ class OpenAiProvider(LlmProvider):
     def __init__(self) -> None:
         if not settings.openai_api_key:
             raise ValueError("OPENAI_API_KEY não configurada")
-        self._client = AsyncOpenAI(api_key=settings.openai_api_key)
+        # Sem estes dois, o SDK espera 600s e tenta 2 vezes — até dez minutos
+        # segurando um slot de concorrência do processamento, e o lock do
+        # telefone com ele. Ver `OPENAI_TIMEOUT_SECONDS` na configuração.
+        self._client = AsyncOpenAI(
+            api_key=settings.openai_api_key,
+            timeout=settings.openai_timeout_seconds,
+            max_retries=settings.openai_max_retries,
+        )
         self._model = settings.openai_model
 
     async def extract_intent(self, message: str, context: dict) -> FinancialIntent:

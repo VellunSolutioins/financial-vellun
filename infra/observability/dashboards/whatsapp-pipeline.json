@@ -485,6 +485,204 @@
         },
         "overrides": []
       }
+    },
+    {
+      "id": 39,
+      "type": "row",
+      "title": "Capacidade e SLO",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 31
+      },
+      "collapsed": false,
+      "panels": []
+    },
+    {
+      "id": 34,
+      "type": "timeseries",
+      "title": "Fim a fim: webhook até a resposta sair (SLO)",
+      "description": "A única latência que corresponde ao que o usuário sente: inclui o tempo parado em fila, que a soma das etapas não inclui. Só enxerga mensagens que completaram — fila totalmente travada aparece no painel de idade, não aqui.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 32
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(vellun_agent_message_end_to_end_seconds_bucket{env=\"$env\"}[10m])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vellun_agent_message_end_to_end_seconds_bucket{env=\"$env\"}[10m])))",
+          "legendFormat": "p95"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(vellun_agent_message_end_to_end_seconds_bucket{env=\"$env\"}[10m])))",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 35,
+      "type": "timeseries",
+      "title": "Entrega ao WhatsApp (p95) e taxa de envio",
+      "description": "Latência da chamada à Graph API e volume entregue. Divergência entre publicado e entregue é backlog na fila de saída.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 32
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(vellun_agent_outbound_send_seconds_bucket{env=\"$env\"}[10m])))",
+          "legendFormat": "p95 do envio"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(vellun_agent_outbound_published_total{env=\"$env\"}[5m]))",
+          "legendFormat": "publicadas/s"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(rate(vellun_agent_outbound_sent_total{env=\"$env\"}[5m]))",
+          "legendFormat": "entregues/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 36,
+      "type": "timeseries",
+      "title": "Idade da mensagem mais antiga, por fila",
+      "description": "Responde 'há quanto tempo alguém está sem resposta'. Diverge da profundidade justamente nos casos que importam: fila curta e parada, ou fila funda drenando rápido.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 32
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "time() - rabbitmq_detailed_queue_head_message_timestamp{env=\"$env\", queue=~\"whatsapp\\..*\"}",
+          "legendFormat": "{{queue}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 37,
+      "type": "timeseries",
+      "title": "API principal, por rota (p95)",
+      "description": "Quanto o agente espera pela API em cada rota. 'o pipeline está lento' não distingue IA lenta de API lenta; isto distingue.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 39
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le, __name__) (rate({__name__=~\"vellun_agent_internal_api_.*_seconds_bucket\", env=\"$env\"}[10m])))",
+          "legendFormat": "{{__name__}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 38,
+      "type": "timeseries",
+      "title": "GroupFlusher: ciclos vs. grupos encontrados",
+      "description": "A razão entre os dois diz se vale sair do polling: perto de zero, quase todo ciclo é desperdício; perto de um, o ritmo está certo.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${ds}"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 39
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(vellun_agent_flusher_polls_total{env=\"$env\"}[5m]))",
+          "legendFormat": "ciclos/s"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(vellun_agent_flusher_groups_found_total{env=\"$env\"}[5m]))",
+          "legendFormat": "grupos encontrados/s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "lineWidth": 2
+          }
+        },
+        "overrides": []
+      }
     }
   ]
 }

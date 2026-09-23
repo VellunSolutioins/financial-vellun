@@ -15,11 +15,14 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from ..services.metrics import metrics
+
 logger = logging.getLogger(__name__)
 
 #: Routing keys lógicas (o nome físico da fila vem da configuração).
 ROUTE_INBOUND = "inbound"
 ROUTE_PROCESSING = "processing"
+ROUTE_OUTBOUND = "outbound"
 
 #: Header que carrega o número da tentativa entre republicações.
 HEADER_ATTEMPT = "x-attempt"
@@ -149,6 +152,11 @@ async def dispatch(
         return "defer"
     except PermanentError as exc:
         logger.warning("Falha permanente; enviando para DLQ: %s", exc)
+        # Contado aqui, e não em cada driver: a política de ack é o único lugar
+        # por onde toda mensagem descartada passa. Antes, `dlq` só era
+        # incrementado no caminho legado, e os scripts liam um contador
+        # (`dlq_messages`) que nunca existiu — reportando sempre zero.
+        metrics.incr("dlq")
         await on_dlq(message, exc, True)
         return "dlq"
     except Exception as exc:  # noqa: BLE001 — transitório por padrão
@@ -156,6 +164,7 @@ async def dispatch(
             logger.error(
                 "Tentativas esgotadas (%d); enviando para DLQ", message.attempt + 1, exc_info=exc
             )
+            metrics.incr("dlq")
             await on_dlq(message, exc, False)
             return "dlq"
         logger.warning(

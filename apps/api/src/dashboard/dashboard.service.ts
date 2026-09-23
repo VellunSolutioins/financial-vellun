@@ -1,11 +1,23 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import {
-  startOfDayUtc,
-  endOfDayUtc,
-  startOfMonthUtc,
-  endOfMonthUtc,
-} from '../common/date.util';
+import { startOfDayUtc, endOfDayUtc, startOfMonthUtc, endOfMonthUtc } from '../common/date.util';
+
+/**
+ * Itens de conta a pagar/receber trazidos junto do dashboard empresarial.
+ *
+ * O widget mostra uma prévia e leva para a tela completa; trazer a lista
+ * inteira era carregar tudo para exibir cinco. Os totais não dependem deste
+ * corte — vêm de uma agregação à parte.
+ */
+const PENDING_PREVIEW_LIMIT = 5;
+
+/** Linha do comparativo mensal, como o Postgres devolve. */
+export type MonthlyTotalRow = {
+  month: string;
+  type: 'income' | 'expense';
+  /** `numeric` vem como texto para não passar por float no caminho. */
+  total: string | null;
+};
 
 @Injectable()
 export class DashboardService {
@@ -22,18 +34,36 @@ export class DashboardService {
 
     const [accounts, incomeAgg, expenseAgg, expensesByCategory, recentTransactions] =
       await Promise.all([
-        this.prisma.account.findMany({ where: { userId, isActive: true }, select: { currentBalance: true } }),
+        this.prisma.account.findMany({
+          where: { userId, isActive: true },
+          select: { currentBalance: true },
+        }),
         this.prisma.transaction.aggregate({
-          where: { userId, type: 'income', status: 'confirmed', transactionDate: { gte: start, lte: end } },
+          where: {
+            userId,
+            type: 'income',
+            status: 'confirmed',
+            transactionDate: { gte: start, lte: end },
+          },
           _sum: { amount: true },
         }),
         this.prisma.transaction.aggregate({
-          where: { userId, type: 'expense', status: 'confirmed', transactionDate: { gte: start, lte: end } },
+          where: {
+            userId,
+            type: 'expense',
+            status: 'confirmed',
+            transactionDate: { gte: start, lte: end },
+          },
           _sum: { amount: true },
         }),
         this.prisma.transaction.groupBy({
           by: ['categoryId'],
-          where: { userId, type: 'expense', status: 'confirmed', transactionDate: { gte: start, lte: end } },
+          where: {
+            userId,
+            type: 'expense',
+            status: 'confirmed',
+            transactionDate: { gte: start, lte: end },
+          },
           _sum: { amount: true },
           orderBy: { _sum: { amount: 'desc' } },
         }),
@@ -87,40 +117,62 @@ export class DashboardService {
       ? endOfDayUtc(periodEnd)
       : endOfMonthUtc(now.getFullYear(), now.getMonth());
 
-    const [accounts, confirmedInPeriod, expensesByCategory, accountsReceivable, accountsPayable] =
-      await Promise.all([
-        this.prisma.account.findMany({
-          where: { userId, isActive: true },
-          select: { currentBalance: true },
-        }),
-        this.prisma.transaction.findMany({
-          where: {
-            userId,
-            status: 'confirmed',
-            type: { in: ['income', 'expense'] },
-            transactionDate: { gte: start, lte: end },
-          },
-          select: { type: true, amount: true, transactionDate: true },
-          orderBy: { transactionDate: 'asc' },
-        }),
-        this.prisma.transaction.groupBy({
-          by: ['categoryId'],
-          where: { userId, type: 'expense', status: 'confirmed', transactionDate: { gte: start, lte: end } },
-          _sum: { amount: true },
-          orderBy: { _sum: { amount: 'desc' } },
-          take: 5,
-        }),
-        this.prisma.transaction.findMany({
-          where: { userId, type: 'income', status: 'pending' },
-          include: { category: true, account: true },
-          orderBy: { transactionDate: 'asc' },
-        }),
-        this.prisma.transaction.findMany({
-          where: { userId, type: 'expense', status: 'pending' },
-          include: { category: true, account: true },
-          orderBy: { transactionDate: 'asc' },
-        }),
-      ]);
+    const [
+      accounts,
+      confirmedInPeriod,
+      expensesByCategory,
+      accountsReceivable,
+      accountsPayable,
+      pendingTotals,
+    ] = await Promise.all([
+      this.prisma.account.findMany({
+        where: { userId, isActive: true },
+        select: { currentBalance: true },
+      }),
+      this.prisma.transaction.findMany({
+        where: {
+          userId,
+          status: 'confirmed',
+          type: { in: ['income', 'expense'] },
+          transactionDate: { gte: start, lte: end },
+        },
+        select: { type: true, amount: true, transactionDate: true },
+        orderBy: { transactionDate: 'asc' },
+      }),
+      this.prisma.transaction.groupBy({
+        by: ['categoryId'],
+        where: {
+          userId,
+          type: 'expense',
+          status: 'confirmed',
+          transactionDate: { gte: start, lte: end },
+        },
+        _sum: { amount: true },
+        orderBy: { _sum: { amount: 'desc' } },
+        take: 5,
+      }),
+      this.prisma.transaction.findMany({
+        where: { userId, type: 'income', status: 'pending' },
+        include: { category: true, account: true },
+        orderBy: { transactionDate: 'asc' },
+        take: PENDING_PREVIEW_LIMIT,
+      }),
+      this.prisma.transaction.findMany({
+        where: { userId, type: 'expense', status: 'pending' },
+        include: { category: true, account: true },
+        orderBy: { transactionDate: 'asc' },
+        take: PENDING_PREVIEW_LIMIT,
+      }),
+      // Os totais não podem sair da prévia acima: uma soma de cinco itens
+      // mostraria "R$ 1.200 a receber" com R$ 80 mil em aberto. Uma agregação
+      // só cobre receber e pagar, e é ela que conta quantos existem.
+      this.prisma.transaction.groupBy({
+        by: ['type'],
+        where: { userId, status: 'pending', type: { in: ['income', 'expense'] } },
+        _sum: { amount: true },
+        _count: { _all: true },
+      }),
+    ]);
 
     const totalBalance = accounts.reduce((sum, a) => sum + Number(a.currentBalance), 0);
 
@@ -164,8 +216,8 @@ export class DashboardService {
       percentage: totalExpense > 0 ? (Number(e._sum.amount ?? 0) / totalExpense) * 100 : 0,
     }));
 
-    const totalReceivable = accountsReceivable.reduce((sum, t) => sum + Number(t.amount), 0);
-    const totalPayable = accountsPayable.reduce((sum, t) => sum + Number(t.amount), 0);
+    const receivableAgg = pendingTotals.find((p) => p.type === 'income');
+    const payableAgg = pendingTotals.find((p) => p.type === 'expense');
 
     return {
       totalBalance,
@@ -174,8 +226,18 @@ export class DashboardService {
       netResult: totalIncome - totalExpense,
       cashFlow,
       topExpenseCategories,
-      accountsReceivable: { total: totalReceivable, items: accountsReceivable },
-      accountsPayable: { total: totalPayable, items: accountsPayable },
+      accountsReceivable: {
+        total: Number(receivableAgg?._sum.amount ?? 0),
+        // `count` é o total em aberto; `items` é só a prévia. O widget precisa
+        // dos dois para não dar a entender que há apenas cinco.
+        count: receivableAgg?._count._all ?? 0,
+        items: accountsReceivable,
+      },
+      accountsPayable: {
+        total: Number(payableAgg?._sum.amount ?? 0),
+        count: payableAgg?._count._all ?? 0,
+        items: accountsPayable,
+      },
     };
   }
 
@@ -232,34 +294,76 @@ export class DashboardService {
     };
   }
 
+  /**
+   * Receita e despesa confirmadas por mês, nos últimos `months` meses.
+   *
+   * Uma query. Antes eram duas agregações por mês, em série — 24 idas ao banco
+   * para montar um gráfico, cada uma com o custo fixo de round-trip. O ganho
+   * não está no trabalho do Postgres (que era pequeno em cada uma), e sim em
+   * parar de pagar 24 vezes por ele; sob pool compartilhado, era também o
+   * caminho mais fácil de esgotar conexão.
+   *
+   * `$queryRaw` porque o `groupBy` do Prisma não expressa `date_trunc`. O
+   * `userId` vai como parâmetro; os enums entram como literal, que o Postgres
+   * coage para o tipo da coluna — passá-los como parâmetro exigiria cast
+   * explícito para o nome do enum gerado.
+   *
+   * Meses sem lançamento **não** voltam do banco, e o gráfico precisa deles
+   * como zero: a grade dos meses é montada aqui, e o resultado do banco só a
+   * preenche.
+   */
   private async getMonthlyComparison(userId: string, months: number) {
-    const result = [];
     const now = new Date();
+    // Mesma janela do laço anterior: os `months` meses terminando no corrente.
+    const first = startOfMonthUtc(now.getFullYear(), now.getMonth() - (months - 1));
+    const last = endOfMonthUtc(now.getFullYear(), now.getMonth());
 
-    for (let i = months - 1; i >= 0; i--) {
-      const ref = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const year = ref.getFullYear();
-      const monthIndex = ref.getMonth();
-      const start = startOfMonthUtc(year, monthIndex);
-      const end = endOfMonthUtc(year, monthIndex);
+    const rows = await this.prisma.$queryRaw<MonthlyTotalRow[]>`
+      SELECT to_char(date_trunc('month', "transaction_date"), 'YYYY-MM') AS month,
+             "type"::text AS type,
+             sum("amount")::text AS total
+        FROM "transactions"
+       WHERE "user_id" = ${userId}
+         AND "status" = 'confirmed'
+         AND "type" IN ('income', 'expense')
+         AND "transaction_date" >= ${first.toISOString().slice(0, 10)}::date
+         AND "transaction_date" <= ${last.toISOString().slice(0, 10)}::date
+       GROUP BY 1, 2
+    `;
 
-      const [inc, exp] = await Promise.all([
-        this.prisma.transaction.aggregate({
-          where: { userId, type: 'income', status: 'confirmed', transactionDate: { gte: start, lte: end } },
-          _sum: { amount: true },
-        }),
-        this.prisma.transaction.aggregate({
-          where: { userId, type: 'expense', status: 'confirmed', transactionDate: { gte: start, lte: end } },
-          _sum: { amount: true },
-        }),
-      ]);
-
-      result.push({
-        month: `${year}-${String(monthIndex + 1).padStart(2, '0')}`,
-        income: Number(inc._sum.amount ?? 0),
-        expense: Number(exp._sum.amount ?? 0),
-      });
-    }
-    return result;
+    return buildMonthlySeries(rows, now, months);
   }
+}
+
+/**
+ * Monta a série de `months` meses terminando no mês de `now`, preenchendo com
+ * as linhas agregadas do banco e com zero onde não houve lançamento.
+ *
+ * Fora da classe para que o teste possa comparar esta montagem, linha a linha,
+ * com a versão que fazia uma agregação por mês.
+ */
+export function buildMonthlySeries(
+  rows: MonthlyTotalRow[],
+  now: Date,
+  months: number,
+): { month: string; income: number; expense: number }[] {
+  const series: { month: string; income: number; expense: number }[] = [];
+  const indexOfMonth = new Map<string, number>();
+
+  for (let i = months - 1; i >= 0; i--) {
+    const ref = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const key = `${ref.getFullYear()}-${String(ref.getMonth() + 1).padStart(2, '0')}`;
+    indexOfMonth.set(key, series.length);
+    series.push({ month: key, income: 0, expense: 0 });
+  }
+
+  for (const row of rows) {
+    const index = indexOfMonth.get(row.month);
+    // Linha fora da janela (dado de borda) é ignorada, em vez de virar um mês
+    // extra no meio do gráfico.
+    if (index === undefined) continue;
+    series[index][row.type] = Number(row.total ?? 0);
+  }
+
+  return series;
 }

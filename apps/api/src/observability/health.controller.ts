@@ -4,6 +4,7 @@ import { HealthCheck, HealthCheckResult, HealthCheckService } from '@nestjs/term
 import { SkipThrottle } from '@nestjs/throttler';
 
 import { PrismaHealthIndicator } from './prisma.health-indicator';
+import { RedisHealthIndicator } from './redis.health-indicator';
 
 /**
  * Liveness e readiness separados.
@@ -16,6 +17,10 @@ import { PrismaHealthIndicator } from './prisma.health-indicator';
  *
  * A API não fala com RabbitMQ (só o agente de IA fala), então readiness aqui é
  * Postgres. Depender do agente seria errado: a API funciona sem ele.
+ *
+ * O Redis também aparece no corpo, mas **não** derruba o readiness: a API foi
+ * feita para degradar sem ele (rate limit em memória, cache recalculado). Ver
+ * `RedisHealthIndicator` para o porquê.
  */
 @ApiTags('health')
 @SkipThrottle()
@@ -24,6 +29,7 @@ export class HealthController {
   constructor(
     private readonly health: HealthCheckService,
     private readonly prisma: PrismaHealthIndicator,
+    private readonly redis: RedisHealthIndicator,
   ) {}
 
   @Get('live')
@@ -36,6 +42,9 @@ export class HealthController {
   @HealthCheck()
   @ApiOperation({ summary: 'Readiness: 503 quando uma dependência está fora.' })
   readiness(): Promise<HealthCheckResult> {
-    return this.health.check([() => this.prisma.check('database')]);
+    return this.health.check([
+      () => this.prisma.check('database'),
+      () => this.redis.check('redis'),
+    ]);
   }
 }

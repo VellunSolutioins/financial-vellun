@@ -12,12 +12,10 @@ from pydantic import BaseModel, ValidationError
 
 from ..bootstrap import pipeline
 from ..config import settings
-from ..messaging.base import ROUTE_INBOUND, ROUTE_PROCESSING, PublishError
-from ..messaging.contracts import InboundMessageV1, ProcessingJobV1
-from ..schemas.notifications import WelcomeNotification
+from ..messaging.base import ROUTE_INBOUND, ROUTE_OUTBOUND, ROUTE_PROCESSING, PublishError
+from ..messaging.contracts import InboundMessageV1, OutboundMessageV1, ProcessingJobV1
 from ..schemas.ops import ReprocessRequest
 from ..services.metrics import metrics
-from ..services.welcome_service import welcome_service
 
 logger = logging.getLogger(__name__)
 
@@ -25,34 +23,27 @@ router = APIRouter(prefix="/internal", tags=["internal"])
 
 #: Allowlist de destinos do reprocessamento: rota lógica -> contrato publicado.
 #:
-#: Só existem duas, e a única forma de acrescentar uma terceira é editando este
-#: mapa. Exchange e nome físico de fila continuam saindo da configuração, nunca
-#: do pedido — quem chama escolhe entre duas rotas conhecidas, não um destino.
+#: A única forma de acrescentar uma rota é editando este mapa. Exchange e nome
+#: físico de fila continuam saindo da configuração, nunca do pedido — quem chama
+#: escolhe entre rotas conhecidas, não um destino.
 _DESTINOS: dict[str, type[BaseModel]] = {
     ROUTE_INBOUND: InboundMessageV1,
     ROUTE_PROCESSING: ProcessingJobV1,
+    ROUTE_OUTBOUND: OutboundMessageV1,
 }
 
 
 def _require_internal_key(x_internal_api_key: str | None = Header(default=None)) -> None:
-    """Valida a chave interna em tempo constante (evita timing attacks)."""
-    expected = settings.internal_api_key
-    if not x_internal_api_key or not hmac.compare_digest(x_internal_api_key, expected):
+    """Valida a chave da direção API→agente em tempo constante.
+
+    Aceita também a ``INTERNAL_API_KEY`` antiga enquanto ela existir. Compara
+    com todas as chaves, sem parar na primeira, para o tempo não revelar qual
+    casou.
+    """
+    provided = (x_internal_api_key or "").encode()
+    matches = [hmac.compare_digest(provided, key.encode()) for key in settings.accepted_incoming_keys]
+    if not x_internal_api_key or not any(matches):
         raise HTTPException(status_code=401, detail="Chave de API interna inválida")
-
-
-@router.post("/notifications/welcome")
-async def send_welcome(payload: WelcomeNotification, x_internal_api_key: str | None = Header(default=None)) -> dict:
-    _require_internal_key(x_internal_api_key)
-    if not payload.phone:
-        raise HTTPException(status_code=400, detail="phone é obrigatório")
-    try:
-        await welcome_service.send_welcome(payload.phone, payload.name)
-    except Exception as exc:  # noqa: BLE001 - a API trata não-2xx como best-effort
-        raise HTTPException(
-            status_code=502, detail="Não foi possível entregar as boas-vindas"
-        ) from exc
-    return {"status": "sent"}
 
 
 @router.post("/ops/reprocess")

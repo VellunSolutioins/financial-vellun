@@ -39,9 +39,9 @@ services:
       GRAFANA_CLOUD_TOKEN: ${GRAFANA_CLOUD_TOKEN:-}
     ports:
       # UI de diagnóstico: mostra cada componente, seus alvos e o último erro.
-      - '12345:12345'
+      - '127.0.0.1:12345:12345'
       # Recebimento dos logs empurrados pelas aplicações.
-      - '3100:3100'
+      - '127.0.0.1:3100:3100'
     volumes:
       # Caminho relativo ao **primeiro** `-f` (infra/docker/), que é o diretório
       # de projeto que o Compose usa para resolver bind mounts — não ao diretório
@@ -61,7 +61,7 @@ services:
       TZ: America/Sao_Paulo
       DATA_SOURCE_NAME: ${POSTGRES_EXPORTER_DSN:-postgresql://vellun_monitor:vellun_monitor_dev@postgres:5432/financial_vellun?sslmode=disable}
     ports:
-      - '9187:9187'
+      - '127.0.0.1:9187:9187'
     depends_on:
       postgres:
         condition: service_healthy
@@ -73,8 +73,9 @@ services:
     environment:
       TZ: America/Sao_Paulo
       REDIS_ADDR: redis://redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
     ports:
-      - '9121:9121'
+      - '127.0.0.1:9121:9121'
     depends_on:
       redis:
         condition: service_healthy

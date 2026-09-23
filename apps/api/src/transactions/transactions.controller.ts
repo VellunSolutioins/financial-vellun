@@ -57,11 +57,7 @@ export class TransactionsController {
   }
 
   @Delete(':id')
-  remove(
-    @Req() req: Request,
-    @Param('id') id: string,
-    @Query('hard_delete') hardDelete?: string,
-  ) {
+  remove(@Req() req: Request, @Param('id') id: string, @Query('hard_delete') hardDelete?: string) {
     const user = req.user as any;
     return this.transactionsService.remove(user.id, id, hardDelete === 'true');
   }

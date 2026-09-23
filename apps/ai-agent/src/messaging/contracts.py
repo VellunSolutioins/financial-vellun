@@ -104,6 +104,42 @@ class ProcessingJobV1(_VersionedMessage):
         return self
 
 
+class OutboundMessageV1(_VersionedMessage):
+    """Uma resposta a entregar no WhatsApp.
+
+    Separar o envio do processamento é o ponto do P3: antes, o consumer de
+    processamento chamava a Graph API **antes** do ack, então uma indisponibilidade
+    do WhatsApp segurava o job inteiro no timeout do envio e o reprocessamento
+    refazia trabalho que já tinha efeito (lançamento criado, confirmação pendente
+    consumida). Com a fila, o processamento acka assim que o estado está
+    persistido, e o backlog de uma queda da Meta fica concentrado numa fila só.
+
+    ``userId``/``contactId`` são **contexto**, não roteamento: quem entrega já
+    recebeu o telefone resolvido e não decide identidade (contrato C5). Eles
+    vêm vazios quando a resposta foi resumida de uma tentativa anterior — o
+    texto guardado em ``job:reply:{jobId}`` não carrega identidade, e
+    reconsultá-la só para preencher um campo de log seria uma chamada à API por
+    entrega.
+    """
+
+    phone: str = Field(min_length=1)
+    text: str = Field(min_length=1)
+    #: Chave de deduplicação do envio. Presente nas respostas de job; ausente em
+    #: avisos que não nascem de um job (número não vinculado, falha na DLQ).
+    job_id: str | None = Field(default=None, alias="jobId")
+    user_id: str | None = Field(default=None, alias="userId")
+    contact_id: str | None = Field(default=None, alias="contactId")
+    #: Para quem lê o log e o catálogo de falhas: de onde a resposta veio.
+    kind: Literal["reply", "notice"] = "reply"
+    #: Quando a primeira mensagem do usuário chegou ao webhook. É o que fecha a
+    #: métrica fim a fim: sem carregá-lo até aqui, a única latência mensurável
+    #: seria a de cada etapa isolada, e a soma delas não é o que o usuário
+    #: sente (não inclui tempo de fila).
+    first_received_at: datetime | None = Field(default=None, alias="firstReceivedAt")
+    correlation_id: str = Field(default_factory=new_id, alias="correlationId")
+    created_at: datetime = Field(default_factory=utcnow, alias="createdAt")
+
+
 class DlqEnvelopeV1(_VersionedMessage):
     """Envelope gravado na DLQ, com o necessário para diagnóstico e reprocesso."""
 

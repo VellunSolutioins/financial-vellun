@@ -52,7 +52,9 @@ export class AccountsService {
       where: { accountId: id, status: { not: 'cancelled' } },
     });
     if (hasTransactions > 0) {
-      throw new BadRequestException('Conta possui lançamentos vinculados. Cancele-os antes de desativar a conta.');
+      throw new BadRequestException(
+        'Conta possui lançamentos vinculados. Cancele-os antes de desativar a conta.',
+      );
     }
 
     return this.prisma.account.update({ where: { id: account.id }, data: { isActive: false } });

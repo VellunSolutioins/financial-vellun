@@ -10,6 +10,7 @@ import { MetricsController } from './metrics.controller';
 import { MetricsInterceptor } from './metrics.interceptor';
 import { MetricsService } from './metrics.service';
 import { PrismaHealthIndicator } from './prisma.health-indicator';
+import { RedisHealthIndicator } from './redis.health-indicator';
 
 /**
  * Instrumentação da API: métricas, health, correlação e log estruturado.
@@ -30,6 +31,7 @@ import { PrismaHealthIndicator } from './prisma.health-indicator';
     MetricsService,
     AppLoggerService,
     PrismaHealthIndicator,
+    RedisHealthIndicator,
     { provide: APP_INTERCEPTOR, useClass: MetricsInterceptor },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
   ],

@@ -14,14 +14,14 @@ O objetivo deste plano é transformar a estratégia em **prompts incrementais e 
 
 ### Decisões de produto (fechadas com o usuário)
 
-| Item | Decisão |
-| --- | --- |
-| Trial | **30 dias** (estado `trialing` + `trialEndsAt`) |
-| Grace period (past_due) | **3 dias** (`graceUntil`) |
-| Periodicidade | **Mensal e anual** (dois planos por tier) |
-| Meio de pagamento | Cartão de crédito (recorrente), BRL |
-| Cancelamento | Ao fim do período pago (`cancelAtPeriodEnd = true`) |
-| Ativação | Somente por webhook validado / reconciliação (nunca pelo redirect) |
+| Item                    | Decisão                                                            |
+| ----------------------- | ------------------------------------------------------------------ |
+| Trial                   | **30 dias** (estado `trialing` + `trialEndsAt`)                    |
+| Grace period (past_due) | **3 dias** (`graceUntil`)                                          |
+| Periodicidade           | **Mensal e anual** (dois planos por tier)                          |
+| Meio de pagamento       | Cartão de crédito (recorrente), BRL                                |
+| Cancelamento            | Ao fim do período pago (`cancelAtPeriodEnd = true`)                |
+| Ativação                | Somente por webhook validado / reconciliação (nunca pelo redirect) |
 
 ### Princípio de arquitetura
 
@@ -50,12 +50,14 @@ Não são executáveis por mim, mas **bloqueiam produção**. Registrar status a
 **Objetivo:** modelar planos, assinaturas, pagamentos, eventos de webhook e auditoria no banco, sem nenhuma lógica de PSP.
 
 **Arquivos:**
+
 - [apps/api/prisma/schema.prisma](../apps/api/prisma/schema.prisma) — novos enums e models; relação em `User`.
 - `apps/api/prisma/migrations/` — nova migration.
 - [apps/api/prisma/seed.ts](../apps/api/prisma/seed.ts) (ou equivalente do `db:seed`) — seed dos planos.
 - `packages/shared/src/` — enums e tipos de billing (espelhar enums do Prisma, ex. em `packages/shared/src/enums` e schemas Zod em `packages/shared/src/schemas`).
 
 **Detalhes:**
+
 - Models conforme doc seção 4: `Plan`, `Subscription`, `Payment`, `PaymentWebhookEvent`, `SubscriptionAudit`. Seguir convenção `@map("snake_case")` já usada no schema.
 - Enums: `SubscriptionStatus` (`pending|trialing|active|past_due|canceled|unpaid|expired`), `PaymentStatus` (`pending|processing|paid|failed|refunded|partially_refunded|chargeback|canceled`), `BillingInterval` (`monthly|annual`), `PaymentMethodType` (`credit_card`).
 - `Subscription` com `userId`, `planId`, `providerCustomerId`, `providerSubscriptionId`, `status`, `currentPeriodStart/End`, `trialEndsAt`, `graceUntil`, `cancelAtPeriodEnd`, `canceledAt`.
@@ -75,6 +77,7 @@ Não são executáveis por mim, mas **bloqueiam produção**. Registrar status a
 **Arquivos (novos):** `apps/api/src/billing/` com `billing.module.ts`, serviços e `dto/`; registrar em [apps/api/src/app.module.ts](../apps/api/src/app.module.ts).
 
 **Detalhes:**
+
 - Interface `PaymentProvider` (doc seção 12.4) + tipos internos (`ProviderCustomer`, `CheckoutSession`, `ProviderSubscription`, `ProviderPayment`, `VerifiedPaymentEvent`, etc.). Definir token de injeção (`PAYMENT_PROVIDER`).
 - `SubscriptionStateService`: transições válidas da máquina de estados; rejeitar transições inválidas; computar `currentPeriodEnd`, `trialEndsAt` (30d), `graceUntil` (3d).
 - `SubscriptionAccessService.canUseProduct(userId)` (doc seção 5): libera se `active`, `trialing` (trial válido) ou `past_due` dentro de `graceUntil`. Retorno tipado reutilizável por API e canal interno.
@@ -92,6 +95,7 @@ Não são executáveis por mim, mas **bloqueiam produção**. Registrar status a
 **Arquivos:** `apps/api/src/billing/providers/asaas/`; `apps/api/.env.example` ([apps/api/.env.example](../apps/api/.env.example)); ConfigModule já é global.
 
 **Detalhes:**
+
 - Cliente HTTP com `ASAAS_API_URL`, `ASAAS_API_KEY`, `ASAAS_WEBHOOK_TOKEN`; timeout e retry seguro (idempotente); sandbox e produção separados; nunca logar segredos.
 - Implementar todos os métodos da interface: `createCustomer`, `createCheckout` (assinatura recorrente por cartão), `createPaymentMethodUpdateSession`, `cancelSubscription`, `getSubscription`, `listSubscriptionPayments`, `refundPayment`, `verifyWebhook` (valida assinatura sobre o **corpo bruto**).
 - Mapear tipos do Asaas → tipos internos (nenhum tipo do Asaas vaza para fora do adapter).
@@ -109,6 +113,7 @@ Não são executáveis por mim, mas **bloqueiam produção**. Registrar status a
 **Arquivos:** `apps/api/src/billing/billing.controller.ts` + DTOs.
 
 **Endpoints (protegidos por `JwtAuthGuard`, padrão `@ApiCookieAuth`):**
+
 - `GET /billing/plans` — lista planos ativos.
 - `GET /billing/subscription` — estado da assinatura do usuário (status, plano, próxima cobrança, cancelamento programado, grace).
 - `POST /billing/checkout` — cria/recupera cliente no Asaas e abre checkout recorrente; retorna URL. **Não ativa** a assinatura.
@@ -126,6 +131,7 @@ Não são executáveis por mim, mas **bloqueiam produção**. Registrar status a
 **Arquivos:** rota de webhook no `billing.controller.ts` (ou controller dedicado, **sem** `JwtAuthGuard`, com acesso ao raw body); worker/fila; mapper de eventos.
 
 **Detalhes:**
+
 - Garantir **raw body** para validação de assinatura (configurar no [apps/api/src/main.ts](../apps/api/src/main.ts) sem quebrar o `ValidationPipe`/`cookie-parser` existentes).
 - `verifyWebhook` (via adapter); rejeitar assinaturas inválidas; validar timestamp se houver.
 - Persistir `PaymentWebhookEvent` com `providerEventId` **antes** de processar; suportar duplicados e fora de ordem; responder rápido ao Asaas.
@@ -156,6 +162,7 @@ Não são executáveis por mim, mas **bloqueiam produção**. Registrar status a
 **Arquivos:** `apps/api/src/billing/guards/active-subscription.guard.ts`; decorator `@AllowWithoutSubscription()`; aplicar nos módulos de negócio e no `internal`.
 
 **Detalhes:**
+
 - `ActiveSubscriptionGuard` usa `SubscriptionAccessService.canUseProduct(userId)`.
 - Decorator (metadata via `Reflector`) para liberar rotas permitidas sem assinatura: login/cadastro/refresh/logout, `/billing/*`, exportação/exclusão de dados, suporte.
 - Aplicar o guard em: `accounts`, `categories`, `contacts`, `dashboard`, `transactions` (controllers em [apps/api/src/](../apps/api/src/)) — em conjunto com o `JwtAuthGuard` existente.
@@ -174,6 +181,7 @@ Não são executáveis por mim, mas **bloqueiam produção**. Registrar status a
 **Arquivos (Python):** [apps/ai-agent/src/services/message_processor.py](../apps/ai-agent/src/services/message_processor.py), [apps/ai-agent/src/services/media_processor.py](../apps/ai-agent/src/services/media_processor.py), [apps/ai-agent/src/services/api_client.py](../apps/ai-agent/src/services/api_client.py); novo endpoint interno na API.
 
 **Detalhes:**
+
 - Novo endpoint interno (ex. `GET /internal/users/{userId}/subscription-access` ou incluir no resolve do contato) protegido por `InternalApiKeyGuard`, retornando `canUseProduct`.
 - Checar assinatura **logo após resolver o contato** e **antes** de qualquer operação paga:
   - Texto: em `process_buffered_message`, antes de `intent_classifier.classify`.
@@ -192,6 +200,7 @@ Não são executáveis por mim, mas **bloqueiam produção**. Registrar status a
 **Arquivos:** rotas em [apps/web/src/app/](../apps/web/src/app/) (ex. `app/app/conta/assinatura`, páginas de planos e retorno/cancelamento do checkout); [apps/web/src/contexts/auth-context.tsx](../apps/web/src/contexts/auth-context.tsx); [apps/web/src/lib/auth.ts](../apps/web/src/lib/auth.ts); [apps/web/src/lib/api-client.ts](../apps/web/src/lib/api-client.ts); [apps/web/src/middleware.ts](../apps/web/src/middleware.ts).
 
 **Detalhes:**
+
 - Página de planos (cards mensal/anual, valores em `R$` com `toLocaleString('pt-BR')`).
 - Início do checkout (redirect Asaas) + páginas de retorno/sucesso e cancelamento — **retorno não ativa a conta**; o estado vem do backend.
 - Tela "Minha assinatura": plano, status, próxima cobrança, cancelamento programado; atualizar cartão (fluxo hospedado Asaas); cancelar; avisos de pagamento recusado e grace period.
@@ -209,12 +218,13 @@ Não são executáveis por mim, mas **bloqueiam produção**. Registrar status a
 **Objetivo:** controles mínimos para produção (doc seções 8, 10, Fase 6).
 
 **Itens de código:**
+
 - CSRF para operações autenticadas por cookie (atenção ao `SameSite=None` em produção — doc seção 8.3).
 - Rate limiting em login, cadastro, checkout e billing (`@nestjs/throttler`).
 - Helmet + CSP + headers de segurança no [main.ts](../apps/api/src/main.ts); proteger/desabilitar Swagger em produção.
 - Rotação/revogação de refresh tokens; cookies `Secure`/`HttpOnly`/`SameSite` revisados.
 - Revisar logs (API + agente) para garantir ausência de segredos/dados de cartão.
-- **Verificação de telefone por OTP** (doc seção 8.5): hoje o cadastro marca WhatsApp como verificado sem confirmação ([apps/web/src/app/(auth)/cadastro/page.tsx](../apps/web/src/app/(auth)/cadastro/page.tsx) + registro na API). Implementar fluxo de OTP antes de usar WhatsApp para ações financeiras.
+- **Verificação de telefone por OTP** (doc seção 8.5): hoje o cadastro marca WhatsApp como verificado sem confirmação ([apps/web/src/app/(auth)/cadastro/page.tsx](<../apps/web/src/app/(auth)/cadastro/page.tsx>) + registro na API). Implementar fluxo de OTP antes de usar WhatsApp para ações financeiras.
 - Rotação da `INTERNAL_API_KEY` e comparação segura (doc seção 8.4).
 - Exportação e exclusão de dados (direitos do titular — doc seção 10.4); política de retenção/descarte.
 - Scanners no CI: SAST, análise de dependências, secret scanning.
@@ -252,6 +262,7 @@ Itens de segurança/privacidade desmembrados do Prompt 10 por alterarem fluxos s
 **Objetivo:** invalidar refresh tokens no logout/refresh e em caso de comprometimento (doc seção 8.3).
 
 **Detalhes:**
+
 - Persistir refresh tokens (model Prisma + migration), ex. `RefreshToken` com `userId`, `tokenHash`, `expiresAt`, `revokedAt`, `replacedById`.
 - No refresh: validar o token contra o store, **rotacionar** (emitir novo, revogar o anterior) e detectar reuso (revogar a família em caso de replay).
 - No logout: revogar o refresh token atual.
@@ -265,7 +276,8 @@ Itens de segurança/privacidade desmembrados do Prompt 10 por alterarem fluxos s
 **Objetivo:** confirmar posse do número antes de usar o WhatsApp para ações financeiras (doc seção 8.5). **Depende do canal de envio (Prompt 0).**
 
 **Detalhes:**
-- Hoje o cadastro marca `whatsappContact.isVerified = true` sem confirmação ([apps/web/src/app/(auth)/cadastro/page.tsx](../apps/web/src/app/(auth)/cadastro/page.tsx) + registro na API).
+
+- Hoje o cadastro marca `whatsappContact.isVerified = true` sem confirmação ([apps/web/src/app/(auth)/cadastro/page.tsx](<../apps/web/src/app/(auth)/cadastro/page.tsx>) + registro na API).
 - Gerar OTP (curto, com expiração e rate limit), armazenar hash, enviar pelo canal (WhatsApp/SMS), endpoint de verificação; só então `isVerified = true`.
 - Frontend: passo de confirmação no cadastro/edição de telefone.
 - **Testes:** geração/expiração/limite de OTP, verificação correta/incorreta.
@@ -277,6 +289,7 @@ Itens de segurança/privacidade desmembrados do Prompt 10 por alterarem fluxos s
 **Objetivo:** suportar direitos do titular (doc seção 10.4).
 
 **Detalhes:**
+
 - Endpoint de **exportação** (agrega dados pessoais e financeiros do usuário em formato portável).
 - Endpoint de **exclusão/anonimização** (cascata respeitando retenção legal de registros fiscais/auditoria; informar exceções ao titular).
 - Marcar essas rotas com `@AllowWithoutSubscription()` (acessíveis sem assinatura — doc seção 5).
@@ -291,6 +304,7 @@ Itens de segurança/privacidade desmembrados do Prompt 10 por alterarem fluxos s
 **Objetivo:** SAST, análise de dependências e secret scanning no pipeline (doc seção 8.6).
 
 **Detalhes:**
+
 - Configurar pipeline (ex. GitHub Actions): SAST, auditoria de dependências (Node + Python) e secret scanning; falhar o build em achados críticos.
 - Rodar lint e suítes de teste (corrigir também o script `pnpm lint`, hoje quebrado pelo glob/ignore).
 

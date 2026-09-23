@@ -18,6 +18,7 @@
     "prisma:migrate": "pnpm --filter @financial-vellun/api prisma:migrate",
     "prisma:studio": "pnpm --filter @financial-vellun/api prisma:studio",
     "prisma:seed": "pnpm --filter @financial-vellun/api db:seed",
+    "prisma:seed:loadtest": "pnpm --filter @financial-vellun/api db:seed:loadtest",
     "lint": "eslint . --ext .ts,.tsx,.js,.jsx",
     "typecheck": "pnpm --filter @financial-vellun/api exec tsc --noEmit -p tsconfig.build.json",
     "test": "pnpm --filter @financial-vellun/api test && pnpm test:agent",
@@ -43,7 +44,10 @@
       "prisma",
       "@scarf/scarf",
       "unrs-resolver"
-    ]
+    ],
+    "overrides": {
+      "shell-quote": "^1.8.4"
+    }
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
@@ -55,5 +59,5 @@
     "prettier": "^3.8.4",
     "typescript": "^6.0.3"
   },
-  "packageManager": "pnpm@9.0.0+sha512.b4106707c7225b1748b61595953ccbebff97b54ad05d002aa3635f633b9c53cd666f7ce9b8bc44704f1fa048b9a49b55371ab2d9e9d667d1efe2ef1514bcd513"
+  "packageManager": "pnpm@10.15.0"
 }

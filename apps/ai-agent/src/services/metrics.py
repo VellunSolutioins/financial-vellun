@@ -57,6 +57,7 @@ KNOWN_COUNTERS = (
     "webhook_received",
     "webhook_ignored",
     "webhook_invalid_signature",
+    "webhook_body_too_large",
     "webhook_text_too_long",
     "webhook_invalid_item",
     "publish_confirmed",
@@ -69,8 +70,15 @@ KNOWN_COUNTERS = (
     "inbound_buffered",
     "inbound_duplicate",
     "not_linked",
+    # Verificação de posse do número (código enviado ao bot)
+    "phone_verified",
+    "phone_verification_invalid",
+    "phone_verification_expired",
+    # Confirmação pendente descartada porque o número mudou de dono
+    "pending_discarded_link_changed",
     "message_too_long",
     "subscription_blocked",
+    "ai_daily_limit_reached",
     # Mídia
     "media_audio",
     "media_image",
@@ -80,6 +88,12 @@ KNOWN_COUNTERS = (
     "vision_success",
     "vision_fail",
     # Agrupamento
+    # `flusher_polls` e `flusher_groups_found` respondem se vale sair do
+    # polling: a razão entre eles é a fração de ciclos que encontrou trabalho.
+    # Perto de zero, quase todo ciclo é desperdício e um gatilho por evento se
+    # paga; perto de um, o polling está no ritmo certo.
+    "flusher_polls",
+    "flusher_groups_found",
     "group_flushed",
     "group_flush_failed",
     "buffer_flush",
@@ -96,11 +110,21 @@ KNOWN_COUNTERS = (
     # LLM e efeitos
     "llm_success",
     "llm_fallback",
+    # Memo por job de categorias e contas: mede quantas chamadas à API
+    # principal deixaram de acontecer. Zero aqui, com jobs criando
+    # lançamentos, significa que o escopo do memo não está sendo aberto.
+    "catalog_categories_memo_hit",
+    "catalog_accounts_memo_hit",
     "transactions_created",
     "transactions_idempotent_hit",
     "extractions_idempotent_hit",
     "whatsapp_send_failed",
     "jobs_reply_resumed",
+    # Entrega assíncrona (P3): publicada na fila de saída, entregue, ou
+    # descartada por já ter sido entregue neste `jobId`.
+    "outbound_published",
+    "outbound_sent",
+    "outbound_duplicated",
     # Falha definitiva
     "dlq",
     # Catalogo de falhas (Entrega 5): a DLQ e transporte, o Postgres e a fonte
@@ -126,6 +150,8 @@ KNOWN_TIMINGS = {
     "llm_latency_ms": "llm_latency_seconds",
     "processing_duration_ms": "processing_duration_seconds",
     "receive_to_process_ms": "receive_to_process_seconds",
+    "outbound_send_ms": "outbound_send_seconds",
+    "message_end_to_end_ms": "message_end_to_end_seconds",
 }
 
 
@@ -176,6 +202,15 @@ class Metrics:
     # ── Escrita ─────────────────────────────────────────────────────────────
     def incr(self, name: str, amount: int = 1) -> None:
         self._counter(name).inc(amount)
+
+    def declare_timing(self, name: str) -> None:
+        """Cria o histograma agora, mesmo sem nenhuma observação ainda.
+
+        Mesma razão de ``KNOWN_COUNTERS``: uma série que só nasce na primeira
+        ocorrência faz ``absent(...)`` responder "sem dado" em vez de "zero", e
+        não há como alertar sobre algo que nunca apareceu.
+        """
+        self._histogram(name)
 
     def observe_ms(self, name: str, value_ms: float) -> None:
         """Registra uma duração dada em **milissegundos**.

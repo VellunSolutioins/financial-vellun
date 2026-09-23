@@ -20,7 +20,13 @@ import logging
 
 from .config import settings
 from .grouping import GroupFlusherWorker, get_group_store
-from .messaging.base import ROUTE_INBOUND, ROUTE_PROCESSING, MessageConsumer, MessagePublisher
+from .messaging.base import (
+    ROUTE_INBOUND,
+    ROUTE_OUTBOUND,
+    ROUTE_PROCESSING,
+    MessageConsumer,
+    MessagePublisher,
+)
 from .messaging.factory import create_consumer, create_publisher
 
 logger = logging.getLogger(__name__)
@@ -42,6 +48,13 @@ class Pipeline:
         publisher = create_publisher()
         await publisher.start()
         self.publisher = publisher
+        # O despachante de saída precisa do publisher para enfileirar respostas.
+        # Ligado aqui, e não no `start_consumers`, porque o processo que só
+        # publica (webhook com RUN_CONSUMERS_IN_API=false) também responde ao
+        # usuário — avisos de número não vinculado, por exemplo.
+        from .services.outbound import outbound_dispatcher
+
+        outbound_dispatcher.bind(publisher)
         logger.info("Publisher de mensageria pronto")
 
     async def start_consumers(self) -> None:
@@ -51,7 +64,11 @@ class Pipeline:
         await self.start_publisher()
         assert self.publisher is not None
 
-        from .consumers import InboundMessageConsumer, MessageProcessingConsumer
+        from .consumers import (
+            InboundMessageConsumer,
+            MessageProcessingConsumer,
+            OutboundMessageConsumer,
+        )
 
         inbound = InboundMessageConsumer(self.publisher)
         processing = MessageProcessingConsumer()
@@ -65,6 +82,13 @@ class Pipeline:
         await processing_consumer.start(processing.handle)
 
         self._broker_consumers = [inbound_consumer, processing_consumer]
+
+        # A fila de saída é consumida mesmo com OUTBOUND_DELIVERY=direct: no
+        # rollback, o que já está enfileirado precisa continuar sendo entregue.
+        outbound = OutboundMessageConsumer()
+        outbound_consumer = create_consumer(settings.rabbitmq_outbound_queue, ROUTE_OUTBOUND)
+        await outbound_consumer.start(outbound.handle)
+        self._broker_consumers.append(outbound_consumer)
 
         self.flusher = GroupFlusherWorker(get_group_store(), self.publisher)
         self.flusher.start()
@@ -95,6 +119,7 @@ class Pipeline:
         filas = (
             (settings.rabbitmq_inbound_queue, ROUTE_INBOUND),
             (settings.rabbitmq_processing_queue, ROUTE_PROCESSING),
+            (settings.rabbitmq_outbound_queue, ROUTE_OUTBOUND),
         )
 
         try:
@@ -128,13 +153,23 @@ class Pipeline:
         self._consumers_running = False
 
         if self.publisher is not None:
+            from .services.outbound import outbound_dispatcher
+
+            outbound_dispatcher.bind(None)
             await self.publisher.stop()
             self.publisher = None
 
         from .services.api_client import api_client
+        from .services.messenger import messenger
         from .services.redis_client import redis_provider
+        from .services.whatsapp_media import whatsapp_media
 
         await api_client.aclose()
+        await whatsapp_media.aclose()
+        # O pool do messenger de produção nunca era fechado: a cada ciclo de
+        # lifespan (reload em dev, testes em sequência) sobrava um pool com
+        # conexões abertas para a Graph API.
+        await messenger.aclose()
         await redis_provider.close()
         logger.info("Pipeline encerrado")
 
@@ -189,12 +224,13 @@ def log_runtime_config() -> None:
 
     logger.info(
         "Configuração efetiva: environment=%s pipeline=%s broker=%s "
-        "run_consumers_in_api=%s group_store=%s main_api_url=%s llm_provider=%s "
+        "run_consumers_in_api=%s outbound_delivery=%s group_store=%s main_api_url=%s llm_provider=%s "
         "openai_key=%s messenger=%s whatsapp_phone_number_id=%s webhook_secret=%s",
         settings.environment,
         settings.message_pipeline,
         settings.message_broker,
         settings.run_consumers_in_api,
+        "queue" if settings.is_queued_outbound else "direct",
         settings.group_store_backend,
         settings.main_api_url,
         settings.llm_provider,

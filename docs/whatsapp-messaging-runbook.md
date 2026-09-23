@@ -1,6 +1,7 @@
 # Runbook — pipeline de mensageria do WhatsApp
 
-Operação do fluxo `webhook → whatsapp.inbound.v1 → agrupamento → whatsapp.processing.v1 → lançamento`.
+Operação do fluxo `webhook → whatsapp.inbound.v1 → agrupamento → whatsapp.processing.v1 →
+lançamento → whatsapp.outbound.v1 → resposta`.
 As decisões por trás do desenho estão em [docs/adrs/](adrs/README.md); a visão
 geral e as variáveis de ambiente estão no [README](../README.md).
 
@@ -8,15 +9,16 @@ geral e as variáveis de ambiente estão no [README](../README.md).
 
 ## Mapa rápido
 
-| Recurso               | Nome                                                   | Papel                                           |
-| --------------------- | ------------------------------------------------------ | ----------------------------------------------- |
-| Exchange principal    | `whatsapp.x`                                           | routing keys `inbound` e `processing`           |
-| Exchange de retry     | `whatsapp.retry.x`                                     | recebe as republicações com atraso              |
-| Dead-letter exchange  | `whatsapp.dlx`                                         | routing keys `inbound.dlq` e `processing.dlq`   |
-| Fila de entrada       | `whatsapp.inbound.v1`                                  | mensagens individuais do webhook                |
-| Fila de processamento | `whatsapp.processing.v1`                               | jobs consolidados por telefone                  |
-| Retry                 | `whatsapp.{inbound,processing}.retry.{1,4,16,60,300}s` | TTL fixo, dead-letter de volta à fila de origem |
-| DLQ                   | `whatsapp.{inbound,processing}.dlq`                    | falhas permanentes ou tentativas esgotadas      |
+| Recurso               | Nome                                                            | Papel                                                                                   |
+| --------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Exchange principal    | `whatsapp.x`                                                    | routing keys `inbound`, `processing` e `outbound`                                       |
+| Exchange de retry     | `whatsapp.retry.x`                                              | recebe as republicações com atraso                                                      |
+| Dead-letter exchange  | `whatsapp.dlx`                                                  | routing keys `*.dlq` das três filas                                                     |
+| Fila de entrada       | `whatsapp.inbound.v1`                                           | mensagens individuais do webhook                                                        |
+| Fila de processamento | `whatsapp.processing.v1`                                        | jobs consolidados por telefone                                                          |
+| Fila de saída         | `whatsapp.outbound.v1`                                          | respostas a entregar (ver [ADR-0011](adrs/0011-entrega-assincrona-em-fila-de-saida.md)) |
+| Retry                 | `whatsapp.{inbound,processing,outbound}.retry.{1,4,16,60,300}s` | TTL fixo, dead-letter de volta à fila de origem                                         |
+| DLQ                   | `whatsapp.{inbound,processing,outbound}.dlq`                    | falhas permanentes ou tentativas esgotadas                                              |
 
 Chaves no Redis:
 
@@ -70,7 +72,14 @@ novos.
 Resposta saudável:
 
 ```json
-{ "status": "ok", "pipeline": "broker", "broker": "up", "consumers": "up", "flusher": "up", "redis": "up" }
+{
+  "status": "ok",
+  "pipeline": "broker",
+  "broker": "up",
+  "consumers": "up",
+  "flusher": "up",
+  "redis": "up"
+}
 ```
 
 `consumers: "disabled"` e `flusher: "disabled"` são esperados quando
@@ -119,21 +128,21 @@ série por URL tentada.
 
 ### O que cada uma indica
 
-| Métrica                                                | Leitura                                                                                                           |
-| ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| Métrica                                                | Leitura                                                                                                                                                                                                                     |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `webhook_received` / `publish_confirmed`               | divergência entre os dois indica itens descartados antes de publicar (payload sem mensagem, ou item inválido: `webhook_invalid_item`). Texto longo demais **é** publicado, como não suportado: veja `webhook_text_too_long` |
-| `publish_failed`                                       | o webhook devolveu `503`; o provedor vai reenviar                                                                 |
-| `webhook_latency_ms`                                   | inclui o _publisher confirm_. Subida sustentada = broker sob pressão                                              |
-| `messages_consumed` / `messages_duplicated`            | duplicadas altas são normais após um reenvio da Meta; sustentadas indicam ack lento                               |
-| `inbound_grouped` / `group_flushed` / `jobs_published` | acompanham o funil de consolidação                                                                                |
-| `receive_to_process_ms`                                | tempo entre receber e começar a processar; inclui o debounce (5 s)                                                |
-| `processing_duration_ms`                               | duração do processamento; dominado pela latência do LLM                                                           |
-| `jobs_deferred`                                        | jobs adiados por lock de telefone. Alto = muita mensagem simultânea do mesmo número                               |
-| `jobs_duplicated`                                      | reentregas descartadas pelo marcador `job:done`                                                                   |
-| `transactions_created` / `transactions_idempotent_hit` | lançamentos criados e lançamentos devolvidos por idempotência                                                     |
-| `transaction_failed`                                   | a API recusou o lançamento (conta/categoria inválida, sem assinatura)                                             |
-| `whatsapp_send_failed`                                 | falha ao responder ao usuário                                                                                     |
-| `dlq` / `dlq_messages`                                 | qualquer valor diferente de zero pede investigação                                                                |
+| `publish_failed`                                       | o webhook devolveu `503`; o provedor vai reenviar                                                                                                                                                                           |
+| `webhook_latency_ms`                                   | inclui o _publisher confirm_. Subida sustentada = broker sob pressão                                                                                                                                                        |
+| `messages_consumed` / `messages_duplicated`            | duplicadas altas são normais após um reenvio da Meta; sustentadas indicam ack lento                                                                                                                                         |
+| `inbound_grouped` / `group_flushed` / `jobs_published` | acompanham o funil de consolidação                                                                                                                                                                                          |
+| `receive_to_process_ms`                                | tempo entre receber e começar a processar; inclui o debounce (5 s)                                                                                                                                                          |
+| `processing_duration_ms`                               | duração do processamento; dominado pela latência do LLM                                                                                                                                                                     |
+| `jobs_deferred`                                        | jobs adiados por lock de telefone. Alto = muita mensagem simultânea do mesmo número                                                                                                                                         |
+| `jobs_duplicated`                                      | reentregas descartadas pelo marcador `job:done`                                                                                                                                                                             |
+| `transactions_created` / `transactions_idempotent_hit` | lançamentos criados e lançamentos devolvidos por idempotência                                                                                                                                                               |
+| `transaction_failed`                                   | a API recusou o lançamento (conta/categoria inválida, sem assinatura)                                                                                                                                                       |
+| `whatsapp_send_failed`                                 | falha ao responder ao usuário                                                                                                                                                                                               |
+| `dlq` / `dlq_messages`                                 | qualquer valor diferente de zero pede investigação                                                                                                                                                                          |
 
 Todo log relacionado ao mesmo evento carrega `correlationId`,
 `providerMessageId`, `jobId` (quando aplicável) e o telefone **hasheado** em
@@ -173,8 +182,25 @@ segundo terminal.
 > uma resposta ao usuário. Use `WHATSAPP_PROVIDER=log`, ou a carga vira centenas
 > de chamadas reais à API da Meta.
 
+> **Os telefones precisam estar verificados.** Desde a verificação de posse do
+> número, um telefone sem vínculo verificado recebe "seu número ainda não está
+> vinculado" e o job termina ali — sem LLM, sem lançamento, sem contexto. A
+> carga passaria com folga medindo o caminho errado. Semeie antes:
+>
+> ```bash
+> LOADTEST_PHONES=50 pnpm prisma:seed:loadtest
+> # e ao terminar
+> LOADTEST_CLEANUP=true pnpm prisma:seed:loadtest
+> ```
+>
+> O seed recusa rodar com `NODE_ENV=production` ou contra um banco que não seja
+> local.
+
 ```bash
 cd apps/ai-agent
+
+# perfis do capacity review: 10, 100, 500 e 1000 mensagens/minuto
+.venv/Scripts/python.exe scripts/loadtest.py --profile 100/min
 
 # 500 requests, 50 em paralelo, espalhados por 50 telefones,
 # esperando o pipeline drenar e com veredito no fim
@@ -228,6 +254,52 @@ Duas leituras que confundem se você não souber:
   `--wait-drain` também olha `ZCARD group:due` e compara
   `jobs_published`/`jobs_processed`.
 
+### Capacity review
+
+Os números acima são do **webhook**: quantos `202` ele aceita. Eles nunca foram
+o gargalo. O que o capacity review mede é o pipeline inteiro, por perfil de
+carga, e o custo de **uma** mensagem em cada recurso.
+
+Rode os quatro perfis em sequência, com o LLM mockado (`LLM_PROVIDER=rules`) e
+depois com o real (`LLM_PROVIDER=openai`). A diferença entre os dois é a fatia
+da OpenAI no p95 — e é ela que decide se `PROCESSING_CONSUMER_CONCURRENCY` está
+alta ou baixa demais.
+
+| Perfil   | p95 fim a fim | Dreno | Backlog máx. | CPU | Memória | Conexões PG | p95 OpenAI |
+| -------- | ------------- | ----- | ------------ | --- | ------- | ----------- | ---------- |
+| 10/min   | _a preencher_ |       |              |     |         |             |            |
+| 100/min  | _a preencher_ |       |              |     |         |             |            |
+| 500/min  | _a preencher_ |       |              |     |         |             |            |
+| 1000/min | _a preencher_ |       |              |     |         |             |            |
+
+O p95 fim a fim sai do histograma em `/metrics`
+(`vellun_agent_message_end_to_end_seconds`) ou do painel "Fim a fim" do
+dashboard; o `/metrics.json` que o script lê só tem média.
+
+**Custo por mensagem** — o que multiplica quando a carga multiplica:
+
+| Recurso                  | Por mensagem                                              | Onde conferir                                     |
+| ------------------------ | --------------------------------------------------------- | ------------------------------------------------- |
+| Operações no Redis       | ~8: buffer, lock (acquire/extend/release), dedupe, estado | `redis_commands_processed_total`                  |
+| Chamadas à API principal | 3–5: contato, assinatura, categorias, contas, lançamento  | `vellun_agent_internal_api_*_seconds_count`       |
+| Queries no Postgres      | as das chamadas acima, todas pelo pool da API             | `pg_stat_statements`, `docs/connection-budget.md` |
+| Chamadas à OpenAI        | 1 por mensagem de texto; +1 para áudio; +1 para imagem    | `vellun_agent_llm_latency_seconds_count`          |
+| Publicações no broker    | 3: inbound, processing, outbound                          | `vellun_agent_publish_confirmed_total`            |
+| Chamadas à Meta          | 1 por resposta entregue                                   | `vellun_agent_outbound_sent_total`                |
+
+A linha das categorias e contas é a que se paga primeiro: elas são buscadas
+duas vezes por job (contexto do LLM e resolução do lançamento). A memo por job
+elimina a segunda — ver P6 do plano de performance.
+
+**O que observar durante cada perfil:**
+
+- `whatsapp.outbound.v1` crescendo sozinha significa que o gargalo é a Meta, não
+  o pipeline: os lançamentos estão sendo registrados;
+- `jobs_deferred` alto significa contenção por telefone — mais réplicas não
+  ajudam, mais telefones sim (é por isso que os perfis espalham);
+- conexões do Postgres acima de 80% do limite invalidam o resultado: o que está
+  sendo medido passa a ser a fila do pool.
+
 ---
 
 ## Backlog crescendo
@@ -241,7 +313,14 @@ docker exec financial-vellun-rabbitmq rabbitmqctl list_queues name messages cons
 2. Se houver consumers e a fila cresce, aumente
    `PROCESSING_CONSUMER_CONCURRENCY` ou suba mais réplicas de
    `python -m src.worker`.
-3. Se `whatsapp.processing.v1` cresce e `jobs_deferred` está alto, o gargalo é
+3. Se só `whatsapp.outbound.v1` cresce, o problema é **entrega**, não
+   processamento: os lançamentos estão sendo registrados e o que falta é a
+   resposta sair. Olhe `whatsapp_send_failed` e o status que a Graph API está
+   devolvendo. Enquanto o WhatsApp não voltar, não há o que fazer além de
+   deixar a fila acumular — ela drena sozinha, e o `job:sent:{jobId}` impede
+   que a retomada duplique mensagem. Avisar o usuário pelo WhatsApp não é
+   opção: é o canal que está fora.
+4. Se `whatsapp.processing.v1` cresce e `jobs_deferred` está alto, o gargalo é
    contenção por telefone — mais réplicas não ajudam; investigue por que um
    telefone está preso (`proc:lock:*` no Redis).
 
@@ -371,7 +450,7 @@ Pelo painel: **Exchanges → `whatsapp.x` → Publish message**, com
 histórico do shell:
 
 ```bash
-curl -u guest:guest -H 'content-type: application/json' \
+curl -u "$RABBITMQ_USER:$RABBITMQ_PASSWORD" -H 'content-type: application/json' \
   -X POST http://localhost:15672/api/exchanges/%2F/whatsapp.x/publish \
   -d '{
         "properties": { "delivery_mode": 2 },

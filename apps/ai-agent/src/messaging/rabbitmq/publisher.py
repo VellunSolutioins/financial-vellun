@@ -7,6 +7,7 @@ vira :class:`PublishError`, que o webhook traduz em ``503``.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 import aio_pika
@@ -53,6 +54,13 @@ class RabbitMqPublisher(MessagePublisher):
                     delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
                     correlation_id=correlation_id,
                     headers=headers or {},
+                    # Propriedade AMQP `timestamp`. É o que alimenta
+                    # `rabbitmq_detailed_queue_head_message_timestamp`, e com
+                    # ele o alerta de **idade da mensagem mais antiga** — a
+                    # pergunta do SLO ("há quanto tempo alguém está sem
+                    # resposta?"), que profundidade de fila não responde: uma
+                    # fila curta e parada não passa de limiar nenhum.
+                    timestamp=datetime.now(timezone.utc),
                 ),
                 routing_key=routing_key,
             )

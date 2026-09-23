@@ -74,7 +74,7 @@ class _FakeProcessor:
 
     async def handle_intent(
         self, phone, user_id, intent, raw, last_inbound_id=None,
-        *, response_prefix="", force_confirm=False, confirm_question=None,
+        *, response_prefix="", force_confirm=False, confirm_question=None, contact=None,
     ):
         self.handle_calls.append(
             {
@@ -83,6 +83,7 @@ class _FakeProcessor:
                 "force_confirm": force_confirm,
                 "confirm_question": confirm_question,
                 "last_inbound_id": last_inbound_id,
+                "contact": contact,
             }
         )
         if force_confirm:

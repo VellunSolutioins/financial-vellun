@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 from ..config import settings
-from .base import ROUTE_INBOUND, ROUTE_PROCESSING, MessageConsumer, MessagePublisher
+from .base import ROUTE_INBOUND, ROUTE_OUTBOUND, ROUTE_PROCESSING, MessageConsumer, MessagePublisher
 from .inmemory import InMemoryBroker, InMemoryConsumer, InMemoryPublisher
 
 logger = logging.getLogger(__name__)
@@ -16,9 +16,13 @@ _inmemory_broker: InMemoryBroker | None = None
 
 def queue_definitions() -> list[tuple[str, str]]:
     """Filas principais do pipeline: ``(nome, routing_key)``."""
+    # A fila de outbound é declarada **sempre**, mesmo com
+    # `OUTBOUND_DELIVERY=direct`: declarar é idempotente e barato, e assim o
+    # rollback (ou o roll-forward) não depende de um deploy só para criar fila.
     return [
         (settings.rabbitmq_inbound_queue, ROUTE_INBOUND),
         (settings.rabbitmq_processing_queue, ROUTE_PROCESSING),
+        (settings.rabbitmq_outbound_queue, ROUTE_OUTBOUND),
     ]
 
 
@@ -56,11 +60,11 @@ def create_consumer(queue_name: str, routing_key: str) -> MessageConsumer:
 
     from .rabbitmq import RabbitMqConsumer
 
-    concurrency = (
-        settings.inbound_consumer_concurrency
-        if routing_key == ROUTE_INBOUND
-        else settings.processing_consumer_concurrency
-    )
+    concurrency = {
+        ROUTE_INBOUND: settings.inbound_consumer_concurrency,
+        ROUTE_PROCESSING: settings.processing_consumer_concurrency,
+        ROUTE_OUTBOUND: settings.outbound_consumer_concurrency,
+    }.get(routing_key, settings.processing_consumer_concurrency)
     return RabbitMqConsumer(
         _rabbit_connection(),
         queue_name=queue_name,

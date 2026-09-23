@@ -182,7 +182,7 @@ Também é recomendável uma entidade de auditoria para registrar:
 Criar um serviço central de autorização comercial:
 
 ```typescript
-SubscriptionAccessService.canUseProduct(userId)
+SubscriptionAccessService.canUseProduct(userId);
 ```
 
 A conta poderá utilizar o produto quando estiver:
@@ -574,9 +574,7 @@ interface PaymentProvider {
   ): Promise<PaymentMethodUpdateSession>;
   cancelSubscription(input: CancelSubscriptionInput): Promise<void>;
   getSubscription(providerSubscriptionId: string): Promise<ProviderSubscription>;
-  listSubscriptionPayments(
-    providerSubscriptionId: string,
-  ): Promise<ProviderPayment[]>;
+  listSubscriptionPayments(providerSubscriptionId: string): Promise<ProviderPayment[]>;
   refundPayment(input: RefundPaymentInput): Promise<ProviderRefund>;
   verifyWebhook(input: VerifyWebhookInput): Promise<VerifiedPaymentEvent>;
 }

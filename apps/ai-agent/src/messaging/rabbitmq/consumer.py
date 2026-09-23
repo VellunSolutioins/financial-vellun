@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 import aio_pika
@@ -159,6 +160,11 @@ class RabbitMqConsumer(MessageConsumer):
                 delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
                 correlation_id=broker_message.correlation_id,
                 headers=headers,
+                # O timestamp é o da **republicação**, não o da mensagem
+                # original: a idade que interessa na fila de retry é há quanto
+                # tempo esta tentativa espera. O tempo total desde a primeira
+                # falha já está em `x-first-failed-at`.
+                timestamp=datetime.now(timezone.utc),
             ),
             routing_key=retry_routing_key(self._routing_key, bucket),
         )
@@ -181,6 +187,7 @@ class RabbitMqConsumer(MessageConsumer):
                 content_type="application/json",
                 delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
                 correlation_id=broker_message.correlation_id,
+                timestamp=datetime.now(timezone.utc),
             ),
             routing_key=dlq_routing_key(self._routing_key),
         )

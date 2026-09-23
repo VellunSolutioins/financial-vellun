@@ -139,9 +139,8 @@ export default function CadastroPage() {
       const user = await login({ email: data.email, password: data.password });
       setUser(user);
       toast.success('Conta criada com sucesso!');
-      router.push(
-        user.profileType === 'individual' ? '/app/pessoal/dashboard' : '/app/empresa/dashboard',
-      );
+      // Próximo passo: provar a posse do WhatsApp para ligá-lo à conta.
+      router.push('/app/verificar-whatsapp');
     } catch (e) {
       toast.error(e instanceof ApiClientError ? e.message : 'Ocorreu um erro. Tente novamente.');
     }

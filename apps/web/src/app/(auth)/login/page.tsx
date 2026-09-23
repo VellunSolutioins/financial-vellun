@@ -38,7 +38,9 @@ export default function LoginPage() {
       const user = await login(data);
       setUser(user);
       toast.success('Login realizado com sucesso!');
-      router.push(user.profileType === 'individual' ? '/app/pessoal/dashboard' : '/app/empresa/dashboard');
+      router.push(
+        user.profileType === 'individual' ? '/app/pessoal/dashboard' : '/app/empresa/dashboard',
+      );
     } catch (e) {
       toast.error(e instanceof ApiClientError ? e.message : 'Ocorreu um erro. Tente novamente.');
     }
@@ -65,7 +67,9 @@ export default function LoginPage() {
               autoComplete="current-password"
               {...register('password')}
             />
-            {errors.password && <p className="text-xs text-destructive">{errors.password.message}</p>}
+            {errors.password && (
+              <p className="text-xs text-destructive">{errors.password.message}</p>
+            )}
           </div>
           <Button type="submit" className="w-full" disabled={isSubmitting}>
             {isSubmitting ? 'Entrando...' : 'Entrar'}

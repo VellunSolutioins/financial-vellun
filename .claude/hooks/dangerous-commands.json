@@ -5,8 +5,17 @@
   { "name": "fork bomb", "pattern": ":\\(\\)\\s*\\{\\s*:\\s*\\|\\s*:\\s*&\\s*\\}\\s*;\\s*:" },
   { "name": "mkfs", "pattern": "\\bmkfs\\b" },
   { "name": "dd sobre dispositivo", "pattern": "dd\\s+if=.*of=/dev/" },
-  { "name": "git push --force em main/master", "pattern": "git\\s+push.*--force.*\\b(main|master)\\b" },
+  {
+    "name": "git push --force em main/master",
+    "pattern": "git\\s+push.*--force.*\\b(main|master)\\b"
+  },
   { "name": "git push -f em main/master", "pattern": "git\\s+push.*-f\\b.*\\b(main|master)\\b" },
-  { "name": "git reset --hard origin/main", "pattern": "git\\s+reset\\s+--hard\\s+origin/(main|master)" },
-  { "name": "bypass de verificação em commit/push", "pattern": "git\\s+(commit|push).*(--no-verify|--no-gpg-sign)" }
+  {
+    "name": "git reset --hard origin/main",
+    "pattern": "git\\s+reset\\s+--hard\\s+origin/(main|master)"
+  },
+  {
+    "name": "bypass de verificação em commit/push",
+    "pattern": "git\\s+(commit|push).*(--no-verify|--no-gpg-sign)"
+  }
 ]

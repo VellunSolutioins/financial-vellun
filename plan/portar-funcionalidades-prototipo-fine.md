@@ -23,12 +23,14 @@ cartões de crédito com fatura, recorrências, metas por categoria, caixinhas, 
 ## Fases (1 PR por fase, ordenadas por dependência)
 
 ### Fase 0 — Transfer completo + saldo sem cartão
+
 - Migration: `transferAccountId` nullable em `transactions`.
 - API: `transactions.service.ts` valida `transferAccountId` quando `type=transfer` (ownership, ≠ accountId) e recalcula ambas as contas; `accounts.service.recalculateBalance` considera transfers confirmados (saída −, entrada +); `dashboard.service.getSummary` exclui contas `credit_card` do `totalBalance` (não tocar `getBusinessSummary` além do mesmo ajuste de exclusão — usuários business compartilham `/accounts`; avaliar e aplicar consistentemente).
 - Shared: `packages/shared/src/schemas/transaction.ts` ganha `transfer_account_id`.
 - Web: `TransactionForm.tsx` mostra select "Conta destino" quando tipo=transferência (Zod refine).
 
 ### Fase 1 — Cartões de crédito
+
 - Migration: tabela `credit_cards`.
 - API: módulo `credit-cards` (padrão `transactions.controller.ts`: JwtAuthGuard + ActiveSubscriptionGuard, DTOs class-validator + @ApiProperty):
   - `POST /credit-cards` — cria Account `credit_card` + CreditCard na mesma transação Prisma.
@@ -41,27 +43,32 @@ cartões de crédito com fatura, recorrências, metas por categoria, caixinhas, 
 - Shared: enum `CardBrand`, schema `credit-card.ts`.
 
 ### Fase 2 — Recorrências
+
 - Migration: `recurring_rules` + `recurringRuleId`/`competenceMonth` + unique em `transactions`.
 - API: módulo `recurring` — CRUD `/recurring-rules` (type restrito a income|expense via `@IsIn`), `RecurringGeneratorService` com cron diário TZ São Paulo (regra ativa com dueDay clampado = hoje e dentro de start/end → cria pending), `POST /recurring-rules/generate`.
 - Web: `app/app/pessoal/recorrencias/page.tsx` + `RecurringRuleForm.tsx`; card "Comprometido com fixos" (soma das regras ativas de despesa). Nav: "Recorrências".
 - Reutilizar `PendingTransactionsView.tsx` para confirmar gerados; badge de source já existe na lista de lançamentos.
 
 ### Fase 3 — Metas por categoria + dashboard
+
 - Migration: `category_goals`.
 - API: módulo `goals` — `PUT /goals/:categoryId` (upsert), `DELETE /goals/:categoryId`, `GET /goals/progress?month=` → `[{categoryId, categoryName, color, goal, spent, percentage}]` (mesmo groupBy do [dashboard.service.ts:34](apps/api/src/dashboard/dashboard.service.ts#L34)). `getSummary` ganha `spendingProjection {projected, dailyAverage}` (gasto/diasDecorridos × diasNoMês) e dados de real vs previsto.
 - Web: `app/app/pessoal/metas/page.tsx` (barras com faixas: <75% verde, 75–99% amarelo, ≥100% vermelho); dashboard pessoal ganha card "Projeção do mês" e BarChart Recharts "Real vs Previsto" (padrão do gráfico de evolução existente). Nav: "Metas".
 
 ### Fase 4 — Caixinhas
+
 - Migration: `savings_boxes`, `savings_contributions`.
 - API: módulo `savings-boxes` — CRUD + `POST /savings-boxes/:id/contributions`; `GET` retorna `{..., saved, percentage}`.
 - Web: `app/app/pessoal/caixinhas/page.tsx` (cards com Progress + `ContributionDialog`); widget no dashboard (total guardado + top 3). Nav: "Caixinhas".
 
 ### Fase 5 — Família
+
 - Migration: `family_members` + `memberId` em `transactions`.
 - API: módulo `family` — CRUD `/family-members` + `GET /family-members/spending?month=` (groupBy memberId, despesas confirmadas). `transactions`: `memberId` nos DTOs de create/update (validar ownership) e filtro em `ListTransactionsDto`.
 - Web: `app/app/pessoal/familia/page.tsx` (CRUD + BarChart gasto por membro); select "Membro (opcional)" no `TransactionForm`; filtro por membro em lançamentos. Nav: "Família".
 
 ### Fase 6 — Organização (lembretes, agenda, notas, arquivos)
+
 - Migration: `reminders`, `agenda_events`, `notes`, `file_attachments`.
 - API: 1 módulo `organization` com 4 controllers:
   - `/reminders` CRUD + `POST /reminders/:id/pay` (se isRecurrent, cria o do mês seguinte); service anexa `derivedStatus: 'overdue'` quando pending && dueDate < hoje-SP (usar `Intl.DateTimeFormat('en-CA', {timeZone: 'America/Sao_Paulo'})`, nunca `new Date()` cru).
@@ -72,6 +79,7 @@ cartões de crédito com fatura, recorrências, metas por categoria, caixinhas, 
 - Dashboard pessoal: lista "Próximas contas a pagar" (top 5 lembretes não pagos).
 
 ## Convenções obrigatórias (CLAUDE.md) em todas as fases
+
 - Mobile-first; listas paginadas com **10 itens/página** (passar `limit=10` no front — o default atual da API é 20).
 - Máscaras BR (`maskCurrency` etc. de [lib/masks.ts](apps/web/src/lib/masks.ts)) + Zod no front + class-validator no back; moeda enviada como `"1500.00"`.
 - Reutilizar `components/ui` (Card, Dialog, Select, Badge, Toast, Confirm), `lib/api-client.ts`, `date.util.ts`/`parseDateOnly` da API.
@@ -79,6 +87,7 @@ cartões de crédito com fatura, recorrências, metas por categoria, caixinhas, 
 - `prisma generate` + rebuild do shared a cada fase; migrations aditivas (colunas nullable/tabelas novas).
 
 ## Riscos / pontos de atenção
+
 1. **Transfers existentes**: ao ativar a Fase 0, transfers antigos sem destino passam a subtrair da origem — verificar dados existentes na migração.
 2. **Timezone**: o app grava datas ao meio-dia UTC; cron de recorrência e status "vencido" devem derivar "hoje" em America/Sao_Paulo (entre 21h e 0h local o dia UTC já virou).
 3. **Bordas de fatura**: `closingDay/dueDay` limitados a 1–28; `dueDay < closingDay` ⇒ vencimento no mês seguinte ao fechamento.
@@ -87,6 +96,7 @@ cartões de crédito com fatura, recorrências, metas por categoria, caixinhas, 
 6. **Upload**: validar mimetype/size no interceptor E no service; `UPLOAD_DIR` fora do repo; nunca servir estático.
 
 ## Verificação por fase (E2E)
+
 - **F0**: transfer 100 entre 2 contas → origem −100/destino +100; cancelar → restaura; não aparece em receitas/despesas do dashboard.
 - **F1**: cartão (fech. 10, venc. 20), despesas dia 5 e 15 → fatura atual só com o item do ciclo aberto; compra não muda saldo total do dashboard; pagar fatura → banco cai, devedor zera. Testar UI a 375px.
 - **F2**: regra com dueDay = hoje-SP → `generate` cria pending `source=recurring`; rodar 2× não duplica; confirmar atualiza saldo; dueDay=31 em mês de 30 dias.
@@ -97,6 +107,7 @@ cartões de crédito com fatura, recorrências, metas por categoria, caixinhas, 
 - **Transversal**: `pnpm lint`, builds de api/web/shared, specs jest existentes verdes, smoke mobile, formato pt-BR nos valores.
 
 ## Arquivos críticos
+
 - `apps/api/prisma/schema.prisma` — todos os modelos novos
 - `apps/api/src/accounts/accounts.service.ts` — `recalculateBalance` (F0/F1)
 - `apps/api/src/transactions/transactions.service.ts` — transfer, memberId, recurringRuleId

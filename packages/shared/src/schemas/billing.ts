@@ -1,11 +1,6 @@
 import { z } from 'zod';
 
-import {
-  BillingInterval,
-  PaymentMethodType,
-  PaymentStatus,
-  SubscriptionStatus,
-} from '../enums';
+import { BillingInterval, PaymentMethodType, PaymentStatus, SubscriptionStatus } from '../enums';
 
 export const PlanSchema = z.object({
   id: z.string().uuid(),

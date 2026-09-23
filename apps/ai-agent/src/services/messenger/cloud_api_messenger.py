@@ -45,13 +45,25 @@ class WhatsappCloudApiMessenger(Messenger):
             f"{settings.whatsapp_api_base_url.rstrip('/')}/"
             f"{settings.whatsapp_phone_number_id}/messages"
         )
-        self._client = httpx.AsyncClient(
-            headers={
-                "Authorization": f"Bearer {settings.whatsapp_provider_token}",
-                "Content-Type": "application/json",
-            },
-            timeout=30.0,
-        )
+        self._client: httpx.AsyncClient | None = None
+
+    def _http(self) -> httpx.AsyncClient:
+        """Pool único, recriado se tiver sido fechado.
+
+        Sob demanda, e não no ``__init__``, porque o singleton do módulo nasce
+        na importação: criar o pool ali o deixaria pendurado num event loop que
+        ainda nem existe, e um ``aclose`` no shutdown inutilizaria o messenger
+        para um ciclo seguinte de lifespan (reload em dev, testes em sequência).
+        """
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                headers={
+                    "Authorization": f"Bearer {settings.whatsapp_provider_token}",
+                    "Content-Type": "application/json",
+                },
+                timeout=30.0,
+            )
+        return self._client
 
     async def send(self, phone: str, text: str) -> None:
         # Cloud API espera o número sem o "+".
@@ -63,7 +75,7 @@ class WhatsappCloudApiMessenger(Messenger):
             "text": {"body": text},
         }
         try:
-            response = await self._client.post(self._url, json=payload)
+            response = await self._http().post(self._url, json=payload)
         except httpx.HTTPError as exc:
             raise TransientError(
                 f"falha de rede ao enviar pelo WhatsApp: {type(exc).__name__}"
@@ -80,4 +92,6 @@ class WhatsappCloudApiMessenger(Messenger):
         raise PermanentError(f"WhatsApp Cloud API recusou envio: {detalhe}")
 
     async def aclose(self) -> None:
-        await self._client.aclose()
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
+        self._client = None

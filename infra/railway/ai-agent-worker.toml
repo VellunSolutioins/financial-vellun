@@ -1,0 +1,39 @@
+# Serviço `financial-vellun-ai-agent-worker` — consumo das filas.
+#
+# Mesma imagem do `ai-agent`, outro comando. Aponte o campo "Config as code"
+# deste serviço para `infra/railway/ai-agent-worker.toml`.
+#
+# **Sem domínio público.** A porta 8011 serve só `/health/*` e `/metrics`, para
+# o Alloy e para o orquestrador; expor isso na internet só aumentaria a
+# superfície. O scrape entra pela rede privada
+# (`financial-vellun-ai-agent-worker.railway.internal:8011`) — ver o alvo
+# comentado em `infra/observability/alloy/config.alloy`.
+#
+# Variáveis que este serviço PRECISA ter:
+#   WORKER_METRICS_PORT=8011     ← porta fixa; o Alloy scrapa endereço fixo
+#   RUN_CONSUMERS_IN_API         ← irrelevante aqui (o entrypoint já é o worker)
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile.ai-agent"
+
+[deploy]
+startCommand = "python -m src.worker"
+
+# Readiness do worker = broker + consumers + flusher + Redis. Um worker que não
+# consegue consumir não deve substituir o que estava rodando.
+healthcheckPath = "/health/ready"
+healthcheckTimeout = 60
+
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+# É aqui que se escala, por idade da mensagem mais antiga e profundidade da fila
+# (P4/P6) — respeitando `réplicas × PROCESSING_CONSUMER_CONCURRENCY ≤ capacidade
+# do downstream` (OpenAI, API principal, Postgres).
+numReplicas = 1
+
+# Precisa cobrir SHUTDOWN_DRAIN_SECONDS (20s) com folga: no deploy, o worker
+# antigo para de receber, termina o que está em voo e devolve o resto à fila.
+# Nenhuma mensagem se perde porque nada é ackado antes de concluir.
+overlapSeconds = 45

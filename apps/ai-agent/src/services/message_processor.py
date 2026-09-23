@@ -18,17 +18,25 @@ from .audit_service import audit_service
 from .clock import today_local
 from .confirmation_rules import needs_confirmation
 from .contact_service import contact_service
-from .conversation_manager import conversation_manager
+from .conversation_manager import ConversationState, conversation_manager
 from .intent_classifier import intent_classifier
 from .messenger import messenger
 from .metrics import metrics
+from .phone_verification import (
+    ALREADY_LINKED_MESSAGE,
+    NO_PENDING_CODE_MESSAGE,
+    extract_verification_code,
+    phone_verification_service,
+)
 from .subscription_gate import subscription_gate
 from .transaction_creator import transaction_creator
+from .usage_limiter import DAILY_LIMIT_MESSAGE, usage_limiter
 
 logger = logging.getLogger(__name__)
 
 NOT_LINKED_MESSAGE = (
-    "Seu número não está vinculado a uma conta. Acesse o app para vincular."
+    "Seu número ainda não está vinculado a uma conta. No app, abra Minha Conta, "
+    "toque em \"Verificar WhatsApp\" e envie o código aqui."
 )
 HELP_MESSAGE = (
     "Posso registrar seus lançamentos! Ex.: 'gastei 100 no mercado' ou "
@@ -37,6 +45,15 @@ HELP_MESSAGE = (
 #: Quando ativa, ``respond`` acumula o texto aqui em vez de enviar. Só o
 #: ``process_job`` a ativa — ver a docstring dele.
 _reply_outbox: ContextVar[list[str] | None] = ContextVar("reply_outbox", default=None)
+
+#: Preenchido com ``{"userId", "contactId"}`` assim que o contato é resolvido,
+#: para o consumer de processamento anexar identidade à mensagem de saída sem
+#: consultar de novo. Quem abre o slot é o **chamador** (o consumer), e não este
+#: módulo: assim um dublê de ``process_job`` num teste simplesmente não o
+#: preenche, em vez de quebrar.
+job_identity: ContextVar[dict[str, str | None] | None] = ContextVar(
+    "job_identity", default=None
+)
 
 AFFIRMATIVE = ("sim", "isso", "confirmo", "ok", "pode", "correto", "certo", "exato")
 NEGATIVE = ("não", "nao", "cancela", "cancelar", "errado", "deixa")
@@ -115,13 +132,37 @@ class MessageProcessor:
 
         metrics.incr("messages_processed")
 
+        # Código de verificação do número: a API decide se confere. O código
+        # com rótulo ("Código: 123456", como o app preenche) é conferido antes
+        # do contato, porque o número que o envia ainda não é vinculado.
+        code = extract_verification_code(message)
+        if code is not None and code.labeled:
+            outcome = await phone_verification_service.confirm(phone, code.value)
+            if outcome.reply is not None:
+                return await self._respond(phone, outcome.reply)
+
         contact = await contact_service.find_by_phone(phone)
         if contact is None:
+            if code is not None and not code.labeled:
+                # Número solto só vale como código para quem ainda não tem vínculo.
+                outcome = await phone_verification_service.confirm(phone, code.value)
+                if outcome.reply is not None:
+                    return await self._respond(phone, outcome.reply)
             metrics.incr("not_linked")
             logger.info("Contato não vinculado")
+            if code is not None:
+                return await self._respond(phone, NO_PENDING_CODE_MESSAGE)
             return await self._respond(phone, NOT_LINKED_MESSAGE)
+        if code is not None and code.labeled:
+            # Código sem desafio aberto vindo de um número já vinculado (ex.:
+            # reenvio da mesma mensagem). Não é um lançamento para o LLM.
+            return await self._respond(phone, ALREADY_LINKED_MESSAGE)
 
         user_id = contact["userId"]
+        slot = job_identity.get()
+        if slot is not None:
+            slot["userId"] = user_id
+            slot["contactId"] = contact.get("id")
 
         # Bloqueia antes de qualquer operação paga (LLM/criação) se sem assinatura.
         allowed, block_message = await subscription_gate.evaluate(user_id)
@@ -130,11 +171,26 @@ class MessageProcessor:
             logger.info("Acesso bloqueado por assinatura")
             return await self._respond(phone, block_message or NOT_LINKED_MESSAGE)
 
+        # Depois do vínculo e da assinatura, antes de qualquer chamada paga. O
+        # comprovante (intent pré-extraído) já foi contado no consumer de
+        # entrada, onde a leitura da imagem aconteceu.
+        if pre_extracted is None and not await usage_limiter.allow(phone):
+            return await self._respond(phone, DAILY_LIMIT_MESSAGE)
+
         if pre_extracted is not None:
             # Comprovante: a visão já extraiu o intent no consumer de entrada.
             intent = FinancialIntent(**pre_extracted)
         else:
             state = await conversation_manager.get(phone)
+
+            if state.awaiting_confirmation and not state.belongs_to(contact):
+                # O número mudou de dono (ou foi revogado e reverificado) depois
+                # da pergunta: a resposta não pode concluir o lançamento de outra
+                # conta. Descarta e trata a mensagem como nova.
+                metrics.incr("pending_discarded_link_changed")
+                logger.info("Confirmação pendente descartada: vínculo do número mudou")
+                await conversation_manager.clear(phone)
+                state = ConversationState()
 
             if state.awaiting_confirmation and state.pending_intent is not None:
                 context = await self._build_context(user_id, contact, phone)
@@ -158,6 +214,7 @@ class MessageProcessor:
             force_confirm=force_confirm,
             confirm_question=confirm_question,
             idempotency_key=idempotency_key,
+            contact=contact,
         )
 
     async def handle_intent(
@@ -172,12 +229,14 @@ class MessageProcessor:
         force_confirm: bool = False,
         confirm_question: str | None = None,
         idempotency_key: str | None = None,
+        contact: dict | None = None,
     ) -> str:
         """Trata um ``FinancialIntent`` já extraído (texto, áudio ou imagem).
 
         ``response_prefix`` é prefixado na resposta final (ex.: eco da transcrição
         de áudio). ``force_confirm`` força o ramo de confirmação independentemente
-        das regras (usado para comprovantes/imagem).
+        das regras (usado para comprovantes/imagem). ``contact`` é o vínculo que
+        fica gravado junto de uma confirmação pendente.
         """
         # Intenções não-transacionais.
         if intent.intent == IntentType.help:
@@ -203,7 +262,7 @@ class MessageProcessor:
 
         if must_confirm:
             metrics.incr("confirmation_requested")
-            await conversation_manager.set_pending(phone, intent)
+            await conversation_manager.set_pending(phone, intent, contact)
             await audit_service.log_extraction(
                 user_id=user_id,
                 raw_input=raw_message,
@@ -240,12 +299,22 @@ class MessageProcessor:
         return await self._respond(phone, response_prefix + result["message"])
 
     async def respond(self, phone: str, text: str) -> str:
-        """Envia a resposta ao usuário — ou a guarda, dentro de ``process_job``."""
+        """Responde ao usuário — ou guarda o texto, dentro de ``process_job``.
+
+        Fora de um job (avisos do consumer de entrada, caminho legado), a
+        resposta vai para o despachante de saída, que enfileira ou entrega
+        conforme ``OUTBOUND_DELIVERY``. Nenhum ponto do domínio chama o
+        messenger direto.
+        """
         outbox = _reply_outbox.get()
         if outbox is not None:
             outbox.append(text)
             return text
-        return await self.deliver(phone, text)
+
+        from .outbound import outbound_dispatcher
+
+        await outbound_dispatcher.send(phone, text, kind="notice")
+        return text
 
     async def deliver(self, phone: str, text: str) -> str:
         """Entrega ao usuário e registra como outbound. **Levanta** se não entregar."""
@@ -319,23 +388,17 @@ class MessageProcessor:
         return None
 
     async def _build_context(self, user_id: str, contact: dict, phone: str) -> dict:
-        """Contexto para o LLM: categorias, contas, data e histórico recente."""
-        from ..services.api_client import api_client
-        from ..services.conversation_history_service import conversation_history_service
+        """Contexto para o LLM: categorias, contas, data e histórico recente.
 
-        categories: list[str] = []
-        accounts: list[str] = []
-        try:
-            cat_resp = await api_client.get(f"/internal/users/{user_id}/categories")
-            if cat_resp.status_code == 200:
-                categories = [c["name"] for c in cat_resp.json()]
-            acc_resp = await api_client.get(f"/internal/users/{user_id}/accounts")
-            if acc_resp.status_code == 200:
-                accounts = [a["name"] for a in acc_resp.json()]
-        except Exception:  # noqa: BLE001
-            logger.warning(
-                "Não foi possível carregar contexto do usuário %s", user_id, exc_info=True
-            )
+        As listas vêm do ``user_catalog``, que as memoriza pelo tempo do job: a
+        criação do lançamento precisa das mesmas duas, e antes cada uma era
+        buscada duas vezes por mensagem.
+        """
+        from ..services.conversation_history_service import conversation_history_service
+        from ..services.user_catalog import user_catalog
+
+        categories = [c["name"] for c in await user_catalog.categories(user_id)]
+        accounts = [a["name"] for a in await user_catalog.accounts(user_id)]
 
         recent_messages = await conversation_history_service.get_recent_messages(
             phone, settings.conversation_context_message_limit

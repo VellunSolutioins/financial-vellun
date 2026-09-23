@@ -1,0 +1,39 @@
+# Serviço `financial-vellun-api` — NestJS + Prisma.
+#
+# Aponte o campo "Config as code" deste serviço para `infra/railway/api.toml`.
+# Build por Nixpacks a partir da raiz do monorepo (pnpm workspaces): a API
+# depende de `packages/shared`, então o root directory precisa ser `/`.
+#
+# Variáveis que este serviço PRECISA ter (as demais estão no README):
+#   PORT=3001                 ← o Alloy scrapa porta fixa
+#   TRUST_PROXY=1             ← atrás do proxy do Railway (rate limit por IP)
+#   DATABASE_URL              ← com `connection_limit` e `pool_timeout` (P2)
+#   DIRECT_URL                ← conexão direta, sem pooler, para as migrations
+#   REDIS_URL                 ← mesma instância do agente, prefixos separados
+#   METRICS_TOKEN             ← o mesmo do agente; o Alloy usa um só
+
+[build]
+builder = "NIXPACKS"
+buildCommand = "pnpm install --frozen-lockfile && pnpm --filter @financial-vellun/api exec prisma generate && pnpm --filter @financial-vellun/api build"
+
+[deploy]
+# As migrations rodam no start, contra `DIRECT_URL`: `migrate deploy` usa
+# prepared statements nomeados e advisory locks, que um pooler em transaction
+# mode não preserva entre comandos (contrato C7).
+startCommand = "pnpm --filter @financial-vellun/api exec prisma migrate deploy && pnpm --filter @financial-vellun/api start"
+
+# Postgres fora → 503 → o deploy novo não entra no lugar do antigo. O Redis
+# aparece no corpo mas não reprova: a API degrada sem ele de propósito
+# (`RedisHealthIndicator`).
+healthcheckPath = "/health/ready"
+healthcheckTimeout = 120
+
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+# Mais de uma réplica exige throttler em Redis + `trust proxy` (contrato C11),
+# ambos já entregues — e o connection budget do Postgres recalculado (P2):
+# `réplicas × connection_limit` precisa caber no `max_connections`.
+numReplicas = 1
+
+overlapSeconds = 20

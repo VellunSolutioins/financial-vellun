@@ -104,8 +104,12 @@ class GroupFlusherWorker:
 
     async def tick(self) -> int:
         """Consolida todos os grupos vencidos. Retorna quantos jobs publicou."""
+        metrics.incr("flusher_polls")
         published = 0
-        for phone in await self._store.due_phones():
+        vencidos = await self._store.due_phones()
+        if vencidos:
+            metrics.incr("flusher_groups_found", len(vencidos))
+        for phone in vencidos:
             published += await self._flush_phone(phone)
         return published
 

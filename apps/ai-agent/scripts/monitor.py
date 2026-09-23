@@ -105,7 +105,7 @@ def formatar(estado: dict, anterior: dict | None, intervalo: float, args) -> str
         f"{valor('publish_confirmed'):>7} {valor('publish_failed'):>6} "
         f"{valor('messages_consumed'):>7} {taxa('messages_consumed'):>7.1f} "
         f"{valor('jobs_processed'):>6} {valor('jobs_duplicated'):>5} "
-        f"{valor('jobs_deferred'):>6} {valor('dlq_messages'):>5} "
+        f"{valor('jobs_deferred'):>6} {valor('dlq'):>5} "
         f"{filas.get(args.inbound_queue, 0):>7} {filas.get(args.processing_queue, 0):>7} "
         f"{latencia:>8.1f}"
     )

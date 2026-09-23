@@ -23,6 +23,13 @@ export const OPS_TOKEN_TYPE = 'ops';
  */
 export const OPS_SESSION_TTL_SECONDS = 30 * 60;
 
+/**
+ * Prazo absoluto de uma sessão, contado do login. A renovação deslizante não
+ * passa daqui: sem ele, uma sessão usada com frequência nunca expirava, e quem
+ * saiu da organização continuava dentro enquanto mantivesse o painel aberto.
+ */
+export const OPS_SESSION_ABSOLUTE_TTL_SECONDS = 12 * 60 * 60;
+
 /** A partir de quanto do TTL restante a sessão é reemitida. */
 export const OPS_SESSION_RENEW_THRESHOLD_SECONDS = 15 * 60;
 

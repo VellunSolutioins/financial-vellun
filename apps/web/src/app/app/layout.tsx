@@ -45,6 +45,21 @@ function SubscriptionBanner({
   return null;
 }
 
+const VERIFICAR_WHATSAPP_PATH = '/app/verificar-whatsapp';
+
+/** Aviso enquanto o WhatsApp não é verificado: sem ele, o bot não reconhece o usuário. */
+function WhatsappBanner({ verified, pathname }: { verified?: boolean; pathname: string }) {
+  if (verified || pathname === VERIFICAR_WHATSAPP_PATH || pathname === '/app/conta') return null;
+  return (
+    <div className="mb-4 rounded-md border border-blue-300 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+      Seu WhatsApp ainda não está verificado: o bot só registra lançamentos depois disso.{' '}
+      <Link href={VERIFICAR_WHATSAPP_PATH} className="font-semibold underline">
+        Verificar agora
+      </Link>
+    </div>
+  );
+}
+
 const navItems = {
   individual: [
     { href: '/app/pessoal/dashboard', label: 'Dashboard' },
@@ -110,7 +125,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           onClick={() => setSidebarOpen(true)}
           className="-ml-2 inline-flex h-10 w-10 items-center justify-center rounded-md text-gray-700 hover:bg-gray-100"
         >
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <svg
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
             <line x1="3" y1="6" x2="21" y2="6" />
             <line x1="3" y1="12" x2="21" y2="12" />
             <line x1="3" y1="18" x2="21" y2="18" />
@@ -146,7 +168,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             onClick={() => setSidebarOpen(false)}
             className="-mr-2 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-gray-700 hover:bg-gray-100 lg:hidden"
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />
             </svg>
@@ -198,6 +227,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <main className="flex-1 overflow-auto bg-gray-50 min-w-0 lg:h-screen lg:min-h-0">
         <div className="mx-auto max-w-6xl p-4 sm:p-6 lg:p-8">
           <SubscriptionBanner access={subscriptionAccess} pathname={pathname} />
+          <WhatsappBanner verified={user.whatsappVerified} pathname={pathname} />
           {children}
         </div>
       </main>

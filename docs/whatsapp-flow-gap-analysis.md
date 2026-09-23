@@ -13,7 +13,7 @@ resultou em:
 - **nenhum lançamento foi criado**;
 - **nenhuma resposta chegou ao usuário**.
 
-O `202` prova que o *publisher confirm* do RabbitMQ voltou — a mensagem **entrou** em
+O `202` prova que o _publisher confirm_ do RabbitMQ voltou — a mensagem **entrou** em
 `whatsapp.inbound.v1`. Logo o defeito está depois da publicação. O problema real é que
 **hoje não dá para saber onde**: o pipeline tem vários pontos que reportam sucesso sem
 entregar nada, e no Railway o Alloy ainda não existe
@@ -56,14 +56,14 @@ Ele persiste na API, escreve no Redis e acka. Quem publica é o `GroupFlusherWor
 
 ### Esperado × real
 
-| Passo esperado | Real |
-| --- | --- |
-| Mensagem chega no endpoint | ✔ igual |
-| Processamento mínimo | ✔ igual — valida assinatura, normaliza, monta o contrato |
-| Processo enviado ao RabbitMQ | ✔ igual — `publish_many` em `whatsapp.inbound.v1` |
-| Endpoint responde `202` | ✔ igual — só após o *publisher confirm* |
-| Consumer executa o processo | ✘ **dois** consumers, com um timer e o Redis entre eles |
-| Resposta enviada ao usuário | ✘ o envio pode falhar em silêncio e ainda assim marcar o job como concluído |
+| Passo esperado               | Real                                                                        |
+| ---------------------------- | --------------------------------------------------------------------------- |
+| Mensagem chega no endpoint   | ✔ igual                                                                     |
+| Processamento mínimo         | ✔ igual — valida assinatura, normaliza, monta o contrato                    |
+| Processo enviado ao RabbitMQ | ✔ igual — `publish_many` em `whatsapp.inbound.v1`                           |
+| Endpoint responde `202`      | ✔ igual — só após o _publisher confirm_                                     |
+| Consumer executa o processo  | ✘ **dois** consumers, com um timer e o Redis entre eles                     |
+| Resposta enviada ao usuário  | ✘ o envio pode falhar em silêncio e ainda assim marcar o job como concluído |
 
 ---
 
@@ -133,14 +133,14 @@ pré-declarados (`services/metrics.py:63-104`), então zero é informação, nã
 curl -H "Authorization: Bearer $METRICS_TOKEN" https://<agente>/metrics.json
 ```
 
-| Último contador > 0 | Onde parou |
-| --- | --- |
-| `publish_confirmed` | não consumiu → consumer não está de pé (`RUN_CONSUMERS_IN_API`) |
-| `messages_consumed` | morreu no `_persist_inbound` (G2) → conferir DLQ |
-| `inbound_grouped` | flusher não rodou / Redis fora (G6) |
-| `jobs_published` | processing consumer parado ou lock preso |
-| `jobs_processed` sem `transactions_created` | `not_linked` / `subscription_blocked` / confirmação pendente |
-| `transactions_created` > 0 e nada chegou | **G1** — messenger em modo `log` ou Graph recusando |
+| Último contador > 0                         | Onde parou                                                      |
+| ------------------------------------------- | --------------------------------------------------------------- |
+| `publish_confirmed`                         | não consumiu → consumer não está de pé (`RUN_CONSUMERS_IN_API`) |
+| `messages_consumed`                         | morreu no `_persist_inbound` (G2) → conferir DLQ                |
+| `inbound_grouped`                           | flusher não rodou / Redis fora (G6)                             |
+| `jobs_published`                            | processing consumer parado ou lock preso                        |
+| `jobs_processed` sem `transactions_created` | `not_linked` / `subscription_blocked` / confirmação pendente    |
+| `transactions_created` > 0 e nada chegou    | **G1** — messenger em modo `log` ou Graph recusando             |
 
 Apoio, na ordem:
 
@@ -172,7 +172,7 @@ Apoio, na ordem:
 - `cloud_api_messenger.send`: **levantar** — `TransientError` para rede/5xx/429,
   `PermanentError` para 4xx de negócio — em vez de `return` silencioso. Com isso
   `whatsapp_send_failed` passa a valer alguma coisa.
-- **Achado na implementação:** levantar no envio *não* era seguro como estava. O retry
+- **Achado na implementação:** levantar no envio _não_ era seguro como estava. O retry
   refazia o job inteiro, e a criação do lançamento é idempotente, mas a confirmação
   pendente não: ao criar, `conversation_manager.clear()` já a consumiu, e o "sim"
   reprocessado era classificado do zero, sem a pergunta que ele responde. Por isso

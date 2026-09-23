@@ -25,7 +25,8 @@ export default function HomePage() {
           Controle financeiro <span className="text-primary">simples e poderoso</span>
         </h1>
         <p className="text-xl text-gray-600 mb-10 max-w-2xl mx-auto">
-          Gerencie suas finanças pessoais ou empresariais com inteligência artificial. Lance gastos via WhatsApp e tenha tudo organizado automaticamente.
+          Gerencie suas finanças pessoais ou empresariais com inteligência artificial. Lance gastos
+          via WhatsApp e tenha tudo organizado automaticamente.
         </p>
         <div className="flex gap-4 justify-center">
           <Button size="lg" asChild>
@@ -58,7 +59,10 @@ export default function HomePage() {
               desc: 'Envie uma mensagem e nossa IA registra automaticamente o lançamento para você.',
             },
           ].map((f) => (
-            <div key={f.title} className="rounded-xl border bg-white p-8 shadow-sm hover:shadow-md transition-shadow">
+            <div
+              key={f.title}
+              className="rounded-xl border bg-white p-8 shadow-sm hover:shadow-md transition-shadow"
+            >
               <div className="text-4xl mb-4">{f.icon}</div>
               <h3 className="text-lg font-semibold text-gray-900 mb-2">{f.title}</h3>
               <p className="text-gray-600">{f.desc}</p>

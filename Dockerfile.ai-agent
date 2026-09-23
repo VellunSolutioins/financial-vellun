@@ -1,15 +1,31 @@
-FROM python:3.12-slim
+# Imagem fixada por digest: a mesma tag pode apontar para outro conteúdo a
+# qualquer momento, e um build que "só reconstruiu" traria pacotes diferentes.
+# Para atualizar: docker pull python:3.12-slim && docker image inspect
+# python:3.12-slim --format '{{index .RepoDigests 0}}'
+FROM python@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY apps/ai-agent/requirements.txt .
+# Instala a partir do lock com hashes: versão e conteúdo de cada pacote são os
+# mesmos de quando o lock foi gerado e conferido. `--require-hashes` recusa
+# qualquer dependência que não esteja lá (plano de segurança, S3).
+COPY apps/ai-agent/requirements.lock .
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+    && pip install --no-cache-dir --require-hashes -r requirements.lock
 
 COPY apps/ai-agent/src ./src
+
+# Usuário sem privilégio: um defeito no processo não vira root no container.
+RUN useradd --system --create-home --uid 10001 agent \
+    && chown -R agent:agent /app
+USER agent
+
+# Liveness do próprio container, sem depender de curl na imagem.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD python -c "import os,urllib.request;urllib.request.urlopen(f\"http://127.0.0.1:{os.getenv('PORT','8010')}/health/live\",timeout=4)"
 
 # Por padrao serve o webhook. Com RUN_CONSUMERS_IN_API=true (padrao) esta mesma
 # imagem tambem consome as filas; para separar os processos, suba uma segunda

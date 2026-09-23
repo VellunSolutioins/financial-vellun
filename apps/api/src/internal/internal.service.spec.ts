@@ -47,6 +47,50 @@ describe('InternalService', () => {
     service = new InternalService(prisma as any, {} as any, access as any);
   });
 
+  describe('findContactByPhone (vínculo verificado)', () => {
+    const user = { id: 'u1', name: 'Joao', profileType: 'individual' };
+    const contact = (overrides: Record<string, unknown>) => ({
+      id: 'contact1',
+      userId: 'u1',
+      user,
+      isVerified: true,
+      revokedAt: null,
+      linkVersion: 3,
+      ...overrides,
+    });
+
+    it('devolve usuário, contato e versão do vínculo quando verificado', async () => {
+      prisma.whatsappContact.findUnique.mockResolvedValue(contact({}));
+
+      await expect(service.findContactByPhone('+5511999999999')).resolves.toEqual({
+        userId: 'u1',
+        name: 'Joao',
+        profileType: 'individual',
+        isVerified: true,
+        contactId: 'contact1',
+        linkVersion: 3,
+      });
+    });
+
+    it('número só declarado (não verificado) não identifica ninguém', async () => {
+      prisma.whatsappContact.findUnique.mockResolvedValue(contact({ isVerified: false }));
+
+      await expect(service.findContactByPhone('+5511999999999')).rejects.toThrow(
+        'Contato não vinculado',
+      );
+    });
+
+    it('número revogado numa troca de telefone não identifica ninguém', async () => {
+      prisma.whatsappContact.findUnique.mockResolvedValue(
+        contact({ isVerified: false, revokedAt: new Date() }),
+      );
+
+      await expect(service.findContactByPhone('+5511999999999')).rejects.toThrow(
+        'Contato não vinculado',
+      );
+    });
+  });
+
   describe('listRecentMessagesByPhone', () => {
     it('normaliza o telefone ao buscar o contato', async () => {
       prisma.whatsappContact.findUnique.mockResolvedValue(null);
@@ -506,6 +550,29 @@ describe('InternalService', () => {
 
       expect(prisma.aiConversation.create).toHaveBeenCalled();
       expect(result).toEqual({ id: 'msg1', conversationId: 'conv1' });
+    });
+
+    it('conversa de número revogado não é atribuída ao dono anterior', async () => {
+      prisma.whatsappContact.upsert.mockResolvedValue({
+        id: 'contact1',
+        userId: 'dono-anterior',
+        isVerified: false,
+        revokedAt: new Date(),
+      });
+      prisma.aiConversation.findFirst.mockResolvedValue(null);
+      prisma.aiConversation.create.mockResolvedValue({ id: 'conv1' });
+      prisma.aiMessage.create.mockResolvedValue({ id: 'msg1', conversationId: 'conv1' });
+
+      await service.recordEvent({
+        eventType: 'message',
+        phone: '+5511999999999',
+        direction: 'inbound' as any,
+        content: 'oi',
+      } as any);
+
+      expect(prisma.aiConversation.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ whatsappContactId: 'contact1', userId: null }),
+      });
     });
 
     it('reusa a conversa ativa existente', async () => {

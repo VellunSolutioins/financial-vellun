@@ -92,11 +92,7 @@ export class SubscriptionService {
    * mais recente do usuário (atualizando plano/cliente) ou cria uma nova. Nunca
    * ativa — a ativação só ocorre por webhook validado.
    */
-  async prepareCheckoutSubscription(
-    userId: string,
-    planId: string,
-    providerCustomerId: string,
-  ) {
+  async prepareCheckoutSubscription(userId: string, planId: string, providerCustomerId: string) {
     const existing = await this.prisma.subscription.findFirst({
       where: { userId },
       orderBy: { createdAt: 'desc' },

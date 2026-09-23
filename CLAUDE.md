@@ -6,16 +6,16 @@ Monorepo iniciado em 2026-06-17. Aplicação de controle financeiro para **pesso
 
 ## Stack
 
-| Camada    | Tecnologia                                          |
-| --------- | --------------------------------------------------- |
-| Frontend  | Next.js 14 (App Router) + Tailwind CSS + shadcn/ui (`apps/web`) |
-| Backend   | NestJS + Prisma + PostgreSQL (`apps/api`)           |
-| AI Agent  | Python + FastAPI (`apps/ai-agent`)                  |
-| Shared    | TypeScript + Zod (`packages/shared`)                |
-| Config    | TS / ESLint / Prettier compartilhados (`packages/config`) |
-| Mensageria| RabbitMQ (broker durável) + Redis (estado distribuído) |
-| Monorepo  | pnpm workspaces                                     |
-| Language  | TypeScript (strict) + Python 3.11                   |
+| Camada     | Tecnologia                                                      |
+| ---------- | --------------------------------------------------------------- |
+| Frontend   | Next.js 14 (App Router) + Tailwind CSS + shadcn/ui (`apps/web`) |
+| Backend    | NestJS + Prisma + PostgreSQL (`apps/api`)                       |
+| AI Agent   | Python + FastAPI (`apps/ai-agent`)                              |
+| Shared     | TypeScript + Zod (`packages/shared`)                            |
+| Config     | TS / ESLint / Prettier compartilhados (`packages/config`)       |
+| Mensageria | RabbitMQ (broker durável) + Redis (estado distribuído)          |
+| Monorepo   | pnpm workspaces                                                 |
+| Language   | TypeScript (strict) + Python 3.11                               |
 
 ## Estrutura do Monorepo
 
@@ -77,25 +77,25 @@ pnpm --filter @financial-vellun/api exec prisma migrate reset    # resetar (dev)
 pnpm --filter @financial-vellun/api db:seed                      # categorias padrão + usuário demo
 ```
 
-| Serviço              | URL                                        |
-| -------------------- | ------------------------------------------ |
-| Web                  | http://localhost:3000                      |
-| Operações (painel)   | http://localhost:3000/ops                  |
-| API                  | http://localhost:3001                      |
-| Swagger              | http://localhost:3001/api/docs             |
-| AI Agent             | http://localhost:8010                      |
-| RabbitMQ             | http://localhost:15672 (guest/guest)       |
+| Serviço            | URL                                                         |
+| ------------------ | ----------------------------------------------------------- |
+| Web                | http://localhost:3000                                       |
+| Operações (painel) | http://localhost:3000/ops                                   |
+| API                | http://localhost:3001                                       |
+| Swagger            | http://localhost:3001/api/docs                              |
+| AI Agent           | http://localhost:8010                                       |
+| RabbitMQ           | http://localhost:15672 (credenciais em `infra/docker/.env`) |
 
 **Observabilidade** — os três serviços expõem o mesmo trio. `/metrics` é texto
 Prometheus e exige `Authorization: Bearer ${METRICS_TOKEN}`; `/metrics.json` (só
 no agente) preserva o shape antigo `{counters, timings}` usado por
 `scripts/monitor.py` e `scripts/loadtest.py`.
 
-| Serviço              | Liveness / Readiness                    | Métricas                        |
-| -------------------- | --------------------------------------- | ------------------------------- |
-| API                  | :3001/health/live · :3001/health/ready  | :3001/metrics                   |
-| AI Agent             | :8010/health/live · :8010/health/ready  | :8010/metrics · /metrics.json   |
-| AI Agent (worker)    | :8011/health/live · :8011/health/ready  | :8011/metrics · /metrics.json   |
+| Serviço           | Liveness / Readiness                   | Métricas                      |
+| ----------------- | -------------------------------------- | ----------------------------- |
+| API               | :3001/health/live · :3001/health/ready | :3001/metrics                 |
+| AI Agent          | :8010/health/live · :8010/health/ready | :8010/metrics · /metrics.json |
+| AI Agent (worker) | :8011/health/live · :8011/health/ready | :8011/metrics · /metrics.json |
 
 ### Agente de IA (Python)
 
@@ -126,7 +126,7 @@ python -m venv .venv                          # apenas na primeira vez
   `schemaVersion` e aliases camelCase
 - O webhook do WhatsApp só valida, normaliza e publica: nada de chamada à API principal,
   banco, OpenAI ou download de mídia dentro do request HTTP
-- Variáveis sensíveis sempre em `.env` (nunca commitar); `INTERNAL_API_KEY` deve ser idêntica entre API e agente de IA
+- Variáveis sensíveis sempre em `.env` (nunca commitar); as chaves internas (`INTERNAL_API_KEY_AGENT_TO_API` e `INTERNAL_API_KEY_API_TO_AGENT`, ou a antiga `INTERNAL_API_KEY` durante a migração) devem ser idênticas entre API e agente de IA
 
 ## Obrigatório
 
@@ -209,19 +209,23 @@ Em modo edição, converter o valor vindo da API para display antes de passar ao
 
 ## Fases de implementação
 
-| Fase | Status | Escopo |
-| ---- | ------ | ------ |
-| **1 — Fundação** | ✅ Completo | Monorepo, schema Prisma, bootstrap dos apps, Docker |
-| **2 — Produto Pessoal** | ✅ Completo | Auth JWT, perfis, CRUD de contas/categorias/lançamentos, dashboard |
-| **3 — IA e WhatsApp** | ✅ Em andamento | Webhook, extração de intenção, integração LLM, pipeline durável (RabbitMQ + Redis) |
-| **4 — Pessoa Jurídica** | ✅ Em andamento | Dashboard empresarial, contas a pagar/receber, clientes/fornecedores, categorias |
-| **5 — Evolução (pós-MVP)** | 🔜 Pendente | Recorrência, metas, relatórios, importação de extratos |
+| Fase                       | Status          | Escopo                                                                             |
+| -------------------------- | --------------- | ---------------------------------------------------------------------------------- |
+| **1 — Fundação**           | ✅ Completo     | Monorepo, schema Prisma, bootstrap dos apps, Docker                                |
+| **2 — Produto Pessoal**    | ✅ Completo     | Auth JWT, perfis, CRUD de contas/categorias/lançamentos, dashboard                 |
+| **3 — IA e WhatsApp**      | ✅ Em andamento | Webhook, extração de intenção, integração LLM, pipeline durável (RabbitMQ + Redis) |
+| **4 — Pessoa Jurídica**    | ✅ Em andamento | Dashboard empresarial, contas a pagar/receber, clientes/fornecedores, categorias   |
+| **5 — Evolução (pós-MVP)** | 🔜 Pendente     | Recorrência, metas, relatórios, importação de extratos                             |
 
 ## Documentação
 
 - [ADRs — decisões arquiteturais](docs/adrs/README.md)
 - [Runbook do pipeline WhatsApp](docs/whatsapp-messaging-runbook.md)
+- [Connection budget do PostgreSQL](docs/connection-budget.md)
+- [Tuning e escala](docs/tuning-e-escala.md)
+- [Serviços no Railway](infra/railway/README.md)
+- [Retenção de dados e backups](docs/retencao-e-backups.md)
 - [Requisitos técnicos](docs/technical-requirements.md)
 - [Prompts de implementação](docs/implementation-prompts.md)
 - [README](README.md) — setup detalhado, variáveis de ambiente e troubleshooting
-- [Swagger da API](http://localhost:3001/api/docs) *(com o servidor rodando)*
+- [Swagger da API](http://localhost:3001/api/docs) _(com o servidor rodando)_

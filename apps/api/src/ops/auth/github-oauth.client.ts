@@ -135,6 +135,43 @@ export class GithubOAuthClient {
     }
   }
 
+  /**
+   * Revalida o pertencimento sem o token do operador, com um token da
+   * organização (`OPS_GITHUB_ORG_TOKEN`, só leitura de membros).
+   *
+   * `null` quando não dá para saber — token não configurado ou GitHub
+   * inacessível —, e quem chama decide. `false` só com resposta explícita de que
+   * o login não é membro.
+   */
+  async isOrgMemberByLogin(login: string): Promise<boolean | null> {
+    const orgToken = this.config.get<string>('OPS_GITHUB_ORG_TOKEN');
+    if (!orgToken) return null;
+
+    const org = encodeURIComponent(this.organization);
+    try {
+      const response = await this.fetchWithTimeout(
+        `${GITHUB_API_URL}/orgs/${org}/members/${encodeURIComponent(login)}`,
+        {
+          headers: {
+            Accept: 'application/vnd.github+json',
+            Authorization: `Bearer ${orgToken}`,
+            'X-GitHub-Api-Version': '2022-11-28',
+            'User-Agent': 'financial-vellun-ops',
+          },
+          redirect: 'manual',
+        },
+      );
+      // 204: membro. 404: não é membro. 302: o token não enxerga os membros
+      // da organização — configuração errada, não prova de nada.
+      if (response.status === 204) return true;
+      if (response.status === 404) return false;
+      this.logger.warn(`Checagem de membro da organização respondeu ${response.status}`);
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
   private async apiGet<T>(path: string, token: string): Promise<T> {
     const response = await this.fetchWithTimeout(`${GITHUB_API_URL}${path}`, {
       headers: {

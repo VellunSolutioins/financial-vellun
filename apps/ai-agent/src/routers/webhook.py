@@ -53,18 +53,43 @@ def _schedule(coro) -> None:
     task.add_done_callback(_log_exc)
 
 
+async def _read_limited_body(request: Request, max_bytes: int) -> bytes:
+    """Lê o corpo sem passar de ``max_bytes``, antes de validar a assinatura.
+
+    ``request.body()`` carregava o corpo inteiro na memória, qualquer que fosse
+    o tamanho, e só então a assinatura era conferida: tráfego não autenticado
+    decidia quanta memória o processo alocava. Um ``Content-Length`` declarado
+    acima do limite é recusado sem ler nada; sem ele (chunked), a leitura para
+    no primeiro pedaço que ultrapassa.
+    """
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > max_bytes:
+        metrics.incr("webhook_body_too_large")
+        raise HTTPException(status_code=413, detail="Corpo da requisição grande demais")
+
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > max_bytes:
+            metrics.incr("webhook_body_too_large")
+            raise HTTPException(status_code=413, detail="Corpo da requisição grande demais")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def _verify_signature(raw_body: bytes, signature: str | None) -> bool:
     """Valida assinatura HMAC-SHA256.
 
     A Meta envia ``X-Hub-Signature-256: sha256=<hex>`` calculada sobre o corpo
-    bruto com o **App Secret**. Sem secret configurado, aceita (dev/simulado).
+    bruto com o **App Secret**. Sem secret, recusa — exceto em ambiente local
+    com ``WEBHOOK_ALLOW_UNSIGNED=true``, para simular mensagens.
     """
     if not settings.whatsapp_webhook_secret:
-        if settings.is_production:
-            # Em produção o secret é obrigatório (§13/Etapa 5).
-            logger.error("WHATSAPP_WEBHOOK_SECRET ausente em produção")
-            return False
-        return True
+        if settings.is_local and settings.webhook_allow_unsigned:
+            return True
+        logger.error("WHATSAPP_WEBHOOK_SECRET ausente: webhook recusado")
+        return False
     if not signature:
         return False
     expected = hmac.new(
@@ -132,7 +157,7 @@ async def receive_whatsapp(
     x_webhook_signature: str | None = Header(default=None),
 ) -> dict:
     started = time.monotonic()
-    raw_body = await request.body()
+    raw_body = await _read_limited_body(request, settings.webhook_max_body_bytes)
 
     # `X-Hub-Signature-256` é o header oficial da Meta; mantemos o
     # `X-Webhook-Signature` por compatibilidade com o formato simulado.

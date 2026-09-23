@@ -279,10 +279,7 @@ export default function DashboardPage() {
                 <CartesianGrid strokeDasharray="3 3" vertical={false} />
                 <XAxis dataKey="day" tick={{ fontSize: 10 }} interval={1} />
                 <YAxis tick={{ fontSize: 11 }} width={48} />
-                <Tooltip
-                  formatter={tooltipCurrency}
-                  labelFormatter={(d) => `Dia ${d}`}
-                />
+                <Tooltip formatter={tooltipCurrency} labelFormatter={(d) => `Dia ${d}`} />
                 <Bar dataKey="income" name="Receitas" fill="#10b981" radius={[2, 2, 0, 0]} />
                 <Bar dataKey="expense" name="Despesas" fill="#ef4444" radius={[2, 2, 0, 0]} />
               </BarChart>
