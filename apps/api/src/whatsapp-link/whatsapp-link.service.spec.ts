@@ -97,12 +97,35 @@ describe('WhatsappLinkService', () => {
       expect(created.codeHash).not.toContain(challenge.code);
     });
 
-    it('sem número do bot configurado, devolve o código sem link', async () => {
+    it('fora de produção, sem número do bot, devolve o código sem link', async () => {
       const { prisma, service } = createService('');
       prisma.user.findUnique.mockResolvedValue({ id: 'user-1', phone: '(19) 99999-9999' });
 
       const challenge = await service.startVerification('user-1', {});
       expect(challenge.waLink).toBeNull();
+    });
+
+    it('em produção, sem número do bot, o boot falha', () => {
+      // A tela sem link nem QR code é uma regressão de conversão no cadastro:
+      // o usuário teria que achar o contato do bot sozinho. Um `warn` na subida
+      // não segura isso — some no log e ninguém abre chamado, só desiste.
+      const anterior = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+      try {
+        expect(() => createService('')).toThrow(/WHATSAPP_BOT_NUMBER/);
+      } finally {
+        process.env.NODE_ENV = anterior;
+      }
+    });
+
+    it('em produção, com o número configurado, o boot segue', () => {
+      const anterior = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+      try {
+        expect(() => createService('+55 (11) 90000-0000')).not.toThrow();
+      } finally {
+        process.env.NODE_ENV = anterior;
+      }
     });
 
     it('trocar um número já verificado exige a senha atual', async () => {

@@ -70,10 +70,23 @@ export class WhatsappLinkService {
   ) {
     const digits = (config.get<string>('WHATSAPP_BOT_NUMBER') ?? '').replace(/\D/g, '');
     this.botNumber = digits || null;
+
+    // Em produção, configuração faltando **derruba o boot**. Sem o número, a
+    // tela de verificação perde o botão e o QR code e sobra o texto "envie esta
+    // mensagem para o nosso WhatsApp" — o usuário precisa achar o contato
+    // sozinho, no meio do cadastro. Ninguém abre um chamado por isso: desiste.
+    // Um `warn` na subida não segura essa regressão, porque some no log.
+    //
+    // Fora de produção o aviso basta: rodar a stack local sem número de bot é
+    // legítimo, e não há cadastro real em jogo.
     if (!this.botNumber) {
-      this.logger.warn(
-        'WHATSAPP_BOT_NUMBER não configurado: a tela de verificação não terá link nem QR code',
-      );
+      const mensagem =
+        'WHATSAPP_BOT_NUMBER não configurado: a tela de verificação fica sem link ' +
+        'wa.me e sem QR code';
+      if (process.env.NODE_ENV === 'production') {
+        throw new Error(`${mensagem}. Defina o número do bot (só dígitos, com DDI).`);
+      }
+      this.logger.warn(mensagem);
     }
   }
 

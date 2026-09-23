@@ -84,26 +84,27 @@ lê este arquivo (`env_file`) e o `pnpm db:up` falha sem ele.
 
 **API** (`apps/api/.env`):
 
-| Variável                                                               | Descrição                                                                                                    |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `DATABASE_URL`                                                         | Conexão com o PostgreSQL. **Porta `5433`** no host (o compose mapeia `5433:5432`)                            |
-| `JWT_SECRET`                                                           | Segredo dos access tokens (≥ 32 chars)                                                                       |
-| `JWT_REFRESH_SECRET`                                                   | Segredo dos refresh tokens (≥ 32 chars)                                                                      |
-| `API_PORT`                                                             | Porta da API (padrão `3001`; `PORT` tem precedência, usado no Railway)                                       |
-| `INTERNAL_API_KEY`                                                     | Chave antiga compartilhada com o agente — **idêntica** nos dois `.env`; substituída pelas chaves por direção |
-| `INTERNAL_API_KEY_AGENT_TO_API` / `INTERNAL_API_KEY_API_TO_AGENT`      | Uma chave por direção da comunicação interna — **idênticas** nos dois `.env`                                 |
-| `WEB_URL`                                                              | Origem do frontend (CORS e links). Local: `http://localhost:3000`                                            |
-| `AI_AGENT_URL`                                                         | Base do agente (boas-vindas por WhatsApp no cadastro)                                                        |
-| `BILLING_ENFORCEMENT_ENABLED`                                          | `false` = não bloqueia usuários sem assinatura (útil em dev)                                                 |
-| `ASAAS_API_URL` / `ASAAS_API_KEY` / `ASAAS_WEBHOOK_TOKEN`              | Gateway de pagamento (sandbox em dev)                                                                        |
-| `BILLING_CALLBACK_BASE_URL`                                            | URL pública para o retorno do checkout (o Asaas recusa `localhost`)                                          |
-| `METRICS_TOKEN`                                                        | Bearer do `/metrics` — mesmo valor no agente. Sem ele o endpoint fica fechado                                |
-| `LOKI_PUSH_URL`                                                        | Envio de logs ao Alloy. Vazio em dev (sem Alloy)                                                             |
-| `OPS_JWT_SECRET`                                                       | Sessão do painel `/ops`. **Precisa ser diferente** de `JWT_SECRET`                                           |
-| `OPS_GITHUB_ORG` / `OPS_GITHUB_CLIENT_ID` / `OPS_GITHUB_CLIENT_SECRET` | OAuth App do GitHub para login de operadores                                                                 |
-| `OPS_GITHUB_CALLBACK_URL` / `API_URL`                                  | Callback do OAuth (vazio → `API_URL` + `/ops/auth/github/callback`)                                          |
-| `OPS_BOOTSTRAP_ADMIN_GITHUB_LOGIN`                                     | Login GitHub do **primeiro** `ops_admin` (ver [Painel de operações](#painel-de-operações-ops))               |
-| `OPS_GRAFANA_URL` / `OPS_GRAFANA_LOKI_DATASOURCE_UID`                  | Links do painel para o Grafana. Vazios desligam a seção                                                      |
+| Variável                                                               | Descrição                                                                                                                                                     |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                                                         | Conexão com o PostgreSQL. **Porta `5433`** no host (o compose mapeia `5433:5432`)                                                                             |
+| `JWT_SECRET`                                                           | Segredo dos access tokens (≥ 32 chars)                                                                                                                        |
+| `JWT_REFRESH_SECRET`                                                   | Segredo dos refresh tokens (≥ 32 chars)                                                                                                                       |
+| `API_PORT`                                                             | Porta da API (padrão `3001`; `PORT` tem precedência, usado no Railway)                                                                                        |
+| `INTERNAL_API_KEY`                                                     | Chave antiga compartilhada com o agente — **idêntica** nos dois `.env`; substituída pelas chaves por direção                                                  |
+| `INTERNAL_API_KEY_AGENT_TO_API` / `INTERNAL_API_KEY_API_TO_AGENT`      | Uma chave por direção da comunicação interna — **idênticas** nos dois `.env`                                                                                  |
+| `WEB_URL`                                                              | Origem do frontend (CORS e links). Local: `http://localhost:3000`                                                                                             |
+| `AI_AGENT_URL`                                                         | Base do agente (boas-vindas por WhatsApp no cadastro)                                                                                                         |
+| `WHATSAPP_BOT_NUMBER`                                                  | Número do bot, **só dígitos com DDI** (`5511999999999`). Monta o link `wa.me` e o QR code da verificação. **Obrigatório em produção**: sem ele a API não sobe |
+| `BILLING_ENFORCEMENT_ENABLED`                                          | `false` = não bloqueia usuários sem assinatura (útil em dev)                                                                                                  |
+| `ASAAS_API_URL` / `ASAAS_API_KEY` / `ASAAS_WEBHOOK_TOKEN`              | Gateway de pagamento (sandbox em dev)                                                                                                                         |
+| `BILLING_CALLBACK_BASE_URL`                                            | URL pública para o retorno do checkout (o Asaas recusa `localhost`)                                                                                           |
+| `METRICS_TOKEN`                                                        | Bearer do `/metrics` — mesmo valor no agente. Sem ele o endpoint fica fechado                                                                                 |
+| `LOKI_PUSH_URL`                                                        | Envio de logs ao Alloy. Vazio em dev (sem Alloy)                                                                                                              |
+| `OPS_JWT_SECRET`                                                       | Sessão do painel `/ops`. **Precisa ser diferente** de `JWT_SECRET`                                                                                            |
+| `OPS_GITHUB_ORG` / `OPS_GITHUB_CLIENT_ID` / `OPS_GITHUB_CLIENT_SECRET` | OAuth App do GitHub para login de operadores                                                                                                                  |
+| `OPS_GITHUB_CALLBACK_URL` / `API_URL`                                  | Callback do OAuth (vazio → `API_URL` + `/ops/auth/github/callback`)                                                                                           |
+| `OPS_BOOTSTRAP_ADMIN_GITHUB_LOGIN`                                     | Login GitHub do **primeiro** `ops_admin` (ver [Painel de operações](#painel-de-operações-ops))                                                                |
+| `OPS_GRAFANA_URL` / `OPS_GRAFANA_LOKI_DATASOURCE_UID`                  | Links do painel para o Grafana. Vazios desligam a seção                                                                                                       |
 
 O produto (web + WhatsApp) funciona sem Asaas, OAuth do GitHub e Grafana
 configurados; só o checkout e o painel `/ops` dependem deles.
