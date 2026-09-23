@@ -10,8 +10,14 @@
 # comentado em `infra/observability/alloy/config.alloy`.
 #
 # Variáveis que este serviço PRECISA ter:
-#   WORKER_METRICS_PORT=8011     ← porta fixa; o Alloy scrapa endereço fixo
+#   WORKER_METRICS_PORT=8011     ← porta que o worker escuta (health + metrics)
+#   PORT=8011                    ← MESMO valor: é onde o Railway sonda o health
 #   RUN_CONSUMERS_IN_API         ← irrelevante aqui (o entrypoint já é o worker)
+#
+# Além dessas, o worker precisa de **todas** as variáveis do serviço HTTP —
+# inclusive WHATSAPP_WEBHOOK_SECRET, que ele nunca usa. A validação de
+# configuração roda na importação de `src.config`, não no entrypoint: fora do
+# ambiente local, faltar qualquer uma delas impede a subida.
 
 [build]
 builder = "DOCKERFILE"
@@ -22,6 +28,14 @@ startCommand = "python -m src.worker"
 
 # Readiness do worker = broker + consumers + flusher + Redis. Um worker que não
 # consegue consumir não deve substituir o que estava rodando.
+#
+# **Exige `PORT=8011` nas variáveis do serviço**, igual a `WORKER_METRICS_PORT`.
+# O Railway sonda este caminho na porta `$PORT`, e quem serve HTTP aqui é o
+# servidor mínimo de observabilidade do worker, que escuta em
+# `WORKER_METRICS_PORT` — não em `PORT`. Com as duas diferentes, o health check
+# bate numa porta onde ninguém atende e o deploy nunca fica saudável, mesmo com
+# o worker consumindo normalmente. O mesmo vale para o `HEALTHCHECK` do
+# Dockerfile, que também usa `PORT`.
 healthcheckPath = "/health/ready"
 healthcheckTimeout = 60
 
