@@ -18,7 +18,14 @@ dockerfilePath = "Dockerfile.ai-agent"
 
 [deploy]
 # O publisher sobe sempre, mesmo sem consumers: sem ele o webhook não responde 202.
-startCommand = "uvicorn src.main:app --host :: --port ${PORT:-8010}"
+#
+# `0.0.0.0`, **não** `::`. Parece contraintuitivo numa rede privada IPv6, mas o
+# `asyncio` liga `IPV6_V6ONLY` em todo socket IPv6 que cria: com `--host ::` o
+# uvicorn passa a **recusar IPv4**, e o webhook público da Meta chega por IPv4.
+# O ambiente deste projeto é dual-stack (criado depois de 2025-10-16), então
+# IPv4 atende tanto o webhook quanto o scrape interno. Ver a seção "IPv6 na rede
+# privada" em docs/observability.md antes de mexer aqui.
+startCommand = "uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8010}"
 
 # Readiness, não liveness: o deploy só recebe tráfego quando o agente consegue
 # publicar no broker. Com o RabbitMQ fora, a versão nova não entra no lugar da
