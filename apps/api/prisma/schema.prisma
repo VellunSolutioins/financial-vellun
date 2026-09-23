@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
   // Caminho da aplicação: pode passar por pooler (PgBouncer em transaction
   // mode), e por isso carrega `pgbouncer=true`, `connection_limit` e
   // `pool_timeout` — ver docs/connection-budget.md.
@@ -166,12 +166,16 @@ enum OpsFailureStatus {
 // ── Core ──────────────────────────────────────────────────────────────────────
 
 model User {
-  id           String      @id @default(uuid())
-  name         String
-  email        String      @unique
-  phone        String?
-  passwordHash String      @map("password_hash")
-  profileType  ProfileType @map("profile_type")
+  spendingGoals SpendingGoal[]
+  reminders     Reminder[]
+  agendaEvents  AgendaEvent[]
+  notes         Note[]
+  id            String         @id @default(uuid())
+  name          String
+  email         String         @unique
+  phone         String?
+  passwordHash  String         @map("password_hash")
+  profileType   ProfileType    @map("profile_type")
 
   // Endereço de cobrança (usado pelo provedor de pagamentos). Nullable para não
   // quebrar usuários anteriores à introdução do campo; obrigatório em novos
@@ -306,6 +310,7 @@ model BusinessProfile {
 // ── Financial ─────────────────────────────────────────────────────────────────
 
 model Account {
+  creditCard     CreditCard?
   id             String      @id @default(uuid())
   userId         String      @map("user_id")
   name           String
@@ -325,17 +330,18 @@ model Account {
 }
 
 model Category {
-  id          String          @id @default(uuid())
-  userId      String?         @map("user_id")
-  name        String
-  type        TransactionType
-  color       String?
-  icon        String?
-  costCenter  String?         @map("cost_center")
-  profileType ProfileType     @map("profile_type")
-  isDefault   Boolean         @default(false) @map("is_default")
-  createdAt   DateTime        @default(now()) @map("created_at")
-  updatedAt   DateTime        @updatedAt @map("updated_at")
+  spendingGoals SpendingGoal[]
+  id            String          @id @default(uuid())
+  userId        String?         @map("user_id")
+  name          String
+  type          TransactionType
+  color         String?
+  icon          String?
+  costCenter    String?         @map("cost_center")
+  profileType   ProfileType     @map("profile_type")
+  isDefault     Boolean         @default(false) @map("is_default")
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
 
   user         User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
   transactions Transaction[]
@@ -345,22 +351,26 @@ model Category {
 }
 
 model Transaction {
-  id              String            @id @default(uuid())
-  userId          String            @map("user_id")
-  accountId       String            @map("account_id")
-  categoryId      String?           @map("category_id")
-  type            TransactionType
-  amount          Decimal           @db.Decimal(15, 2)
-  description     String
-  transactionDate DateTime          @map("transaction_date") @db.Date
-  status          TransactionStatus @default(confirmed)
-  source          TransactionSource @default(manual)
-  rawInput        String?           @map("raw_input")
+  recurrenceType    RecurrenceType    @default(avulso) @map("recurrence_type")
+  seriesId          String?           @map("series_id")
+  installmentNumber Int?              @map("installment_number")
+  installmentTotal  Int?              @map("installment_total")
+  id                String            @id @default(uuid())
+  userId            String            @map("user_id")
+  accountId         String            @map("account_id")
+  categoryId        String?           @map("category_id")
+  type              TransactionType
+  amount            Decimal           @db.Decimal(15, 2)
+  description       String
+  transactionDate   DateTime          @map("transaction_date") @db.Date
+  status            TransactionStatus @default(confirmed)
+  source            TransactionSource @default(manual)
+  rawInput          String?           @map("raw_input")
   // Chave de idempotencia da origem (ex.: jobId do pipeline do WhatsApp).
   // Um retry apos timeout devolve o lancamento existente em vez de duplicar.
-  idempotencyKey  String?           @unique @map("idempotency_key")
-  createdAt       DateTime          @default(now()) @map("created_at")
-  updatedAt       DateTime          @updatedAt @map("updated_at")
+  idempotencyKey    String?           @unique @map("idempotency_key")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
 
   user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   account  Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
@@ -368,6 +378,8 @@ model Transaction {
 
   aiExtractedTransactions AiExtractedTransaction[]
 
+  @@index([seriesId])
+  @@index([userId, recurrenceType, transactionDate])
   // Todo acesso a lançamento é escopado por usuário — não existe consulta que
   // varra a tabela inteira. Por isso os índices úteis começam em `userId`, e os
   // de coluna única que existiam antes (`userId`, `transactionDate`, `type`)
@@ -761,4 +773,100 @@ model OpsFailedMessage {
   @@index([phoneHash])
   @@index([retentionUntil])
   @@map("ops_failed_messages")
+}
+
+enum RecurrenceType {
+  avulso
+  fixo
+  parcelado
+}
+
+enum ReminderStatus {
+  pending
+  paid
+}
+
+model CreditCard {
+  id          String   @id @default(uuid())
+  accountId   String   @unique @map("account_id")
+  brand       String?
+  color       String?
+  creditLimit Decimal? @map("credit_limit") @db.Decimal(15, 2)
+  /// Dia do mês em que a fatura vence (1–28).
+  dueDay      Int      @map("due_day")
+  isPrimary   Boolean  @default(false) @map("is_primary")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@map("credit_cards")
+}
+
+model Reminder {
+  id                String         @id @default(uuid())
+  userId            String         @map("user_id")
+  title             String
+  amount            Decimal?       @db.Decimal(15, 2)
+  dueDate           DateTime       @map("due_date") @db.Date
+  isRecurrent       Boolean        @default(false) @map("is_recurrent")
+  /// Só relevante quando isRecurrent=true. Sem ela, repete indefinidamente.
+  recurrenceEndDate DateTime?      @map("recurrence_end_date") @db.Date
+  status            ReminderStatus @default(pending)
+  createdAt         DateTime       @default(now()) @map("created_at")
+  updatedAt         DateTime       @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("reminders")
+}
+
+model AgendaEvent {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  title       String
+  description String?
+  eventDate   DateTime @map("event_date") @db.Date
+  /// Formato "HH:mm". Ausente = compromisso do dia todo.
+  eventTime   String?  @map("event_time")
+  color       String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("agenda_events")
+}
+
+model Note {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  title     String
+  content   String
+  isPinned  Boolean  @default(false) @map("is_pinned")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("notes")
+}
+
+model SpendingGoal {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  categoryId String   @map("category_id")
+  amount     Decimal  @db.Decimal(15, 2)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, categoryId])
+  @@index([userId])
+  @@map("spending_goals")
 }

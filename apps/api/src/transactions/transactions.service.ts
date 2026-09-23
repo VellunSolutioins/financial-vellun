@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import {
   BadRequestException,
   ForbiddenException,
@@ -10,7 +11,7 @@ import { AccountsService } from '../accounts/accounts.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { ListTransactionsDto } from './dto/list-transactions.dto';
-import { parseDateOnly, startOfDayUtc, endOfDayUtc } from '../common/date.util';
+import { parseDateOnly, startOfDayUtc, endOfDayUtc, addMonthsUtc } from '../common/date.util';
 
 @Injectable()
 export class TransactionsService {
@@ -28,6 +29,7 @@ export class TransactionsService {
       accountId,
       status,
       source,
+      recurrenceType,
       search,
       page = 1,
       limit = 10,
@@ -42,6 +44,7 @@ export class TransactionsService {
       ...(accountId && { accountId }),
       ...(status && { status }),
       ...(source && { source }),
+      ...(recurrenceType && { recurrenceType }),
       ...(search && { description: { contains: search, mode: 'insensitive' } }),
       ...(periodStart || periodEnd
         ? {
@@ -96,26 +99,69 @@ export class TransactionsService {
   async create(userId: string, dto: CreateTransactionDto) {
     await this.validateOwnership(userId, dto.accountId, dto.categoryId);
 
-    const transaction = await this.prisma.transaction.create({
-      data: {
-        userId,
-        accountId: dto.accountId,
-        categoryId: dto.categoryId,
-        type: dto.type,
-        amount: dto.amount,
-        description: dto.description,
-        transactionDate: parseDateOnly(dto.transactionDate),
-        status: dto.status ?? 'confirmed',
-        source: 'manual',
-      },
-      include: { category: true, account: true },
-    });
+    const recurrenceType = dto.recurrenceType ?? 'avulso';
+    const firstDate = parseDateOnly(dto.transactionDate);
+    const baseData = {
+      userId,
+      accountId: dto.accountId,
+      categoryId: dto.categoryId || null,
+      type: dto.type,
+      amount: dto.amount,
+      description: dto.description,
+      source: 'manual' as const,
+      recurrenceType,
+    };
 
-    if (transaction.status === 'confirmed') {
-      await this.accountsService.recalculateBalance(dto.accountId);
+    let occurrences: number;
+    if (recurrenceType === 'parcelado') {
+      if (!dto.installments || dto.installments < 2 || dto.installments > 72) {
+        throw new BadRequestException('Número de parcelas inválido (mínimo 2, máximo 72)');
+      }
+      occurrences = dto.installments;
+    } else if (recurrenceType === 'fixo') {
+      if (!dto.recurrenceMonths || dto.recurrenceMonths < 2 || dto.recurrenceMonths > 120) {
+        throw new BadRequestException('Quantidade de meses inválida (mínimo 2, máximo 120)');
+      }
+      occurrences = dto.recurrenceMonths;
+    } else {
+      occurrences = 1;
     }
 
-    return transaction;
+    const seriesId = occurrences > 1 ? randomUUID() : null;
+
+    // Em "parcelado" o usuário informa o valor TOTAL da compra e o backend
+    // divide; em "fixo" o valor é o de cada ocorrência (uma mensalidade de
+    // R$ 200 por 12 meses são 12 lançamentos de R$ 200, não de R$ 16,67).
+    const amountFor =
+      recurrenceType === 'parcelado'
+        ? installmentAmounts(dto.amount, occurrences)
+        : () => dto.amount;
+
+    const [firstTransaction] = await this.prisma.$transaction(
+      Array.from({ length: occurrences }, (_, i) =>
+        this.prisma.transaction.create({
+          data: {
+            ...baseData,
+            amount: amountFor(i),
+            transactionDate: i === 0 ? firstDate : addMonthsUtc(firstDate, i),
+            // A primeira ocorrência respeita o status escolhido; as futuras
+            // nascem pendentes, já que ainda não aconteceram.
+            status: i === 0 ? (dto.status ?? 'confirmed') : 'pending',
+            seriesId,
+            installmentNumber: seriesId ? i + 1 : null,
+            installmentTotal: seriesId ? occurrences : null,
+          },
+          include: {
+            category: true,
+            account: true,
+          },
+        }),
+      ),
+    );
+
+    await this.accountsService.recalculateBalance(dto.accountId);
+
+    return firstTransaction;
   }
 
   async update(userId: string, id: string, dto: UpdateTransactionDto) {
@@ -191,4 +237,11 @@ export class TransactionsService {
       }
     }
   }
+}
+
+export function installmentAmounts(total: number, count: number): (index: number) => number {
+  const totalCents = Math.round(total * 100);
+  const baseCents = Math.floor(totalCents / count);
+  const remainderCents = totalCents - baseCents * count;
+  return (index) => (index === count - 1 ? baseCents + remainderCents : baseCents) / 100;
 }

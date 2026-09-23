@@ -1,6 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { startOfDayUtc, endOfDayUtc, startOfMonthUtc, endOfMonthUtc } from '../common/date.util';
+import {
+  startOfDayUtc,
+  endOfDayUtc,
+  startOfMonthUtc,
+  endOfMonthUtc,
+  todaySaoPaulo,
+  dateOnlyString,
+} from '../common/date.util';
 
 /**
  * Itens de conta a pagar/receber trazidos junto do dashboard empresarial.
@@ -32,10 +39,10 @@ export class DashboardService {
       ? endOfDayUtc(periodEnd)
       : endOfMonthUtc(now.getFullYear(), now.getMonth());
 
-    const [accounts, incomeAgg, expenseAgg, expensesByCategory, recentTransactions] =
+    const [accounts, incomeAgg, expenseAgg, expensesByCategory, recentTransactions, upcomingBills] =
       await Promise.all([
         this.prisma.account.findMany({
-          where: { userId, isActive: true },
+          where: { userId, isActive: true, type: { not: 'credit_card' } },
           select: { currentBalance: true },
         }),
         this.prisma.transaction.aggregate({
@@ -73,6 +80,17 @@ export class DashboardService {
           orderBy: { createdAt: 'desc' },
           take: 5,
         }),
+        this.prisma.transaction.findMany({
+          where: {
+            userId,
+            type: 'expense',
+            status: 'pending',
+            transactionDate: { gte: startOfDayUtc(dateOnlyString(todaySaoPaulo())) },
+          },
+          include: { category: true, account: true },
+          orderBy: { transactionDate: 'asc' },
+          take: 5,
+        }),
       ]);
 
     const totalBalance = accounts.reduce((sum, a) => sum + Number(a.currentBalance), 0);
@@ -104,6 +122,7 @@ export class DashboardService {
       netResult: totalIncome - totalExpense,
       expensesByCategory: expensesByCategoryResult,
       recentTransactions,
+      upcomingBills,
       monthlyComparison,
     };
   }

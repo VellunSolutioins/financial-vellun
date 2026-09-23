@@ -1,9 +1,14 @@
+import { RecurrenceType } from '@prisma/client';
 import { IsDateString, IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { TransactionSource, TransactionStatus, TransactionType } from '@prisma/client';
 import { Type } from 'class-transformer';
 
 export class ListTransactionsDto {
+  @IsOptional()
+  @IsEnum(RecurrenceType)
+  recurrenceType?: RecurrenceType;
+
   @ApiProperty({ required: false })
   @IsOptional()
   @IsDateString()

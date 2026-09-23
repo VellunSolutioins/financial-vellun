@@ -1,5 +1,6 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
+
 import { apiClient } from '@/lib/api-client';
 
 export interface Transaction {
@@ -14,6 +15,10 @@ export interface Transaction {
   accountId: string;
   category?: { id: string; name: string };
   account?: { id: string; name: string };
+  recurrenceType: 'avulso' | 'fixo' | 'parcelado';
+  seriesId?: string | null;
+  installmentNumber?: number | null;
+  installmentTotal?: number | null;
   createdAt: string;
 }
 
@@ -26,6 +31,7 @@ export interface TransactionFilters {
   status?: string;
   source?: string;
   search?: string;
+  recurrenceType?: string;
   periodStart?: string;
   periodEnd?: string;
   sortBy?: string;
@@ -45,7 +51,7 @@ interface TransactionsResponse {
 
 export function useTransactions(filters: TransactionFilters) {
   const [data, setData] = useState<Transaction[]>([]);
-  const [meta, setMeta] = useState({ total: 0, page: 1, limit: 10, total_pages: 1 });
+  const [meta, setMeta] = useState({ total: 0, page: 1, limit: 20, total_pages: 1 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
