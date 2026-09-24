@@ -173,8 +173,15 @@ export class TransactionsService {
   async update(userId: string, id: string, dto: UpdateTransactionDto) {
     const existing = await this.findOne(userId, id);
 
-    if (dto.accountId !== undefined || dto.categoryId !== undefined) {
-      await this.validateOwnership(userId, dto.accountId, dto.categoryId);
+    // A conta só é revalidada quando muda: editar a descrição de um lançamento
+    // de cartão arquivado continua permitido.
+    const accountChanged = dto.accountId !== undefined && dto.accountId !== existing.accountId;
+    if (accountChanged || dto.categoryId !== undefined) {
+      await this.validateOwnership(
+        userId,
+        accountChanged ? dto.accountId : undefined,
+        dto.categoryId,
+      );
     }
 
     const categoryId = dto.categoryId === '' ? null : dto.categoryId;
@@ -228,7 +235,10 @@ export class TransactionsService {
     return extractions;
   }
 
-  /** Conta e categoria precisam ser do usuário. Usado também pelas recorrências. */
+  /**
+   * Conta e categoria precisam ser do usuário, e a conta precisa estar ativa —
+   * cartão arquivado não recebe compra. Usado também pelas recorrências.
+   */
   async validateOwnership(userId: string, accountId?: string, categoryId?: string) {
     if (accountId !== undefined) {
       if (!accountId) throw new BadRequestException('Conta inválida');
@@ -236,6 +246,7 @@ export class TransactionsService {
       if (!account || account.userId !== userId) {
         throw new BadRequestException('Conta inválida');
       }
+      assertAccountAcceptsEntries(account);
     }
     if (categoryId) {
       const category = await this.prisma.category.findUnique({ where: { id: categoryId } });
@@ -244,6 +255,16 @@ export class TransactionsService {
       }
     }
   }
+}
+
+/** Conta desativada ou cartão arquivado não recebem lançamento novo. */
+export function assertAccountAcceptsEntries(account: { isActive: boolean; type: string }) {
+  if (account.isActive) return;
+  throw new BadRequestException(
+    account.type === 'credit_card'
+      ? 'Cartão arquivado não recebe novas compras'
+      : 'Conta desativada não recebe novos lançamentos',
+  );
 }
 
 export function installmentAmounts(total: number, count: number): (index: number) => number {

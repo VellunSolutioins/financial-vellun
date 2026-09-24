@@ -1,6 +1,6 @@
-import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { IsIn, IsOptional, IsString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { AccountType } from '@prisma/client';
+import { REGULAR_ACCOUNT_TYPES, RegularAccountType } from '../account-types';
 
 export class UpdateAccountDto {
   @ApiProperty({ required: false })
@@ -8,8 +8,8 @@ export class UpdateAccountDto {
   @IsString()
   name?: string;
 
-  @ApiProperty({ enum: AccountType, required: false })
+  @ApiProperty({ enum: REGULAR_ACCOUNT_TYPES, required: false })
   @IsOptional()
-  @IsEnum(AccountType)
-  type?: AccountType;
+  @IsIn(REGULAR_ACCOUNT_TYPES, { message: 'Tipo de conta inválido' })
+  type?: RegularAccountType;
 }

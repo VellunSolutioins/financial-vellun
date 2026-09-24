@@ -11,6 +11,8 @@ import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
 import type { Transaction } from '@/hooks/useTransactions';
+import { useFinancialResources } from '@/hooks/useFinancialResources';
+import { ResourceSelect } from '@/components/resources/ResourceSelect';
 import { CURRENCY_REGEX, currencyToNumber, formatCurrencyInput, maskCurrency } from '@/lib/masks';
 import { cn } from '@/lib/utils';
 
@@ -23,7 +25,7 @@ const schema = z
       .regex(CURRENCY_REGEX, 'Valor inválido')
       .refine((v) => currencyToNumber(v) > 0, 'Valor deve ser positivo'),
     description: z.string().min(1, 'Descrição obrigatória'),
-    accountId: z.string().min(1, 'Conta obrigatória'),
+    accountId: z.string().min(1, 'Conta ou cartão obrigatório'),
     categoryId: z.string().optional(),
     transactionDate: z.string().min(1, 'Data obrigatória'),
     recurrenceType: z.enum(['avulso', 'fixo', 'parcelado']),
@@ -71,7 +73,7 @@ interface Props {
 }
 
 export function TransactionForm({ transaction, fixedOnly = false, onSuccess, onCancel }: Props) {
-  const [accounts, setAccounts] = useState<{ id: string; name: string }[]>([]);
+  const { data: resources } = useFinancialResources();
   const [categories, setCategories] = useState<{ id: string; name: string; type: string }[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const toast = useToast();
@@ -127,16 +129,16 @@ export function TransactionForm({ transaction, fixedOnly = false, onSuccess, onC
   })();
 
   useEffect(() => {
-    Promise.all([
-      apiClient.get<{ id: string; name: string }[]>('/accounts'),
-      apiClient.get<{ id: string; name: string; type: string }[]>('/categories'),
-    ])
-      .then(([acc, cat]) => {
-        setAccounts(acc);
-        setCategories(cat);
-      })
+    apiClient
+      .get<{ id: string; name: string; type: string }[]>('/categories')
+      .then(setCategories)
       .catch(console.error);
   }, []);
+
+  // As opções chegam depois do primeiro render: reaplica a seleção quando existem.
+  useEffect(() => {
+    if (resources && transaction) setValue('accountId', transaction.accountId);
+  }, [resources, transaction, setValue]);
 
   const onSubmit = async (data: FormData) => {
     setSubmitting(true);
@@ -251,15 +253,14 @@ export function TransactionForm({ transaction, fixedOnly = false, onSuccess, onC
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1">
-          <Label>Conta</Label>
-          <Select {...register('accountId')}>
-            <option value="">Selecione...</option>
-            {accounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </Select>
+          <Label htmlFor="transaction-resource">Conta ou cartão</Label>
+          <ResourceSelect
+            id="transaction-resource"
+            resources={resources}
+            emptyLabel="Selecione..."
+            currentValue={transaction?.accountId}
+            {...register('accountId')}
+          />
           {errors.accountId && (
             <p className="text-xs text-destructive">{errors.accountId.message}</p>
           )}

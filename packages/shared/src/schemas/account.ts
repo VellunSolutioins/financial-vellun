@@ -23,13 +23,13 @@ export const AccountSchema = z.object({
   updated_at: z.coerce.date(),
 });
 
+/** Cartão de crédito não é criado como conta: vai por `/credit-cards`. */
 export const CreateAccountSchema = z.object({
   name: z.string().min(1).max(100),
   type: z.enum([
     AccountType.CHECKING,
     AccountType.SAVINGS,
     AccountType.CASH,
-    AccountType.CREDIT_CARD,
     AccountType.DIGITAL_WALLET,
     AccountType.INVESTMENT,
     AccountType.OTHER,

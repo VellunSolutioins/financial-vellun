@@ -150,12 +150,12 @@ describe('InternalService', () => {
 
     it('listAccounts libera usuário com assinatura', async () => {
       access.canUseProduct.mockResolvedValue({ allowed: true });
-      prisma.account.findMany.mockResolvedValue([{ id: 'a1' }]);
+      prisma.account.findMany.mockResolvedValue([{ id: 'a1', type: 'checking', creditCard: null }]);
 
       const result = await service.listAccounts('u1');
 
       expect(access.canUseProduct).toHaveBeenCalledWith('u1');
-      expect(result).toEqual([{ id: 'a1' }]);
+      expect(result).toEqual([{ id: 'a1', type: 'checking', kind: 'account', cardId: null }]);
     });
 
     it('createTransactionFromAi bloqueia antes de tocar no banco quando sem assinatura', async () => {
@@ -170,17 +170,17 @@ describe('InternalService', () => {
     it('libera listAccounts quando a obrigatoriedade está desligada (rollout)', async () => {
       access.isEnforced.mockReturnValue(false);
       access.canUseProduct.mockResolvedValue({ allowed: false });
-      prisma.account.findMany.mockResolvedValue([{ id: 'a1' }]);
+      prisma.account.findMany.mockResolvedValue([{ id: 'a1', type: 'checking', creditCard: null }]);
 
       const result = await service.listAccounts('u1');
 
-      expect(result).toEqual([{ id: 'a1' }]);
+      expect(result).toEqual([{ id: 'a1', type: 'checking', kind: 'account', cardId: null }]);
       expect(access.canUseProduct).not.toHaveBeenCalled();
     });
 
     it('createTransactionFromAi rejeita conta de outro usuário (userId manipulado)', async () => {
       access.canUseProduct.mockResolvedValue({ allowed: true });
-      prisma.account.findUnique.mockResolvedValue({ id: 'a1', userId: 'outro' });
+      prisma.account.findUnique.mockResolvedValue({ id: 'a1', userId: 'outro', isActive: true });
 
       await expect(
         service.createTransactionFromAi({ userId: 'u1', accountId: 'a1' } as any),
@@ -188,8 +188,36 @@ describe('InternalService', () => {
       expect(prisma.transaction.create).not.toHaveBeenCalled();
     });
 
+    it('createTransactionFromAi recusa compra em cartão arquivado', async () => {
+      prisma.account.findUnique.mockResolvedValue({
+        id: 'a1',
+        userId: 'u1',
+        type: 'credit_card',
+        isActive: false,
+      });
+
+      await expect(
+        service.createTransactionFromAi({ userId: 'u1', accountId: 'a1' } as any),
+      ).rejects.toThrow('Cartão arquivado não recebe novas compras');
+      expect(prisma.transaction.create).not.toHaveBeenCalled();
+    });
+
+    it('listAccounts marca cartões com kind = card e o id da conta interna', async () => {
+      prisma.account.findMany.mockResolvedValue([
+        { id: 'a1', name: 'Itaú', type: 'checking', creditCard: null },
+        { id: 'a2', name: 'Nubank', type: 'credit_card', creditCard: { id: 'c1' } },
+      ]);
+
+      const result = await service.listAccounts('u1');
+
+      expect(result).toEqual([
+        { id: 'a1', name: 'Itaú', type: 'checking', kind: 'account', cardId: null },
+        { id: 'a2', name: 'Nubank', type: 'credit_card', kind: 'card', cardId: 'c1' },
+      ]);
+    });
+
     it('createTransactionFromAi rejeita categoria de outro usuário', async () => {
-      prisma.account.findUnique.mockResolvedValue({ id: 'a1', userId: 'u1' });
+      prisma.account.findUnique.mockResolvedValue({ id: 'a1', userId: 'u1', isActive: true });
       prisma.category.findUnique.mockResolvedValue({ id: 'cat1', userId: 'outro' });
 
       await expect(
@@ -216,7 +244,7 @@ describe('InternalService', () => {
     } as any;
 
     beforeEach(() => {
-      prisma.account.findUnique.mockResolvedValue({ id: 'a1', userId: 'u1' });
+      prisma.account.findUnique.mockResolvedValue({ id: 'a1', userId: 'u1', isActive: true });
     });
 
     it('devolve o lançamento existente sem criar outro quando a chave já foi usada', async () => {

@@ -179,8 +179,14 @@ export class RecurrencesService {
 
   async update(userId: string, seriesId: string, dto: UpdateRecurrenceDto) {
     const future = await this.findFuture(userId, seriesId);
-    if (dto.accountId !== undefined || dto.categoryId !== undefined) {
-      await this.transactionsService.validateOwnership(userId, dto.accountId, dto.categoryId);
+    const accountChanged =
+      dto.accountId !== undefined && future.some((o) => o.accountId !== dto.accountId);
+    if (accountChanged || dto.categoryId !== undefined) {
+      await this.transactionsService.validateOwnership(
+        userId,
+        accountChanged ? dto.accountId : undefined,
+        dto.categoryId,
+      );
     }
 
     const data: Prisma.TransactionUncheckedUpdateManyInput = {

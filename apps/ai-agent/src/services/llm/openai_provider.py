@@ -46,7 +46,10 @@ separador decimal brasileiro (ex.: "47,50" -> 47.5).
 - `description`: descrição curta do lançamento.
 - `category_name`: escolha a categoria mais provável dentre as disponíveis do \
 usuário. Se nenhuma se encaixar com clareza, deixe nulo.
-- `account_name`: conta mencionada, se houver.
+- `account_name`: conta ou cartão mencionado, se houver, com o nome como \
+aparece em "Contas disponíveis" (sem o sufixo "(cartão de crédito)"). Itens \
+com esse sufixo são cartões de crédito: use-os só quando o usuário indicar que \
+pagou no cartão. Sem menção, deixe nulo.
 - `transaction_date`: data em formato ISO (YYYY-MM-DD). Resolva datas \
 relativas ("hoje", "ontem") usando a data atual fornecida.
 - `confidence`: 0.0 a 1.0, sua confiança na extração.

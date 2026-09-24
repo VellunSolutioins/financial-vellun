@@ -13,6 +13,8 @@ import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
 import { CURRENCY_REGEX, currencyToNumber, maskCurrency } from '@/lib/masks';
+import { useAuth } from '@/contexts/auth-context';
+import Link from 'next/link';
 
 interface Account {
   id: string;
@@ -24,11 +26,11 @@ interface Account {
   isActive: boolean;
 }
 
+/** Cartão de crédito não é conta: fica na tela de Cartões. */
 const accountTypeLabels: Record<string, string> = {
   checking: 'Conta Corrente',
   savings: 'Poupança',
   cash: 'Dinheiro',
-  credit_card: 'Cartão de Crédito',
   digital_wallet: 'Carteira Digital',
   investment: 'Investimento',
   other: 'Outro',
@@ -36,15 +38,7 @@ const accountTypeLabels: Record<string, string> = {
 
 const schema = z.object({
   name: z.string().min(1, 'Nome obrigatório'),
-  type: z.enum([
-    'checking',
-    'savings',
-    'cash',
-    'credit_card',
-    'digital_wallet',
-    'investment',
-    'other',
-  ]),
+  type: z.enum(['checking', 'savings', 'cash', 'digital_wallet', 'investment', 'other']),
   initialBalance: z.string().regex(CURRENCY_REGEX, 'Valor inválido').optional(),
 });
 type FormData = z.infer<typeof schema>;
@@ -60,6 +54,7 @@ export default function ContasPage() {
   const [editing, setEditing] = useState<Account | null>(null);
   const toast = useToast();
   const confirm = useConfirm();
+  const { user } = useAuth();
 
   const {
     register,
@@ -134,7 +129,18 @@ export default function ContasPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold">Contas</h1>
+        <div>
+          <h1 className="text-2xl font-bold">Contas</h1>
+          {user?.profileType === 'individual' && (
+            <p className="text-sm text-muted-foreground">
+              Cartões de crédito ficam em{' '}
+              <Link href="/app/pessoal/cartoes" className="font-medium underline">
+                Cartões
+              </Link>
+              .
+            </p>
+          )}
+        </div>
         <Button onClick={openNew}>+ Nova conta</Button>
       </div>
 

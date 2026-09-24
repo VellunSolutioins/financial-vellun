@@ -1,106 +1,45 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
-import { AccountsService } from '../accounts/accounts.service';
-import { todaySaoPaulo, startOfMonthUtc, endOfMonthUtc } from '../common/date.util';
+import {
+  dateOnlyString,
+  parseDateOnly,
+  todaySaoPaulo,
+  startOfMonthUtc,
+  endOfMonthUtc,
+} from '../common/date.util';
 
+import { healthFromPercentage, incomeHealthFromPercentage } from './card-health';
 import { CreateCreditCardDto } from './dto/create-credit-card.dto';
 import { UpdateCreditCardDto } from './dto/update-credit-card.dto';
 
-/** Selos de comprometimento do limite (só aplicável quando há creditLimit). */
-const HEALTH_BANDS = [
-  {
-    max: 20,
-    key: 'tranquilo',
-    emoji: '🟢',
-    label: 'Tranquilo',
-    message: 'Você está usando pouco do seu limite.',
-  },
-  {
-    max: 40,
-    key: 'saudavel',
-    emoji: '🔵',
-    label: 'Saudável',
-    message: 'Boa margem disponível para seus gastos.',
-  },
-  {
-    max: 60,
-    key: 'atencao',
-    emoji: '🟡',
-    label: 'Atenção',
-    message: 'Seu limite já está parcialmente comprometido.',
-  },
-  {
-    max: 80,
-    key: 'apertado',
-    emoji: '🟠',
-    label: 'Apertado',
-    message: 'Fique de olho nos próximos gastos.',
-  },
-  {
-    max: 99,
-    key: 'no_limite',
-    emoji: '🔴',
-    label: 'No Limite',
-    message: 'Seu limite está quase comprometido.',
-  },
-] as const;
+type CardWithAccount = Prisma.CreditCardGetPayload<{ include: { account: true } }>;
 
-function healthFromPercentage(percentage: number): {
-  key: string;
-  emoji: string;
-  label: string;
-  message: string;
-} {
-  for (const band of HEALTH_BANDS) {
-    if (percentage <= band.max) return band;
-  }
-  return {
-    key: 'limite_atingido',
-    emoji: '🚨',
-    label: 'Limite Atingido',
-    message: 'Seu limite foi alcançado. Evite novos gastos até liberar crédito.',
-  };
-}
-
-/** Selos de comprometimento da fatura total em relação à renda mensal dos lançamentos fixos. */
-const INCOME_HEALTH_BANDS = [
-  { max: 10, key: 'excelente', emoji: '🟢', label: 'Excelente' },
-  { max: 20, key: 'saudavel', emoji: '🔵', label: 'Saudável' },
-  { max: 30, key: 'atencao', emoji: '🟡', label: 'Atenção' },
-  { max: 40, key: 'apertado', emoji: '🟠', label: 'Apertado' },
-  { max: 50, key: 'critico', emoji: '🔴', label: 'Crítico' },
-] as const;
-
-function incomeHealthFromPercentage(percentage: number): {
-  key: string;
-  emoji: string;
-  label: string;
-} {
-  for (const band of INCOME_HEALTH_BANDS) {
-    if (percentage <= band.max) return band;
-  }
-  return { key: 'muito_alto', emoji: '🚨', label: 'Muito Alto' };
+/**
+ * Cartão em configuração pendente: sem fechamento, vencimento ou início do
+ * controle. Cartões legados ficam assim até o usuário configurá-los — nenhuma
+ * data é inventada.
+ */
+export function cardNeedsSetup(card: {
+  closingDay: number | null;
+  dueDay: number | null;
+  invoiceTrackingStart: Date | null;
+}): boolean {
+  return card.closingDay === null || card.dueDay === null || card.invoiceTrackingStart === null;
 }
 
 @Injectable()
 export class CreditCardsService {
-  constructor(
-    private prisma: PrismaService,
-    private accountsService: AccountsService,
-  ) {}
+  constructor(private prisma: PrismaService) {}
 
-  private toCardView(card: {
-    id: string;
-    brand: string | null;
-    color: string | null;
-    creditLimit: import('@prisma/client').Prisma.Decimal | null;
-    dueDay: number;
-    isPrimary: boolean;
-    createdAt: Date;
-    updatedAt: Date;
-    account: { id: string; name: string; currentBalance: import('@prisma/client').Prisma.Decimal };
-  }) {
+  private toCardView(card: CardWithAccount) {
     const creditLimit = card.creditLimit ? Number(card.creditLimit) : null;
     const currentInvoice = Math.max(0, -Number(card.account.currentBalance));
     const available = creditLimit !== null ? Math.max(0, creditLimit - currentInvoice) : null;
@@ -112,7 +51,14 @@ export class CreditCardsService {
       brand: card.brand,
       color: card.color,
       creditLimit,
+      closingDay: card.closingDay,
       dueDay: card.dueDay,
+      invoiceTrackingStart: card.invoiceTrackingStart
+        ? card.invoiceTrackingStart.toISOString().slice(0, 10)
+        : null,
+      paymentAccountId: card.paymentAccountId,
+      needsSetup: cardNeedsSetup(card),
+      isActive: card.account.isActive,
       isPrimary: card.isPrimary,
       currentInvoice,
       available,
@@ -121,13 +67,20 @@ export class CreditCardsService {
     };
   }
 
-  async findAll(userId: string) {
+  /** Cartões ativos; com `includeArchived`, também os arquivados (depois dos ativos). */
+  async findAll(userId: string, includeArchived = false) {
     const cards = await this.prisma.creditCard.findMany({
-      where: { account: { userId, isActive: true } },
+      where: { account: { userId, ...(includeArchived ? {} : { isActive: true }) } },
       include: { account: true },
       orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
     });
-    return cards.map((c) => this.toCardView(c));
+    return cards
+      .map((c) => this.toCardView(c))
+      .sort((a, b) => Number(b.isActive) - Number(a.isActive));
+  }
+
+  async findOne(userId: string, id: string) {
+    return this.toCardView(await this.findOwned(userId, id));
   }
 
   async summary(userId: string) {
@@ -162,51 +115,74 @@ export class CreditCardsService {
     };
   }
 
+  /**
+   * Conta interna e cartão nascem na mesma transação de banco: uma falha no
+   * cartão não deixa uma conta `credit_card` órfã para trás. O controle de
+   * faturas de um cartão novo começa no dia da criação.
+   */
   async create(userId: string, dto: CreateCreditCardDto) {
-    const existingCount = await this.prisma.creditCard.count({
-      where: { account: { userId, isActive: true } },
-    });
+    await this.assertIndividual(userId);
+    if (dto.paymentAccountId) await this.assertPaymentAccount(userId, dto.paymentAccountId);
 
-    const account = await this.accountsService.create(userId, {
-      name: dto.name,
-      type: 'credit_card',
-      initialBalance: 0,
-    });
-
-    const card = await this.prisma.creditCard.create({
-      data: {
-        accountId: account.id,
-        brand: dto.brand ?? null,
-        color: dto.color ?? null,
-        creditLimit: dto.creditLimit ?? null,
-        dueDay: dto.dueDay,
-        isPrimary: existingCount === 0,
-      },
-      include: { account: true },
+    const card = await this.prisma.$transaction(async (tx) => {
+      const existingCount = await tx.creditCard.count({
+        where: { account: { userId, isActive: true } },
+      });
+      const account = await tx.account.create({
+        data: { userId, name: dto.name, type: 'credit_card', initialBalance: 0, currentBalance: 0 },
+      });
+      return tx.creditCard.create({
+        data: {
+          accountId: account.id,
+          brand: dto.brand ?? null,
+          color: dto.color ?? null,
+          creditLimit: dto.creditLimit ?? null,
+          closingDay: dto.closingDay,
+          dueDay: dto.dueDay,
+          invoiceTrackingStart: parseDateOnly(dateOnlyString(todaySaoPaulo())),
+          paymentAccountId: dto.paymentAccountId ?? null,
+          isPrimary: existingCount === 0,
+        },
+        include: { account: true },
+      });
     });
     return this.toCardView(card);
   }
 
   async update(userId: string, id: string, dto: UpdateCreditCardDto) {
     const existing = await this.findOwned(userId, id);
-    if (dto.name !== undefined) {
-      await this.accountsService.update(userId, existing.accountId, { name: dto.name });
+    if ((dto.closingDay !== undefined || dto.dueDay !== undefined) && cardNeedsSetup(existing)) {
+      throw new ConflictException(
+        'Este cartão está com a configuração pendente. Configure o fechamento antes de alterar as datas.',
+      );
     }
-    const card = await this.prisma.creditCard.update({
-      where: { id: existing.id },
-      data: {
-        ...(dto.brand !== undefined && { brand: dto.brand }),
-        ...(dto.color !== undefined && { color: dto.color }),
-        ...(dto.creditLimit !== undefined && { creditLimit: dto.creditLimit }),
-        ...(dto.dueDay !== undefined && { dueDay: dto.dueDay }),
-      },
-      include: { account: true },
+    if (dto.paymentAccountId) await this.assertPaymentAccount(userId, dto.paymentAccountId);
+
+    const card = await this.prisma.$transaction(async (tx) => {
+      if (dto.name !== undefined) {
+        await tx.account.update({ where: { id: existing.accountId }, data: { name: dto.name } });
+      }
+      return tx.creditCard.update({
+        where: { id: existing.id },
+        data: {
+          ...(dto.brand !== undefined && { brand: dto.brand }),
+          ...(dto.color !== undefined && { color: dto.color }),
+          ...(dto.creditLimit !== undefined && { creditLimit: dto.creditLimit }),
+          ...(dto.closingDay !== undefined && { closingDay: dto.closingDay }),
+          ...(dto.dueDay !== undefined && { dueDay: dto.dueDay }),
+          ...(dto.paymentAccountId !== undefined && { paymentAccountId: dto.paymentAccountId }),
+        },
+        include: { account: true },
+      });
     });
     return this.toCardView(card);
   }
 
   async setPrimary(userId: string, id: string) {
     const existing = await this.findOwned(userId, id);
+    if (!existing.account.isActive) {
+      throw new ConflictException('Cartão arquivado não pode ser o principal');
+    }
     await this.prisma.$transaction([
       this.prisma.creditCard.updateMany({
         where: { account: { userId, isActive: true } },
@@ -221,34 +197,29 @@ export class CreditCardsService {
     return this.toCardView(card);
   }
 
+  /**
+   * Arquiva o cartão. Cartão em uso tem lançamentos por definição — por isso
+   * não passa pela regra de `AccountsService.deactivate` (desenhada para conta
+   * comum, que recusa desativar conta com lançamentos). Arquivado, o cartão não
+   * recebe compras, mas o histórico continua consultável.
+   */
   async remove(userId: string, id: string) {
     const existing = await this.findOwned(userId, id);
 
-    // Cartão em uso tem lançamentos por definição — arquivar direto, sem passar
-    // pela regra de accountsService.deactivate (desenhada para conta corrente,
-    // que recusa desativar contas com lançamentos vinculados).
-    await this.prisma.account.update({
-      where: { id: existing.accountId },
-      data: { isActive: false },
-    });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.account.update({ where: { id: existing.accountId }, data: { isActive: false } });
+      await tx.creditCard.update({ where: { id: existing.id }, data: { isPrimary: false } });
 
-    await this.prisma.creditCard.update({
-      where: { id: existing.id },
-      data: { isPrimary: false },
-    });
-
-    if (existing.isPrimary) {
-      const nextPrimary = await this.prisma.creditCard.findFirst({
-        where: { account: { userId, isActive: true } },
-        orderBy: { createdAt: 'asc' },
-      });
-      if (nextPrimary) {
-        await this.prisma.creditCard.update({
-          where: { id: nextPrimary.id },
-          data: { isPrimary: true },
+      if (existing.isPrimary) {
+        const nextPrimary = await tx.creditCard.findFirst({
+          where: { account: { userId, isActive: true } },
+          orderBy: { createdAt: 'asc' },
         });
+        if (nextPrimary) {
+          await tx.creditCard.update({ where: { id: nextPrimary.id }, data: { isPrimary: true } });
+        }
       }
-    }
+    });
     return { success: true };
   }
 
@@ -260,5 +231,30 @@ export class CreditCardsService {
     if (!card || card.account.userId !== userId)
       throw new NotFoundException('Cartão não encontrado');
     return card;
+  }
+
+  /** Cartões existem só no perfil pessoal. */
+  private async assertIndividual(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { profileType: true },
+    });
+    if (!user) throw new NotFoundException('Usuário não encontrado');
+    if (user.profileType !== 'individual') {
+      throw new ForbiddenException('Cartões de crédito estão disponíveis apenas no perfil pessoal');
+    }
+  }
+
+  /** A conta de pagamento sugerida precisa ser uma conta comum ativa do usuário. */
+  private async assertPaymentAccount(userId: string, accountId: string) {
+    const account = await this.prisma.account.findUnique({ where: { id: accountId } });
+    if (
+      !account ||
+      account.userId !== userId ||
+      !account.isActive ||
+      account.type === 'credit_card'
+    ) {
+      throw new BadRequestException('Conta de pagamento inválida');
+    }
   }
 }

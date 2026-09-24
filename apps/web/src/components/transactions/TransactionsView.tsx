@@ -378,7 +378,7 @@ function TransacoesContent() {
               ],
               ['Data', formatDateBR(viewingTx.transactionDate)],
               ['Categoria', viewingTx.category?.name ?? '—'],
-              ['Conta', viewingTx.account?.name ?? '—'],
+              ['Conta/cartão', viewingTx.account?.name ?? '—'],
               ['Origem', sourceLabels[viewingTx.source]],
               ['Status', statusLabels[viewingTx.status]],
               [

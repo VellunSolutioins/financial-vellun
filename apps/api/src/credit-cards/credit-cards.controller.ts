@@ -1,4 +1,15 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiCookieAuth, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 
@@ -7,6 +18,7 @@ import { ActiveSubscriptionGuard } from '../billing/guards/active-subscription.g
 
 import { CreditCardsService } from './credit-cards.service';
 import { CreateCreditCardDto } from './dto/create-credit-card.dto';
+import { ListCreditCardsDto } from './dto/list-credit-cards.dto';
 import { UpdateCreditCardDto } from './dto/update-credit-card.dto';
 
 @ApiCookieAuth()
@@ -17,15 +29,21 @@ export class CreditCardsController {
   constructor(private creditCardsService: CreditCardsService) {}
 
   @Get()
-  findAll(@Req() req: Request) {
+  findAll(@Req() req: Request, @Query() query: ListCreditCardsDto) {
     const user = req.user as any;
-    return this.creditCardsService.findAll(user.id);
+    return this.creditCardsService.findAll(user.id, query.includeArchived ?? false);
   }
 
   @Get('summary')
   summary(@Req() req: Request) {
     const user = req.user as any;
     return this.creditCardsService.summary(user.id);
+  }
+
+  @Get(':id')
+  findOne(@Req() req: Request, @Param('id') id: string) {
+    const user = req.user as any;
+    return this.creditCardsService.findOne(user.id, id);
   }
 
   @Post()

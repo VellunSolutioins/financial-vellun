@@ -28,7 +28,7 @@ const healthBarStyles: Record<string, string> = {
 };
 
 export default function CartoesPage() {
-  const { data, summary, loading, refetch } = useCreditCards();
+  const { data, archived, summary, loading, refetch } = useCreditCards();
   const [formOpen, setFormOpen] = useState(false);
   const [editingCard, setEditingCard] = useState<CreditCard | undefined>();
   const toast = useToast();
@@ -58,20 +58,20 @@ export default function CartoesPage() {
     }
   };
 
-  const handleDelete = async (card: CreditCard) => {
+  const handleArchive = async (card: CreditCard) => {
     const ok = await confirm({
-      title: 'Excluir cartão',
-      description: `Excluir "${card.name}"?`,
-      confirmText: 'Excluir',
+      title: 'Arquivar cartão',
+      description: `"${card.name}" deixa de receber compras. O histórico continua disponível.`,
+      confirmText: 'Arquivar',
       variant: 'destructive',
     });
     if (!ok) return;
     try {
       await apiClient.delete(`/credit-cards/${card.id}`);
-      toast.success('Cartão excluído.');
+      toast.success('Cartão arquivado.');
       void refetch();
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Erro ao excluir cartão');
+      toast.error(e instanceof Error ? e.message : 'Erro ao arquivar cartão');
     }
   };
 
@@ -210,7 +210,15 @@ export default function CartoesPage() {
                     ) : (
                       <span>Sem limite definido</span>
                     )}
-                    <span>Vence dia {card.dueDay}</span>
+                    {card.needsSetup ? (
+                      <Badge variant="warning" className="shrink-0">
+                        Configurar fechamento
+                      </Badge>
+                    ) : (
+                      <span className="shrink-0">
+                        Fecha dia {card.closingDay} · vence dia {card.dueDay}
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex items-center justify-between gap-1">
@@ -239,9 +247,9 @@ export default function CartoesPage() {
                         size="sm"
                         variant="ghost"
                         className="h-7 px-2 text-destructive"
-                        onClick={() => void handleDelete(card)}
+                        onClick={() => void handleArchive(card)}
                       >
-                        Excluir
+                        Arquivar
                       </Button>
                     </div>
                   </div>
@@ -250,6 +258,44 @@ export default function CartoesPage() {
             );
           })}
         </div>
+      )}
+
+      {archived.length > 0 && (
+        <details className="group rounded-2xl border bg-card">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 p-4 text-sm font-medium">
+            <span>Arquivados ({archived.length})</span>
+            <span className="text-xs text-muted-foreground group-open:hidden">Mostrar</span>
+            <span className="hidden text-xs text-muted-foreground group-open:inline">Ocultar</span>
+          </summary>
+          <ul className="divide-y border-t">
+            {archived.map((card) => (
+              <li key={card.id} className="flex items-center justify-between gap-3 p-4">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white opacity-60"
+                    style={{ backgroundColor: card.color ?? '#94a3b8' }}
+                  >
+                    <CreditCardIcon className="h-4 w-4" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{card.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      Não recebe compras; o histórico continua disponível.
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 shrink-0 px-2"
+                  onClick={() => openEdit(card)}
+                >
+                  Editar
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
 
       <Dialog

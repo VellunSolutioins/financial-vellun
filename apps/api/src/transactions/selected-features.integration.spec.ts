@@ -164,8 +164,13 @@ integration('selected features with PostgreSQL', () => {
       recurrenceType: 'fixo',
       recurrenceMonths: 2,
     });
-    const cards = new CreditCardsService(prisma, accounts);
-    const card = await cards.create(userId, { name: 'Test card', creditLimit: 1000, dueDay: 10 });
+    const cards = new CreditCardsService(prisma);
+    const card = await cards.create(userId, {
+      name: 'Test card',
+      creditLimit: 1000,
+      closingDay: 3,
+      dueDay: 10,
+    });
     await transactions.create(userId, {
       accountId: card.accountId,
       categoryId,

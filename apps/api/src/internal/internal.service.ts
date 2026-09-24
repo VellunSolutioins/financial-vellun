@@ -14,6 +14,7 @@ import { CreateAiTransactionDto } from './dto/create-ai-transaction.dto';
 import { AiEventDto } from './dto/ai-event.dto';
 import { normalizePhone } from '../common/phone.util';
 import { parseDateOnly } from '../common/date.util';
+import { assertAccountAcceptsEntries } from '../transactions/transactions.service';
 
 /** Vínculo que identifica o usuário: verificado e não revogado. */
 function isLinked(contact: { userId: string | null; isVerified: boolean; revokedAt: Date | null }) {
@@ -95,13 +96,23 @@ export class InternalService {
     return { canUseProduct: allowed, reason: access.reason, status: access.status };
   }
 
-  /** Lista as contas ativas do usuário. */
+  /**
+   * Contas comuns e cartões ativos do usuário, marcados com `kind`. O `id` é
+   * sempre o da `Account` — no cartão, a conta interna dele —, que é o que o
+   * lançamento grava. Cartão arquivado não aparece: não recebe compra.
+   */
   async listAccounts(userId: string) {
     await this.assertCanUseProduct(userId);
-    return this.prisma.account.findMany({
+    const accounts = await this.prisma.account.findMany({
       where: { userId, isActive: true },
+      include: { creditCard: { select: { id: true } } },
       orderBy: { createdAt: 'asc' },
     });
+    return accounts.map(({ creditCard, ...account }) => ({
+      ...account,
+      kind: creditCard || account.type === 'credit_card' ? ('card' as const) : ('account' as const),
+      cardId: creditCard?.id ?? null,
+    }));
   }
 
   /**
@@ -165,6 +176,7 @@ export class InternalService {
     if (!account || account.userId !== dto.userId) {
       throw new BadRequestException('Conta inválida para o usuário');
     }
+    assertAccountAcceptsEntries(account);
 
     if (dto.categoryId) {
       const category = await this.prisma.category.findUnique({ where: { id: dto.categoryId } });

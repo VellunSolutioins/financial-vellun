@@ -314,7 +314,9 @@ model BusinessProfile {
 
 model Account {
   creditCard     CreditCard?
-  id             String      @id @default(uuid())
+  /// Cartões que sugerem esta conta para pagar a fatura.
+  paymentForCards CreditCard[] @relation("CreditCardPaymentAccount")
+  id           String      @id @default(uuid())
   userId         String      @map("user_id")
   name           String
   type           AccountType
@@ -800,20 +802,35 @@ enum ReminderStatus {
   paid
 }
 
+/// Cartão de crédito. Os lançamentos continuam em uma `Account` interna
+/// (`type: credit_card`, 1:1 por `accountId`), que nunca aparece em Contas.
+///
+/// Sem `closingDay`, `dueDay` ou `invoiceTrackingStart` o cartão está em
+/// "configuração pendente": cartões anteriores ao controle de faturas não
+/// ganham datas inventadas (ver docs/adrs/0012).
 model CreditCard {
-  id          String   @id @default(uuid())
-  accountId   String   @unique @map("account_id")
-  brand       String?
-  color       String?
-  creditLimit Decimal? @map("credit_limit") @db.Decimal(15, 2)
-  /// Dia do mês em que a fatura vence (1–28).
-  dueDay      Int      @map("due_day")
-  isPrimary   Boolean  @default(false) @map("is_primary")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id                   String    @id @default(uuid())
+  accountId            String    @unique @map("account_id")
+  brand                String?
+  color                String?
+  creditLimit          Decimal?  @map("credit_limit") @db.Decimal(15, 2)
+  /// Dia do mês em que a fatura fecha (1–31; nos meses curtos, o último dia).
+  closingDay           Int?      @map("closing_day")
+  /// Dia do mês em que a fatura vence (1–31; nos meses curtos, o último dia).
+  dueDay               Int?      @map("due_day")
+  /// A partir desta data os lançamentos do cartão contam como dívida e entram
+  /// em faturas. Os anteriores ficam "quitados antes do controle".
+  invoiceTrackingStart DateTime? @map("invoice_tracking_start") @db.Date
+  /// Conta comum sugerida para pagar a fatura. Só sugestão.
+  paymentAccountId     String?   @map("payment_account_id")
+  isPrimary            Boolean   @default(false) @map("is_primary")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
 
-  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  account        Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  paymentAccount Account? @relation("CreditCardPaymentAccount", fields: [paymentAccountId], references: [id], onDelete: SetNull)
 
+  @@index([paymentAccountId])
   @@map("credit_cards")
 }
 

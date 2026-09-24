@@ -1,4 +1,5 @@
 import { CreditCardsModule } from './credit-cards/credit-cards.module';
+import { FinancialResourcesModule } from './financial-resources/financial-resources.module';
 import { SpendingGoalsModule } from './spending-goals/spending-goals.module';
 import { NotesModule } from './notes/notes.module';
 import { RemindersModule } from './reminders/reminders.module';
@@ -34,6 +35,7 @@ import { OpsModule } from './ops/ops.module';
 @Module({
   imports: [
     CreditCardsModule,
+    FinancialResourcesModule,
     SpendingGoalsModule,
     NotesModule,
     RemindersModule,
