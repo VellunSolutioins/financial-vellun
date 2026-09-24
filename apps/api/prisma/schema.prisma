@@ -209,6 +209,7 @@ model User {
   sessions                UserSession[]
   securityEvents          UserSecurityEvent[]
   phoneVerifications      PhoneVerification[]
+  creditCardInvoices      CreditCardInvoice[]
 
   @@map("users")
 }
@@ -380,9 +381,14 @@ model Transaction {
   createdAt         DateTime          @default(now()) @map("created_at")
   updatedAt         DateTime          @updatedAt @map("updated_at")
 
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  account  Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  category Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  // Fatura do cartão em que o lançamento é cobrado. Nula fora de cartão, em
+  // cartão com configuração pendente e antes do início do controle.
+  invoiceId         String?           @map("invoice_id")
+
+  user     User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account  Account            @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  category Category?          @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  invoice  CreditCardInvoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
 
   aiExtractedTransactions AiExtractedTransaction[]
 
@@ -408,6 +414,7 @@ model Transaction {
   // nenhum composto acima os cobre.
   @@index([categoryId])
   @@index([accountId])
+  @@index([invoiceId])
   @@map("transactions")
 }
 
@@ -829,9 +836,35 @@ model CreditCard {
 
   account        Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
   paymentAccount Account? @relation("CreditCardPaymentAccount", fields: [paymentAccountId], references: [id], onDelete: SetNull)
+  invoices       CreditCardInvoice[]
 
   @@index([paymentAccountId])
   @@map("credit_cards")
+}
+
+/// Fatura de um cartão. Criada quando o primeiro lançamento cai no ciclo; as
+/// datas são gravadas nesse momento e só mudam, numa troca de fechamento ou
+/// vencimento, para faturas futuras (`periodStart` depois de hoje). Cobre as
+/// compras de `periodStart` até a véspera de `closingDate`.
+model CreditCardInvoice {
+  id             String   @id @default(uuid())
+  userId         String   @map("user_id")
+  creditCardId   String   @map("credit_card_id")
+  /// `YYYY-MM` do vencimento: a identidade da fatura no cartão.
+  referenceMonth String   @map("reference_month")
+  periodStart    DateTime @map("period_start") @db.Date
+  closingDate    DateTime @map("closing_date") @db.Date
+  dueDate        DateTime @map("due_date") @db.Date
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  creditCard   CreditCard    @relation(fields: [creditCardId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+
+  @@unique([creditCardId, referenceMonth])
+  @@index([userId])
+  @@map("credit_card_invoices")
 }
 
 model Reminder {

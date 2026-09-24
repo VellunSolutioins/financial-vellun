@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { REGULAR_ACCOUNT_WHERE } from '../accounts/account-types';
-import { cardNeedsSetup } from '../credit-cards/credit-cards.service';
+import { cardNeedsSetup } from '../credit-cards/card-setup';
 
 /**
  * Contas e cartões do usuário, separados, para os seletores de lançamento.

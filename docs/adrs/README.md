@@ -30,3 +30,4 @@ decisão não seja revertida sem que o contexto original seja considerado.
 | [0011](0011-entrega-assincrona-em-fila-de-saida.md)         | Entrega da resposta em fila de saída                | Aceito |
 | [0012](0012-cartao-como-recurso-proprio.md)                 | Cartão de crédito como recurso próprio              | Aceito |
 | [0013](0013-recorte-por-recurso-e-base-de-data.md)          | Recorte por conta/cartão e base de data             | Aceito |
+| [0014](0014-faturas-ciclos-e-limite.md)                     | Faturas de cartão: ciclo, atribuição e limite       | Aceito |

@@ -190,6 +190,7 @@ export function CreditCardForm({ card, onSuccess, onCancel }: Props) {
           <p className="col-span-2 text-xs text-muted-foreground">
             Compras no dia do fechamento entram na fatura seguinte. Em meses mais curtos, vale o
             último dia do mês.
+            {card && ' Ao alterar, a fatura atual e as fechadas mantêm as datas; só as futuras mudam.'}
           </p>
         </div>
       ) : (

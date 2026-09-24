@@ -19,16 +19,71 @@ export interface CreditCard {
   needsSetup: boolean;
   isActive: boolean;
   isPrimary: boolean;
-  currentInvoice: number;
+  // Indicadores: todos nulos enquanto a configuração estiver pendente.
+  /** Total da fatura aberta hoje. */
+  currentInvoice: number | null;
+  currentInvoiceRemaining: number | null;
+  currentInvoiceId: string | null;
+  currentClosingDate: string | null;
+  currentDueDate: string | null;
+  /** Cobranças em faturas que fecham depois da atual. */
+  futureInstallments: number | null;
+  /** Restante de faturas já fechadas. */
+  closedUnpaid: number | null;
+  totalDebt: number | null;
+  /** Limite comprometido (= dívida total). */
+  committed: number | null;
+  /** Limite disponível para novas compras. */
   available: number | null;
+  /** Pago acima do cobrado. */
+  credit: number | null;
   percentage: number | null;
   health: { key: string; emoji: string; label: string; message: string } | null;
 }
 
+export type InvoicePaymentStatus = 'unpaid' | 'partial' | 'paid' | 'credit';
+
+export interface CardInvoice {
+  id: string;
+  referenceMonth: string;
+  periodStart: string;
+  closingDate: string;
+  dueDate: string;
+  state: 'open' | 'closed';
+  isCurrent: boolean;
+  isFuture: boolean;
+  charges: number;
+  refunds: number;
+  payments: number;
+  total: number;
+  remaining: number;
+  paymentStatus: InvoicePaymentStatus;
+}
+
+export interface InvoiceItem {
+  id: string;
+  type: 'expense';
+  description: string;
+  amount: number;
+  transactionDate: string;
+  installmentNumber: number | null;
+  installmentTotal: number | null;
+  category: { id: string; name: string; color: string | null } | null;
+}
+
+/** Fatura com os lançamentos que a compõem. */
+export interface CardInvoiceDetail extends CardInvoice {
+  items: InvoiceItem[];
+}
+
 export interface CreditCardSummary {
+  /** Dívida total dos cartões configurados. */
   totalCommitted: number;
+  /** Soma das faturas abertas hoje. */
+  totalCurrentInvoices: number;
   totalLimit: number;
   cardCount: number;
+  pendingSetupCount: number;
   monthlyIncome: number;
   incomePercentage: number | null;
   incomeHealth: { key: string; emoji: string; label: string } | null;

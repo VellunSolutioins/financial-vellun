@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AccountsService } from '../accounts/accounts.service';
 import { dateOnlyString, startOfDayUtc, todaySaoPaulo } from '../common/date.util';
 import { TransactionsService } from './transactions.service';
+import { CardLedgerService } from '../credit-cards/card-ledger.service';
 import { FREQUENCY_STEP_MONTHS } from './recurrence-frequency';
 import { UpdateRecurrenceDto } from './dto/update-recurrence.dto';
 
@@ -141,6 +142,7 @@ export class RecurrencesService {
     private prisma: PrismaService,
     private accountsService: AccountsService,
     private transactionsService: TransactionsService,
+    private cardLedger: CardLedgerService = new CardLedgerService(prisma),
   ) {}
 
   private fromToday() {
@@ -265,12 +267,20 @@ export class RecurrencesService {
     return recurrence;
   }
 
-  /** Recalcula o saldo das contas tocadas (a de hoje entra no saldo). */
-  private async recalculate(occurrences: { accountId: string }[], newAccountId?: string) {
+  /**
+   * Recalcula o saldo das contas tocadas (a de hoje entra no saldo) e a fatura
+   * das ocorrências que continuam existindo, se estiverem num cartão.
+   */
+  private async recalculate(
+    occurrences: { id: string; accountId: string }[],
+    newAccountId?: string,
+  ) {
     const accountIds = new Set(occurrences.map((o) => o.accountId));
     if (newAccountId) accountIds.add(newAccountId);
+    await this.cardLedger.syncTransactions(occurrences.map((o) => o.id));
     for (const accountId of accountIds) {
       await this.accountsService.recalculateBalance(accountId);
+      await this.cardLedger.pruneForAccount(accountId);
     }
   }
 }

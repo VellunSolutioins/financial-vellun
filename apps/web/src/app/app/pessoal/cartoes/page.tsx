@@ -8,15 +8,18 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
 import { CreditCardForm } from '@/components/credit-cards/CreditCardForm';
+import { CardSetupForm } from '@/components/credit-cards/CardSetupForm';
 import { useCreditCards, type CreditCard } from '@/hooks/useCreditCards';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
-import { cn } from '@/lib/utils';
+import { cn, formatDateBR } from '@/lib/utils';
 
 function formatCurrency(v: number) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 }
+
+const shortDate = (iso: string) => formatDateBR(iso, { day: '2-digit', month: '2-digit' });
 
 /** Cores da barra por faixa de comprometimento do limite (ver credit-cards.service.ts). */
 const healthBarStyles: Record<string, string> = {
@@ -32,6 +35,7 @@ export default function CartoesPage() {
   const { data, archived, summary, loading, refetch } = useCreditCards();
   const [formOpen, setFormOpen] = useState(false);
   const [editingCard, setEditingCard] = useState<CreditCard | undefined>();
+  const [settingUp, setSettingUp] = useState<CreditCard | null>(null);
   const toast = useToast();
   const confirm = useConfirm();
 
@@ -99,7 +103,7 @@ export default function CartoesPage() {
           <CardContent className="space-y-3 p-4 sm:p-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-sm text-muted-foreground">
-                Comprometido em todos os cartões
+                Limite comprometido em todos os cartões
               </span>
               {summary.incomeHealth && (
                 <Badge className="shrink-0 bg-muted text-foreground">
@@ -123,10 +127,16 @@ export default function CartoesPage() {
                 />
               </div>
             )}
-            {summary.incomePercentage !== null && (
-              <p className="text-xs text-muted-foreground">
-                {summary.incomePercentage.toFixed(0)}% da renda fixa mensal comprometida com
-                faturas.
+            <p className="text-xs text-muted-foreground">
+              Faturas abertas agora: {formatCurrency(summary.totalCurrentInvoices)}
+              {summary.incomePercentage !== null &&
+                ` · ${summary.incomePercentage.toFixed(0)}% da renda fixa do mês`}
+            </p>
+            {summary.pendingSetupCount > 0 && (
+              <p className="text-xs text-amber-700">
+                {summary.pendingSetupCount === 1
+                  ? '1 cartão sem fechamento configurado fica fora destes totais.'
+                  : `${summary.pendingSetupCount} cartões sem fechamento configurado ficam fora destes totais.`}
               </p>
             )}
           </CardContent>
@@ -181,12 +191,60 @@ export default function CartoesPage() {
                     )}
                   </div>
 
-                  <div>
-                    <p className="text-xs text-muted-foreground">Fatura atual</p>
-                    <span className="text-xl font-bold">{formatCurrency(card.currentInvoice)}</span>
-                  </div>
+                  {card.needsSetup ? (
+                    <div className="space-y-2 rounded-xl bg-amber-50 p-3 text-xs text-amber-900">
+                      <p>
+                        Sem fechamento configurado: os lançamentos aparecem no período, mas ainda
+                        não formam faturas nem contam no limite.
+                      </p>
+                      <Button size="sm" className="h-8" onClick={() => setSettingUp(card)}>
+                        Configurar fechamento
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="min-w-0">
+                        <p className="text-xs text-muted-foreground">
+                          Fatura atual · fecha {shortDate(card.currentClosingDate!)}
+                        </p>
+                        <p className="truncate text-xl font-bold">
+                          {formatCurrency(card.currentInvoice ?? 0)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          vence {shortDate(card.currentDueDate!)}
+                        </p>
+                      </div>
+                      <div className="min-w-0 space-y-0.5 text-right text-xs text-muted-foreground">
+                        <p>
+                          Parcelas futuras{' '}
+                          <span className="font-semibold text-foreground">
+                            {formatCurrency(card.futureInstallments ?? 0)}
+                          </span>
+                        </p>
+                        {(card.closedUnpaid ?? 0) > 0 && (
+                          <p className="text-rose-600">
+                            Fechadas em aberto{' '}
+                            <span className="font-semibold">
+                              {formatCurrency(card.closedUnpaid ?? 0)}
+                            </span>
+                          </p>
+                        )}
+                        <p>
+                          Dívida total{' '}
+                          <span className="font-semibold text-foreground">
+                            {formatCurrency(card.totalDebt ?? 0)}
+                          </span>
+                        </p>
+                        {(card.credit ?? 0) > 0 && (
+                          <p className="text-emerald-700">
+                            Crédito {formatCurrency(card.credit ?? 0)}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
-                  {card.creditLimit !== null && (
+                  {card.creditLimit !== null && !card.needsSetup && (
                     <>
                       <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
                         <div
@@ -208,19 +266,17 @@ export default function CartoesPage() {
                   <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                     {card.available !== null ? (
                       <span>
-                        Disponível{' '}
+                        Limite disponível{' '}
                         <span className="font-semibold text-foreground">
                           {formatCurrency(card.available)}
                         </span>
                       </span>
                     ) : (
-                      <span>Sem limite definido</span>
+                      <span>
+                        {card.creditLimit === null ? 'Sem limite definido' : 'Limite a calcular'}
+                      </span>
                     )}
-                    {card.needsSetup ? (
-                      <Badge variant="warning" className="shrink-0">
-                        Configurar fechamento
-                      </Badge>
-                    ) : (
+                    {!card.needsSetup && (
                       <span className="shrink-0">
                         Fecha dia {card.closingDay} · vence dia {card.dueDay}
                       </span>
@@ -303,6 +359,23 @@ export default function CartoesPage() {
           </ul>
         </details>
       )}
+
+      <Dialog
+        open={settingUp !== null}
+        onClose={() => setSettingUp(null)}
+        title="Configurar fechamento"
+      >
+        {settingUp && (
+          <CardSetupForm
+            card={settingUp}
+            onSuccess={() => {
+              setSettingUp(null);
+              void refetch();
+            }}
+            onCancel={() => setSettingUp(null)}
+          />
+        )}
+      </Dialog>
 
       <Dialog
         open={formOpen}

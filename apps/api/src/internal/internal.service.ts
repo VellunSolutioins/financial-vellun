@@ -15,6 +15,7 @@ import { AiEventDto } from './dto/ai-event.dto';
 import { normalizePhone } from '../common/phone.util';
 import { parseDateOnly } from '../common/date.util';
 import { assertAccountAcceptsEntries } from '../transactions/transactions.service';
+import { CardLedgerService } from '../credit-cards/card-ledger.service';
 
 /** Vínculo que identifica o usuário: verificado e não revogado. */
 function isLinked(contact: { userId: string | null; isVerified: boolean; revokedAt: Date | null }) {
@@ -29,6 +30,7 @@ export class InternalService {
     private prisma: PrismaService,
     private accountsService: AccountsService,
     private subscriptionAccess: SubscriptionAccessService,
+    private cardLedger: CardLedgerService = new CardLedgerService(prisma),
   ) {}
 
   /**
@@ -215,12 +217,15 @@ export class InternalService {
    * Recalcular de novo é seguro: `recalculateBalance` recompõe o saldo do zero a
    * partir dos agregados, sem somar em cima do valor anterior.
    */
-  private async comSaldoGarantido<T extends { status: string; accountId: string }>(
+  private async comSaldoGarantido<T extends { id: string; status: string; accountId: string }>(
     transaction: T,
   ): Promise<T> {
     if (transaction.status === 'confirmed') {
       await this.accountsService.recalculateBalance(transaction.accountId);
     }
+    // Mesma lógica do saldo vale para a fatura do cartão: sincronizar de novo
+    // na reentrega é seguro e cobre o processo que morreu antes de sincronizar.
+    await this.cardLedger.syncTransactions([transaction.id]);
     return transaction;
   }
 

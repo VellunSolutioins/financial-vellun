@@ -12,6 +12,7 @@ import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { ListTransactionsDto, TransactionFiltersDto } from './dto/list-transactions.dto';
 import { ResourceScope, scopeWhere } from '../common/resource-scope';
+import { CardLedgerService } from '../credit-cards/card-ledger.service';
 import { parseDateOnly, startOfDayUtc, endOfDayUtc, addMonthsUtc } from '../common/date.util';
 import { FREQUENCY_STEP_MONTHS } from './recurrence-frequency';
 
@@ -21,6 +22,7 @@ export class TransactionsService {
     private prisma: PrismaService,
     private accountsService: AccountsService,
     private resourceScope: ResourceScope = new ResourceScope(prisma),
+    private cardLedger: CardLedgerService = new CardLedgerService(prisma),
   ) {}
 
   /** Filtro comum da listagem e dos totais; valida o recorte por conta/cartão. */
@@ -214,7 +216,7 @@ export class TransactionsService {
         ? installmentAmounts(dto.amount, occurrences)
         : () => dto.amount;
 
-    const [firstTransaction] = await this.prisma.$transaction(
+    const created = await this.prisma.$transaction(
       Array.from({ length: occurrences }, (_, i) =>
         this.prisma.transaction.create({
           data: {
@@ -237,8 +239,12 @@ export class TransactionsService {
     );
 
     await this.accountsService.recalculateBalance(dto.accountId);
+    await this.cardLedger.syncTransactions(created.map((t) => t.id));
 
-    return firstTransaction;
+    return this.prisma.transaction.findUniqueOrThrow({
+      where: { id: created[0].id },
+      include: { category: true, account: true },
+    });
   }
 
   async update(userId: string, id: string, dto: UpdateTransactionDto) {
@@ -271,8 +277,11 @@ export class TransactionsService {
     if (transaction.accountId !== existing.accountId) {
       await this.accountsService.recalculateBalance(transaction.accountId);
     }
+    // Data, valor, conta ou status podem mudar a fatura (ou tirá-la dela).
+    await this.cardLedger.syncTransactions([id]);
+    await this.cardLedger.pruneForAccount(existing.accountId);
 
-    return transaction;
+    return { ...transaction, invoiceId: (await this.findOne(userId, id)).invoiceId };
   }
 
   async remove(userId: string, id: string, hardDelete = false) {
@@ -285,9 +294,11 @@ export class TransactionsService {
         where: { id },
         data: { status: 'cancelled' },
       });
+      await this.cardLedger.syncTransactions([id]);
     }
 
     await this.accountsService.recalculateBalance(transaction.accountId);
+    await this.cardLedger.pruneForAccount(transaction.accountId);
     return { message: 'Lançamento removido com sucesso' };
   }
 

@@ -19,6 +19,7 @@ import { ActiveSubscriptionGuard } from '../billing/guards/active-subscription.g
 import { CreditCardsService } from './credit-cards.service';
 import { CreateCreditCardDto } from './dto/create-credit-card.dto';
 import { ListCreditCardsDto } from './dto/list-credit-cards.dto';
+import { SetupCreditCardDto } from './dto/setup-credit-card.dto';
 import { UpdateCreditCardDto } from './dto/update-credit-card.dto';
 
 @ApiCookieAuth()
@@ -44,6 +45,25 @@ export class CreditCardsController {
   findOne(@Req() req: Request, @Param('id') id: string) {
     const user = req.user as any;
     return this.creditCardsService.findOne(user.id, id);
+  }
+
+  @Get(':id/invoices')
+  invoices(@Req() req: Request, @Param('id') id: string) {
+    const user = req.user as any;
+    return this.creditCardsService.invoices(user.id, id);
+  }
+
+  @Get(':id/invoices/:invoiceId')
+  invoice(@Req() req: Request, @Param('id') id: string, @Param('invoiceId') invoiceId: string) {
+    const user = req.user as any;
+    return this.creditCardsService.invoice(user.id, id, invoiceId);
+  }
+
+  /** Configura fechamento, vencimento e início do controle de um cartão pendente. */
+  @Post(':id/setup')
+  setup(@Req() req: Request, @Param('id') id: string, @Body() dto: SetupCreditCardDto) {
+    const user = req.user as any;
+    return this.creditCardsService.setup(user.id, id, dto);
   }
 
   @Post()

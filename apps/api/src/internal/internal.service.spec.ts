@@ -37,14 +37,17 @@ describe('InternalService', () => {
   let service: InternalService;
 
   let access: { canUseProduct: jest.Mock; isEnforced: jest.Mock };
+  // A atribuição de fatura tem teste próprio (integração com o banco).
+  const ledger = { syncTransactions: jest.fn().mockResolvedValue(undefined) };
 
   beforeEach(() => {
+    ledger.syncTransactions.mockClear();
     prisma = createPrismaMock();
     access = {
       canUseProduct: jest.fn().mockResolvedValue({ allowed: true }),
       isEnforced: jest.fn().mockReturnValue(true),
     };
-    service = new InternalService(prisma as any, {} as any, access as any);
+    service = new InternalService(prisma as any, {} as any, access as any, ledger as any);
   });
 
   describe('findContactByPhone (vínculo verificado)', () => {
@@ -268,11 +271,13 @@ describe('InternalService', () => {
         status: 'confirmed',
       });
       const accounts = { recalculateBalance: jest.fn() };
-      service = new InternalService(prisma as any, accounts as any, access as any);
+      service = new InternalService(prisma as any, accounts as any, access as any, ledger as any);
 
       await service.createTransactionFromAi(dto);
 
       expect(accounts.recalculateBalance).toHaveBeenCalledWith('a1');
+      // A fatura do cartão também é garantida na reentrega.
+      expect(ledger.syncTransactions).toHaveBeenCalledWith(['t1']);
       expect(prisma.transaction.create).not.toHaveBeenCalled();
     });
 
@@ -284,7 +289,7 @@ describe('InternalService', () => {
         new Prisma.PrismaClientKnownRequestError('unique', { code: 'P2002', clientVersion: '5' }),
       );
       const accounts = { recalculateBalance: jest.fn() };
-      service = new InternalService(prisma as any, accounts as any, access as any);
+      service = new InternalService(prisma as any, accounts as any, access as any, ledger as any);
 
       await service.createTransactionFromAi(dto);
 
@@ -299,7 +304,7 @@ describe('InternalService', () => {
         status: 'cancelled',
       });
       const accounts = { recalculateBalance: jest.fn() };
-      service = new InternalService(prisma as any, accounts as any, access as any);
+      service = new InternalService(prisma as any, accounts as any, access as any, ledger as any);
 
       await service.createTransactionFromAi(dto);
 
@@ -315,7 +320,7 @@ describe('InternalService', () => {
       });
 
       const accounts = { recalculateBalance: jest.fn() };
-      service = new InternalService(prisma as any, accounts as any, access as any);
+      service = new InternalService(prisma as any, accounts as any, access as any, ledger as any);
 
       const result = await service.createTransactionFromAi(dto);
 
@@ -385,7 +390,7 @@ describe('InternalService', () => {
         status: 'confirmed',
       });
       const accounts = { recalculateBalance: jest.fn() };
-      service = new InternalService(prisma as any, accounts as any, access as any);
+      service = new InternalService(prisma as any, accounts as any, access as any, ledger as any);
 
       await service.createTransactionFromAi({
         ...dto,
