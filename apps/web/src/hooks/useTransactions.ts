@@ -29,6 +29,9 @@ export interface TransactionFilters {
   type?: string;
   categoryId?: string;
   accountId?: string;
+  /** Ids separados por vírgula (ver `resourceQuery`). */
+  accountIds?: string;
+  cardIds?: string;
   status?: string;
   source?: string;
   search?: string;

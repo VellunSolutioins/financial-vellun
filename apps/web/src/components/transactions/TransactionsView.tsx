@@ -16,6 +16,11 @@ import {
   recurrenceLabels,
 } from '@/components/transactions/TransactionForm';
 import { useTransactions, type Transaction } from '@/hooks/useTransactions';
+import { useTransactionSummary } from '@/hooks/useTransactionSummary';
+import { useFinancialResources } from '@/hooks/useFinancialResources';
+import { resourceQuery, useResourceFilter } from '@/hooks/useResourceFilter';
+import { ResourceFilter } from '@/components/resources/ResourceFilter';
+import { DateBasisNote } from '@/components/resources/DateBasisNote';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
@@ -101,10 +106,10 @@ function TransacoesContent() {
   const [viewingTx, setViewingTx] = useState<Transaction | undefined>();
   const selectedMonth = searchParams.get('month') ?? currentMonth();
   const { start: monthStart, end: monthEnd } = monthRange(selectedMonth);
+  const { data: resources } = useFinancialResources();
+  const { selection, setSelection } = useResourceFilter();
 
-  const filters = {
-    page: Number(searchParams.get('page') ?? 1),
-    limit: 10,
+  const baseFilters = {
     type: searchParams.get('type') ?? undefined,
     status: searchParams.get('status') ?? undefined,
     source: searchParams.get('source') ?? undefined,
@@ -112,9 +117,12 @@ function TransacoesContent() {
     search: searchParams.get('search') ?? undefined,
     periodStart: monthStart,
     periodEnd: monthEnd,
+    ...resourceQuery(selection),
   };
+  const filters = { ...baseFilters, page: Number(searchParams.get('page') ?? 1), limit: 10 };
 
   const { data, meta, loading, error, refetch } = useTransactions(filters);
+  const { data: totals, refetch: refetchTotals } = useTransactionSummary(baseFilters);
 
   const setParam = (key: string, value: string) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -135,6 +143,7 @@ function TransacoesContent() {
   const closeModal = () => setModalOpen(false);
   const handleSuccess = () => {
     closeModal();
+    refetchTotals();
     void refetch();
   };
   const handleDelete = async (tx: Transaction) => {
@@ -148,6 +157,7 @@ function TransacoesContent() {
     try {
       await apiClient.delete(`/transactions/${tx.id}?hard_delete=true`);
       toast.success('Lançamento excluído.');
+      refetchTotals();
       void refetch();
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Erro ao excluir lançamento');
@@ -162,6 +172,7 @@ function TransacoesContent() {
           <p className="text-sm text-muted-foreground">Suas receitas e despesas do período.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <ResourceFilter resources={resources} value={selection} onChange={setSelection} />
           <Input
             type="month"
             aria-label="Mês dos lançamentos"
@@ -212,6 +223,32 @@ function TransacoesContent() {
           </Select>
         </CardContent>
       </Card>
+
+      {totals && (
+        <div className="space-y-2">
+          <div className="grid grid-cols-3 gap-2 sm:gap-4">
+            {[
+              { label: 'Receitas', value: totals.income, tone: 'text-emerald-600' },
+              { label: 'Despesas', value: totals.expense, tone: 'text-rose-600' },
+              {
+                label: 'Resultado',
+                value: totals.net,
+                tone: totals.net >= 0 ? 'text-foreground' : 'text-rose-600',
+              },
+            ].map((item) => (
+              <Card key={item.label} className="rounded-2xl">
+                <CardContent className="p-3 sm:p-4">
+                  <p className="text-xs text-muted-foreground">{item.label}</p>
+                  <p className={cn('truncate text-sm font-bold sm:text-lg', item.tone)}>
+                    {formatCurrency(item.value)}
+                  </p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+          <DateBasisNote />
+        </div>
+      )}
 
       {/* List */}
       <Card className="rounded-2xl">

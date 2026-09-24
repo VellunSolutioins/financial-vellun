@@ -1,5 +1,13 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { REGULAR_ACCOUNT_WHERE } from '../accounts/account-types';
+import {
+  ResourceFilterDto,
+  ResourceScope,
+  ScopedAccountIds,
+  scopeWhere,
+} from '../common/resource-scope';
 import {
   startOfDayUtc,
   endOfDayUtc,
@@ -26,28 +34,60 @@ export type MonthlyTotalRow = {
   total: string | null;
 };
 
+/**
+ * Período pedido ou, sem ele, o mês corrente **em America/Sao_Paulo** — o
+ * relógio do servidor (UTC) já virou o mês às 21h do último dia.
+ */
+function periodBounds(periodStart?: string, periodEnd?: string) {
+  const today = todaySaoPaulo();
+  return {
+    start: periodStart ? startOfDayUtc(periodStart) : startOfMonthUtc(today.year, today.monthIndex),
+    end: periodEnd ? endOfDayUtc(periodEnd) : endOfMonthUtc(today.year, today.monthIndex),
+  };
+}
+
+/** Contas comuns ativas dentro do recorte: é delas o "saldo total". */
+function balanceAccountsWhere(userId: string, scoped: ScopedAccountIds) {
+  return {
+    userId,
+    isActive: true,
+    ...REGULAR_ACCOUNT_WHERE,
+    ...(scoped ? { id: { in: scoped } } : {}),
+  };
+}
+
 @Injectable()
 export class DashboardService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private resourceScope: ResourceScope = new ResourceScope(prisma),
+  ) {}
 
-  async getSummary(userId: string, periodStart?: string, periodEnd?: string) {
-    const now = new Date();
-    const start = periodStart
-      ? startOfDayUtc(periodStart)
-      : startOfMonthUtc(now.getFullYear(), now.getMonth());
-    const end = periodEnd
-      ? endOfDayUtc(periodEnd)
-      : endOfMonthUtc(now.getFullYear(), now.getMonth());
+  /**
+   * Visão pessoal. Receitas, despesas e categorias são por competência (data do
+   * lançamento ou da parcela), inclusive as de cartão; o saldo é só das contas
+   * comuns, porque cartão não tem saldo.
+   */
+  async getSummary(
+    userId: string,
+    periodStart?: string,
+    periodEnd?: string,
+    filter: ResourceFilterDto = {},
+  ) {
+    const { start, end } = periodBounds(periodStart, periodEnd);
+    const scoped = await this.resourceScope.resolve(userId, filter);
+    const inScope = scopeWhere(scoped);
 
     const [accounts, incomeAgg, expenseAgg, expensesByCategory, recentTransactions, upcomingBills] =
       await Promise.all([
         this.prisma.account.findMany({
-          where: { userId, isActive: true, type: { not: 'credit_card' } },
+          where: balanceAccountsWhere(userId, scoped),
           select: { currentBalance: true },
         }),
         this.prisma.transaction.aggregate({
           where: {
             userId,
+            ...inScope,
             type: 'income',
             status: 'confirmed',
             transactionDate: { gte: start, lte: end },
@@ -57,6 +97,7 @@ export class DashboardService {
         this.prisma.transaction.aggregate({
           where: {
             userId,
+            ...inScope,
             type: 'expense',
             status: 'confirmed',
             transactionDate: { gte: start, lte: end },
@@ -67,6 +108,7 @@ export class DashboardService {
           by: ['categoryId'],
           where: {
             userId,
+            ...inScope,
             type: 'expense',
             status: 'confirmed',
             transactionDate: { gte: start, lte: end },
@@ -75,7 +117,7 @@ export class DashboardService {
           orderBy: { _sum: { amount: 'desc' } },
         }),
         this.prisma.transaction.findMany({
-          where: { userId },
+          where: { userId, ...inScope },
           include: { category: true, account: true },
           orderBy: { createdAt: 'desc' },
           take: 5,
@@ -83,6 +125,7 @@ export class DashboardService {
         this.prisma.transaction.findMany({
           where: {
             userId,
+            ...inScope,
             type: 'expense',
             status: 'confirmed',
             transactionDate: { gte: startOfDayUtc(dateOnlyString(todaySaoPaulo())) },
@@ -113,7 +156,7 @@ export class DashboardService {
     }));
 
     // Monthly comparison (last 12 months) — usado no gráfico de evolução mensal
-    const monthlyComparison = await this.getMonthlyComparison(userId, 12);
+    const monthlyComparison = await this.getMonthlyComparison(userId, 12, scoped);
 
     return {
       totalBalance,
@@ -127,14 +170,19 @@ export class DashboardService {
     };
   }
 
-  async getBusinessSummary(userId: string, periodStart?: string, periodEnd?: string) {
-    const now = new Date();
-    const start = periodStart
-      ? startOfDayUtc(periodStart)
-      : startOfMonthUtc(now.getFullYear(), now.getMonth());
-    const end = periodEnd
-      ? endOfDayUtc(periodEnd)
-      : endOfMonthUtc(now.getFullYear(), now.getMonth());
+  /**
+   * Visão empresarial. Receita, despesa e categorias por competência; o fluxo de
+   * caixa só considera contas comuns — compra no cartão não é saída de caixa.
+   */
+  async getBusinessSummary(
+    userId: string,
+    periodStart?: string,
+    periodEnd?: string,
+    filter: ResourceFilterDto = {},
+  ) {
+    const { start, end } = periodBounds(periodStart, periodEnd);
+    const scoped = await this.resourceScope.resolve(userId, filter);
+    const inScope = scopeWhere(scoped);
     // A pagar/receber = o que ainda vai acontecer: confirmado com data de hoje
     // em diante. Não existe status pendente.
     const upcoming = {
@@ -151,23 +199,30 @@ export class DashboardService {
       pendingTotals,
     ] = await Promise.all([
       this.prisma.account.findMany({
-        where: { userId, isActive: true },
+        where: balanceAccountsWhere(userId, scoped),
         select: { currentBalance: true },
       }),
       this.prisma.transaction.findMany({
         where: {
           userId,
+          ...inScope,
           status: 'confirmed',
           type: { in: ['income', 'expense'] },
           transactionDate: { gte: start, lte: end },
         },
-        select: { type: true, amount: true, transactionDate: true },
+        select: {
+          type: true,
+          amount: true,
+          transactionDate: true,
+          account: { select: { type: true } },
+        },
         orderBy: { transactionDate: 'asc' },
       }),
       this.prisma.transaction.groupBy({
         by: ['categoryId'],
         where: {
           userId,
+          ...inScope,
           type: 'expense',
           status: 'confirmed',
           transactionDate: { gte: start, lte: end },
@@ -177,13 +232,13 @@ export class DashboardService {
         take: 5,
       }),
       this.prisma.transaction.findMany({
-        where: { userId, type: 'income', ...upcoming },
+        where: { userId, ...inScope, type: 'income', ...upcoming },
         include: { category: true, account: true },
         orderBy: { transactionDate: 'asc' },
         take: PENDING_PREVIEW_LIMIT,
       }),
       this.prisma.transaction.findMany({
-        where: { userId, type: 'expense', ...upcoming },
+        where: { userId, ...inScope, type: 'expense', ...upcoming },
         include: { category: true, account: true },
         orderBy: { transactionDate: 'asc' },
         take: PENDING_PREVIEW_LIMIT,
@@ -193,7 +248,7 @@ export class DashboardService {
       // só cobre receber e pagar, e é ela que conta quantos existem.
       this.prisma.transaction.groupBy({
         by: ['type'],
-        where: { userId, ...upcoming, type: { in: ['income', 'expense'] } },
+        where: { userId, ...inScope, ...upcoming, type: { in: ['income', 'expense'] } },
         _sum: { amount: true },
         _count: { _all: true },
       }),
@@ -206,19 +261,19 @@ export class DashboardService {
     const dailyMap = new Map<string, { income: number; expense: number }>();
     for (const t of confirmedInPeriod) {
       const amount = Number(t.amount);
+      if (t.type === 'income') totalIncome += amount;
+      else totalExpense += amount;
+
+      // Caixa: só o que passou por conta comum.
+      if (t.account.type === 'credit_card') continue;
       const day = t.transactionDate.toISOString().slice(0, 10);
       const entry = dailyMap.get(day) ?? { income: 0, expense: 0 };
-      if (t.type === 'income') {
-        totalIncome += amount;
-        entry.income += amount;
-      } else {
-        totalExpense += amount;
-        entry.expense += amount;
-      }
+      if (t.type === 'income') entry.income += amount;
+      else entry.expense += amount;
       dailyMap.set(day, entry);
     }
 
-    // Daily cash flow with running balance over the period
+    // Fluxo de caixa diário com saldo acumulado no período
     let runningBalance = 0;
     const cashFlow = [...dailyMap.entries()]
       .sort((a, b) => a[0].localeCompare(b[0]))
@@ -271,8 +326,7 @@ export class DashboardService {
    * mês (income/expense, zero quando não há). ``month`` no formato ``YYYY-MM``;
    * sem ele, usa o mês atual. Cálculo em UTC para casar com a data armazenada.
    */
-  async getDailyBreakdown(userId: string, month?: string) {
-    const now = new Date();
+  async getDailyBreakdown(userId: string, month?: string, filter: ResourceFilterDto = {}) {
     let year: number;
     let monthIndex: number;
     if (month && /^\d{4}-\d{2}$/.test(month)) {
@@ -280,9 +334,9 @@ export class DashboardService {
       year = y;
       monthIndex = m - 1;
     } else {
-      year = now.getUTCFullYear();
-      monthIndex = now.getUTCMonth();
+      ({ year, monthIndex } = todaySaoPaulo());
     }
+    const scoped = await this.resourceScope.resolve(userId, filter);
 
     const start = new Date(Date.UTC(year, monthIndex, 1));
     const end = new Date(Date.UTC(year, monthIndex + 1, 0, 23, 59, 59, 999));
@@ -291,6 +345,7 @@ export class DashboardService {
     const transactions = await this.prisma.transaction.findMany({
       where: {
         userId,
+        ...scopeWhere(scoped),
         status: 'confirmed',
         type: { in: ['income', 'expense'] },
         transactionDate: { gte: start, lte: end },
@@ -337,11 +392,19 @@ export class DashboardService {
    * como zero: a grade dos meses é montada aqui, e o resultado do banco só a
    * preenche.
    */
-  private async getMonthlyComparison(userId: string, months: number) {
-    const now = new Date();
+  private async getMonthlyComparison(
+    userId: string,
+    months: number,
+    scoped: ScopedAccountIds = null,
+  ) {
+    // O mês corrente é o de São Paulo; `now` só serve para montar a grade.
+    const today = todaySaoPaulo();
+    const now = new Date(today.year, today.monthIndex, today.day);
     // Mesma janela do laço anterior: os `months` meses terminando no corrente.
-    const first = startOfMonthUtc(now.getFullYear(), now.getMonth() - (months - 1));
-    const last = endOfMonthUtc(now.getFullYear(), now.getMonth());
+    const first = startOfMonthUtc(today.year, today.monthIndex - (months - 1));
+    const last = endOfMonthUtc(today.year, today.monthIndex);
+    // Antes das bordas da janela, que o teste lê como os dois últimos parâmetros.
+    const inScope = scoped ? Prisma.sql`AND "account_id" = ANY(${scoped}::text[])` : Prisma.empty;
 
     const rows = await this.prisma.$queryRaw<MonthlyTotalRow[]>`
       SELECT to_char(date_trunc('month', "transaction_date"), 'YYYY-MM') AS month,
@@ -351,6 +414,7 @@ export class DashboardService {
        WHERE "user_id" = ${userId}
          AND "status" = 'confirmed'
          AND "type" IN ('income', 'expense')
+         ${inScope}
          AND "transaction_date" >= ${first.toISOString().slice(0, 10)}::date
          AND "transaction_date" <= ${last.toISOString().slice(0, 10)}::date
        GROUP BY 1, 2

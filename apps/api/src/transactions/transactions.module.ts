@@ -5,10 +5,11 @@ import { RecurrencesController } from './recurrences.controller';
 import { RecurrencesService } from './recurrences.service';
 import { AccountsModule } from '../accounts/accounts.module';
 import { BillingModule } from '../billing/billing.module';
+import { ResourceScope } from '../common/resource-scope';
 
 @Module({
   imports: [AccountsModule, BillingModule],
   controllers: [TransactionsController, RecurrencesController],
-  providers: [TransactionsService, RecurrencesService],
+  providers: [TransactionsService, RecurrencesService, ResourceScope],
 })
 export class TransactionsModule {}

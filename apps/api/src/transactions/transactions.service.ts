@@ -10,7 +10,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AccountsService } from '../accounts/accounts.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
-import { ListTransactionsDto } from './dto/list-transactions.dto';
+import { ListTransactionsDto, TransactionFiltersDto } from './dto/list-transactions.dto';
+import { ResourceScope, scopeWhere } from '../common/resource-scope';
 import { parseDateOnly, startOfDayUtc, endOfDayUtc, addMonthsUtc } from '../common/date.util';
 import { FREQUENCY_STEP_MONTHS } from './recurrence-frequency';
 
@@ -19,9 +20,14 @@ export class TransactionsService {
   constructor(
     private prisma: PrismaService,
     private accountsService: AccountsService,
+    private resourceScope: ResourceScope = new ResourceScope(prisma),
   ) {}
 
-  async findAll(userId: string, filters: ListTransactionsDto) {
+  /** Filtro comum da listagem e dos totais; valida o recorte por conta/cartão. */
+  private async buildWhere(
+    userId: string,
+    filters: TransactionFiltersDto,
+  ): Promise<Prisma.TransactionWhereInput> {
     const {
       periodStart,
       periodEnd,
@@ -32,17 +38,15 @@ export class TransactionsService {
       source,
       recurrenceType,
       search,
-      page = 1,
-      limit = 10,
-      sortBy = 'transactionDate',
-      order = 'desc',
     } = filters;
+    const scoped = await this.resourceScope.resolve(userId, filters);
 
-    const where: Prisma.TransactionWhereInput = {
+    return {
       userId,
       ...(type && { type }),
       ...(categoryId === 'uncategorized' ? { categoryId: null } : categoryId ? { categoryId } : {}),
-      ...(accountId && { accountId }),
+      // `accountId` (legado, um só) e o recorte por recursos se somam.
+      AND: [accountId ? { accountId } : {}, scopeWhere(scoped)],
       ...(status && { status }),
       ...(source && { source }),
       ...(recurrenceType && { recurrenceType }),
@@ -56,6 +60,11 @@ export class TransactionsService {
           }
         : {}),
     };
+  }
+
+  async findAll(userId: string, filters: ListTransactionsDto) {
+    const { page = 1, limit = 10, sortBy = 'transactionDate', order = 'desc' } = filters;
+    const where = await this.buildWhere(userId, filters);
 
     const validSortFields: Record<string, string> = {
       transactionDate: 'transactionDate',
@@ -84,6 +93,68 @@ export class TransactionsService {
         limit,
         totalPages: Math.ceil(total / limit),
       },
+    };
+  }
+
+  /**
+   * Totais dos lançamentos que a listagem mostraria com os mesmos filtros —
+   * todas as páginas, não só a atual. Só confirmados entram na soma: com o
+   * filtro `status=cancelled`, os totais são zero.
+   */
+  async summary(userId: string, filters: TransactionFiltersDto) {
+    const where: Prisma.TransactionWhereInput = {
+      AND: [
+        await this.buildWhere(userId, filters),
+        { status: 'confirmed', type: { in: ['income', 'expense'] } },
+      ],
+    };
+
+    const [byType, byCategory] = await Promise.all([
+      this.prisma.transaction.groupBy({
+        by: ['type'],
+        where,
+        _sum: { amount: true },
+        _count: { _all: true },
+      }),
+      this.prisma.transaction.groupBy({
+        by: ['type', 'categoryId'],
+        where,
+        _sum: { amount: true },
+      }),
+    ]);
+
+    const totalOf = (type: string) =>
+      Number(byType.find((row) => row.type === type)?._sum.amount ?? 0);
+    const income = totalOf('income');
+    const expense = totalOf('expense');
+
+    const categoryIds = byCategory.map((row) => row.categoryId).filter(Boolean) as string[];
+    const categories = await this.prisma.category.findMany({
+      where: { id: { in: categoryIds } },
+      select: { id: true, name: true, color: true },
+    });
+    const categoryById = new Map(categories.map((c) => [c.id, c]));
+
+    return {
+      income,
+      expense,
+      net: income - expense,
+      count: byType.reduce((sum, row) => sum + row._count._all, 0),
+      byCategory: byCategory
+        .map((row) => {
+          const total = Number(row._sum.amount ?? 0);
+          const category = row.categoryId ? categoryById.get(row.categoryId) : undefined;
+          const typeTotal = row.type === 'income' ? income : expense;
+          return {
+            type: row.type as 'income' | 'expense',
+            categoryId: row.categoryId,
+            categoryName: category?.name ?? 'Sem categoria',
+            color: category?.color ?? null,
+            total,
+            percentage: typeTotal > 0 ? (total / typeTotal) * 100 : 0,
+          };
+        })
+        .sort((a, b) => b.total - a.total),
     };
   }
 

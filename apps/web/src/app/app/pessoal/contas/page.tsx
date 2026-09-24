@@ -164,7 +164,10 @@ export default function ContasPage() {
                 >
                   {formatCurrency(Number(acc.currentBalance))}
                 </p>
-                <div className="flex gap-2 mt-4">
+                <div className="flex flex-wrap gap-2 mt-4">
+                  <Button size="sm" variant="outline" asChild>
+                    <Link href={`/app/pessoal/contas/${acc.id}`}>Movimentações</Link>
+                  </Button>
                   <Button size="sm" variant="outline" onClick={() => openEdit(acc)}>
                     Editar
                   </Button>

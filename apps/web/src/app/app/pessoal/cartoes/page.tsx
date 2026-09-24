@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import Link from 'next/link';
 import { Plus, CreditCard as CreditCardIcon, Star } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
@@ -158,7 +159,12 @@ export default function CartoesPage() {
                       </span>
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
-                          <p className="truncate font-medium">{card.name}</p>
+                          <Link
+                            href={`/app/pessoal/cartoes/${card.id}`}
+                            className="truncate font-medium hover:underline"
+                          >
+                            {card.name}
+                          </Link>
                           {card.isPrimary && (
                             <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400" />
                           )}

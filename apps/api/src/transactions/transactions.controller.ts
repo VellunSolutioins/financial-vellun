@@ -17,7 +17,7 @@ import { ActiveSubscriptionGuard } from '../billing/guards/active-subscription.g
 import { TransactionsService } from './transactions.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
-import { ListTransactionsDto } from './dto/list-transactions.dto';
+import { ListTransactionsDto, TransactionFiltersDto } from './dto/list-transactions.dto';
 
 @ApiCookieAuth()
 @ApiTags('transactions')
@@ -30,6 +30,13 @@ export class TransactionsController {
   findAll(@Req() req: Request, @Query() filters: ListTransactionsDto) {
     const user = req.user as any;
     return this.transactionsService.findAll(user.id, filters);
+  }
+
+  /** Totais (receita, despesa, por categoria) com os mesmos filtros da listagem. */
+  @Get('summary')
+  summary(@Req() req: Request, @Query() filters: TransactionFiltersDto) {
+    const user = req.user as any;
+    return this.transactionsService.summary(user.id, filters);
   }
 
   @Get(':id')

@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import {
   BarChart,
   Bar,
@@ -25,6 +25,10 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Select } from '@/components/ui/select';
+import { useFinancialResources } from '@/hooks/useFinancialResources';
+import { resourceQuery, useResourceFilter } from '@/hooks/useResourceFilter';
+import { ResourceFilter } from '@/components/resources/ResourceFilter';
+import { DateBasisNote } from '@/components/resources/DateBasisNote';
 import { apiClient } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 
@@ -167,8 +171,19 @@ function TrendBadge({ value, invert = false }: { value: number | null; invert?: 
 }
 
 export default function DashboardPage() {
+  return (
+    <Suspense>
+      <DashboardContent />
+    </Suspense>
+  );
+}
+
+function DashboardContent() {
   const [data, setData] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const { data: resources } = useFinancialResources();
+  const { selection, setSelection } = useResourceFilter();
+  const scopeParams = new URLSearchParams(resourceQuery(selection)).toString();
 
   const [evolutionMonths, setEvolutionMonths] = useState(12);
   const [selectedMonth, setSelectedMonth] = useState('');
@@ -177,13 +192,15 @@ export default function DashboardPage() {
 
   useEffect(() => {
     apiClient
-      .get<DashboardSummary>('/dashboard/summary')
+      .get<DashboardSummary>(`/dashboard/summary?${scopeParams}`)
       .then((d) => {
         setData(d);
-        setSelectedMonth(lastMonthWithMovement(d.monthlyComparison));
+        setSelectedMonth((current) => current || lastMonthWithMovement(d.monthlyComparison));
       })
       .catch(console.error)
       .finally(() => setLoading(false));
+    // Só a primeira carga escolhe o mês; as seguintes seguem o efeito abaixo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -191,21 +208,23 @@ export default function DashboardPage() {
     const { start, end } = monthRange(selectedMonth);
     setLoading(true);
     apiClient
-      .get<DashboardSummary>(`/dashboard/summary?period_start=${start}&period_end=${end}`)
+      .get<DashboardSummary>(
+        `/dashboard/summary?period_start=${start}&period_end=${end}&${scopeParams}`,
+      )
       .then(setData)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [selectedMonth]);
+  }, [selectedMonth, scopeParams]);
 
   useEffect(() => {
     if (!selectedMonth) return;
     setDailyLoading(true);
     apiClient
-      .get<DailyBreakdown>(`/dashboard/daily?month=${selectedMonth}`)
+      .get<DailyBreakdown>(`/dashboard/daily?month=${selectedMonth}&${scopeParams}`)
       .then(setDaily)
       .catch(console.error)
       .finally(() => setDailyLoading(false));
-  }, [selectedMonth]);
+  }, [selectedMonth, scopeParams]);
 
   const evolutionData = useMemo(
     () =>
@@ -286,18 +305,22 @@ export default function DashboardPage() {
             Visão geral das suas finanças neste período.
           </p>
         </div>
-        <Select
-          value={selectedMonth}
-          onChange={(e) => setSelectedMonth(e.target.value)}
-          className="h-9 w-auto text-sm"
-        >
-          {monthOptions.map((m) => (
-            <option key={m} value={m}>
-              {monthLabelFull(m)}
-            </option>
-          ))}
-        </Select>
+        <div className="flex flex-wrap items-center gap-2">
+          <ResourceFilter resources={resources} value={selection} onChange={setSelection} />
+          <Select
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+            className="h-9 w-auto text-sm"
+          >
+            {monthOptions.map((m) => (
+              <option key={m} value={m}>
+                {monthLabelFull(m)}
+              </option>
+            ))}
+          </Select>
+        </div>
       </div>
+      <DateBasisNote />
 
       {/* Cards de totais */}
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
