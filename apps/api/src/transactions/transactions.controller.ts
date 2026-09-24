@@ -18,6 +18,7 @@ import { TransactionsService } from './transactions.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { ListTransactionsDto, TransactionFiltersDto } from './dto/list-transactions.dto';
+import { RefundTransactionDto } from './dto/refund-transaction.dto';
 
 @ApiCookieAuth()
 @ApiTags('transactions')
@@ -55,6 +56,13 @@ export class TransactionsController {
   create(@Req() req: Request, @Body() dto: CreateTransactionDto) {
     const user = req.user as any;
     return this.transactionsService.create(user.id, dto);
+  }
+
+  /** Estorna uma despesa (ou, com `scope: series`, a compra parcelada inteira). */
+  @Post(':id/refund')
+  refund(@Req() req: Request, @Param('id') id: string, @Body() dto: RefundTransactionDto) {
+    const user = req.user as any;
+    return this.transactionsService.refund(user.id, id, dto);
   }
 
   @Patch(':id')

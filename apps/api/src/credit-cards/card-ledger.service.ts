@@ -15,8 +15,11 @@ import { CycleConfig, InvoiceAmounts, InvoiceSpan, cycleFor, toCents } from './i
 
 export type StoredSpan = InvoiceSpan & { id: string };
 
-/** Tipos que entram em fatura: compras (e, na fase 4, estornos). */
-export const INVOICE_ENTRY_TYPES = ['expense'] as const;
+/**
+ * Tipos que entram em fatura: compras e estornos. As pernas de pagamento
+ * (`transfer`) não: o pagamento aponta para a fatura pelo `CardPayment`.
+ */
+export const INVOICE_ENTRY_TYPES = ['expense', 'refund'] as const;
 
 export function toStoredSpan(row: CreditCardInvoice): StoredSpan {
   return {
@@ -119,8 +122,10 @@ export class CardLedgerService {
    */
   async rebuildFutureInvoices(card: CreditCard): Promise<void> {
     const today = toDbDate(todaySaoPaulo());
+    // Fatura futura já paga (pagamento antecipado) fica como está: o pagamento
+    // aponta para ela.
     const future = await this.prisma.creditCardInvoice.findMany({
-      where: { creditCardId: card.id, periodStart: { gt: today } },
+      where: { creditCardId: card.id, periodStart: { gt: today }, payments: { none: {} } },
       select: { id: true },
     });
     if (future.length === 0) return;
@@ -137,6 +142,54 @@ export class CardLedgerService {
       this.prisma.creditCardInvoice.deleteMany({ where: { id: { in: futureIds } } }),
     ]);
     await this.syncTransactions(affected.map((t) => t.id));
+  }
+
+  /**
+   * Por que cada lançamento não pode mudar de valor, data, conta, tipo ou
+   * status. Perna de pagamento só muda revertendo o pagamento; cobrança em
+   * fatura fechada ou com pagamento ativo só se corrige com estorno. Descrição
+   * e categoria continuam editáveis (não mexem em valores).
+   */
+  async lockReasons(
+    txs: readonly { id: string; invoiceId: string | null; cardPaymentId: string | null }[],
+  ): Promise<Map<string, string>> {
+    const reasons = new Map<string, string>();
+    const invoiceIds = [...new Set(txs.map((t) => t.invoiceId).filter(Boolean))] as string[];
+    const invoices = invoiceIds.length
+      ? await this.prisma.creditCardInvoice.findMany({
+          where: { id: { in: invoiceIds } },
+          select: {
+            id: true,
+            closingDate: true,
+            _count: { select: { payments: { where: { status: 'active' } } } },
+          },
+        })
+      : [];
+    const today = todaySaoPaulo();
+    const byId = new Map(invoices.map((i) => [i.id, i]));
+    for (const tx of txs) {
+      if (tx.cardPaymentId) {
+        reasons.set(
+          tx.id,
+          'Este lançamento faz parte de um pagamento de fatura. Para desfazer, reverta o pagamento no cartão.',
+        );
+        continue;
+      }
+      const invoice = tx.invoiceId ? byId.get(tx.invoiceId) : undefined;
+      if (!invoice) continue;
+      if (compareCalendarDays(today, calendarDayFromUtcDate(invoice.closingDate)) >= 0) {
+        reasons.set(
+          tx.id,
+          'Este lançamento está em uma fatura fechada. Valor, data, cartão e cancelamento não mudam mais: use estorno.',
+        );
+      } else if (invoice._count.payments > 0) {
+        reasons.set(
+          tx.id,
+          'A fatura deste lançamento já tem pagamento. Valor, data, cartão e cancelamento não mudam mais: use estorno.',
+        );
+      }
+    }
+    return reasons;
   }
 
   /** Depois de excluir lançamentos de uma conta: some com faturas futuras vazias. */
@@ -159,22 +212,35 @@ export class CardLedgerService {
       orderBy: { closingDate: 'asc' },
     });
     const invoiceIds = rows.map((r) => r.id);
-    const charges = invoiceIds.length
-      ? await this.prisma.transaction.groupBy({
-          by: ['invoiceId'],
-          where: { invoiceId: { in: invoiceIds }, status: 'confirmed', type: 'expense' },
-          _sum: { amount: true },
-        })
-      : [];
-    const chargesById = new Map(charges.map((c) => [c.invoiceId, toCents(c._sum.amount)]));
+    const [entries, payments] = invoiceIds.length
+      ? await Promise.all([
+          this.prisma.transaction.groupBy({
+            by: ['invoiceId', 'type'],
+            where: {
+              invoiceId: { in: invoiceIds },
+              status: 'confirmed',
+              type: { in: [...INVOICE_ENTRY_TYPES] },
+            },
+            _sum: { amount: true },
+          }),
+          this.prisma.cardPayment.groupBy({
+            by: ['invoiceId'],
+            where: { invoiceId: { in: invoiceIds }, status: 'active' },
+            _sum: { amount: true },
+          }),
+        ])
+      : [[], []];
+    const sumOf = (invoiceId: string, type: string) =>
+      toCents(entries.find((e) => e.invoiceId === invoiceId && e.type === type)?._sum.amount);
+    const paidById = new Map(payments.map((p) => [p.invoiceId, toCents(p._sum.amount)]));
 
     for (const row of rows) {
       const list = result.get(row.creditCardId) ?? [];
       list.push({
         span: toStoredSpan(row),
-        chargesCents: chargesById.get(row.id) ?? 0,
-        refundsCents: 0,
-        paymentsCents: 0,
+        chargesCents: sumOf(row.id, 'expense'),
+        refundsCents: sumOf(row.id, 'refund'),
+        paymentsCents: paidById.get(row.id) ?? 0,
       });
       result.set(row.creditCardId, list);
     }
@@ -318,6 +384,7 @@ export class CardLedgerService {
         creditCardId,
         periodStart: { gt: toDbDate(todaySaoPaulo()) },
         transactions: { none: {} },
+        payments: { none: {} },
       } satisfies Prisma.CreditCardInvoiceWhereInput,
     });
   }

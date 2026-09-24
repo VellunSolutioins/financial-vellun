@@ -65,3 +65,10 @@ async def test_api_antiga_sem_kind_trata_tudo_como_conta(catalogo):
     catalogo[:] = [{"id": "a1", "name": "Conta"}]
     assert await TransactionCreator()._resolve_account("u1", None) == "a1"
     assert display_name(catalogo[0]) == "Conta"
+
+
+async def test_receita_nunca_vai_para_cartao(catalogo):
+    # Mesmo citando o cartão, receita cai na conta comum (cartão não recebe receita).
+    assert await TransactionCreator()._resolve_account("u1", "Nubank", "income") == "acc-1"
+    catalogo[:] = [RECURSOS[0]]
+    assert await TransactionCreator()._resolve_account("u1", "Nubank", "income") is None

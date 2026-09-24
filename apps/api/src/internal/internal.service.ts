@@ -14,7 +14,10 @@ import { CreateAiTransactionDto } from './dto/create-ai-transaction.dto';
 import { AiEventDto } from './dto/ai-event.dto';
 import { normalizePhone } from '../common/phone.util';
 import { parseDateOnly } from '../common/date.util';
-import { assertAccountAcceptsEntries } from '../transactions/transactions.service';
+import {
+  assertAccountAcceptsEntries,
+  assertAccountAcceptsType,
+} from '../transactions/transactions.service';
 import { CardLedgerService } from '../credit-cards/card-ledger.service';
 
 /** Vínculo que identifica o usuário: verificado e não revogado. */
@@ -179,6 +182,7 @@ export class InternalService {
       throw new BadRequestException('Conta inválida para o usuário');
     }
     assertAccountAcceptsEntries(account);
+    assertAccountAcceptsType(account, dto.type);
 
     if (dto.categoryId) {
       const category = await this.prisma.category.findUnique({ where: { id: dto.categoryId } });

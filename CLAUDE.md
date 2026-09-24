@@ -41,8 +41,9 @@ financial-vellun/
 ## Estrutura interna dos apps
 
 ```
-apps/api/src/        accounts/ auth/ billing/ categories/ contacts/ dashboard/
-                     internal/ notifications/ observability/ ops/ transactions/ users/
+apps/api/src/        accounts/ auth/ billing/ categories/ contacts/ credit-cards/ dashboard/
+                     financial-resources/ internal/ notifications/ observability/ ops/
+                     transactions/ users/
                      prisma/ (cada módulo: *.module/*.controller/*.service + dto/)
                      observability/ (métricas, health, correlação, log estruturado)
                      ops/ (auth GitHub OAuth, audit append-only, operators)
@@ -75,6 +76,8 @@ pnpm format:check                  # checar formatação
 pnpm --filter @financial-vellun/api exec prisma migrate deploy   # aplicar migrations
 pnpm --filter @financial-vellun/api exec prisma migrate reset    # resetar (dev)
 pnpm --filter @financial-vellun/api db:seed                      # categorias padrão + usuário demo
+pnpm --filter @financial-vellun/api db:audit:cards               # relatório (só leitura) de dados de cartão legados
+pnpm --filter @financial-vellun/api db:backfill:invoices         # atribui faturas de cartões configurados (idempotente)
 ```
 
 | Serviço            | URL                                                         |

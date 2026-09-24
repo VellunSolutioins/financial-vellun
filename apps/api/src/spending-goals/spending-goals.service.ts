@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { startOfMonthUtc, endOfMonthUtc } from '../common/date.util';
 
 import { CreateSpendingGoalDto } from './dto/create-spending-goal.dto';
+import { NET_EXPENSE_TYPES, netExpenseByCategory, roundCents } from '../transactions/net-expense';
 import { UpdateSpendingGoalDto } from './dto/update-spending-goal.dto';
 
 /** Faixas de comprometimento da meta de gasto por categoria (doc "Metas de Gastos"). */
@@ -41,18 +42,24 @@ export class SpendingGoalsService {
   private async spentByCategory(userId: string, categoryIds: string[]) {
     if (categoryIds.length === 0) return new Map<string, number>();
     const { start, end } = this.currentMonthRange();
+    // Despesa líquida: um estorno devolve à meta o que tinha consumido.
     const spent = await this.prisma.transaction.groupBy({
-      by: ['categoryId'],
+      by: ['categoryId', 'type'],
       where: {
         userId,
-        type: 'expense',
+        type: { in: [...NET_EXPENSE_TYPES] },
         status: 'confirmed',
         categoryId: { in: categoryIds },
         transactionDate: { gte: start, lte: end },
       },
       _sum: { amount: true },
     });
-    return new Map(spent.map((s) => [s.categoryId as string, Number(s._sum.amount ?? 0)]));
+    return new Map(
+      [...netExpenseByCategory(spent)].map(([categoryId, total]) => [
+        categoryId as string,
+        roundCents(total),
+      ]),
+    );
   }
 
   async findAll(userId: string) {

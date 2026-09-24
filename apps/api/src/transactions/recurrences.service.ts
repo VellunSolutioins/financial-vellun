@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, RecurrenceFrequency } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
@@ -181,6 +181,9 @@ export class RecurrencesService {
 
   async update(userId: string, seriesId: string, dto: UpdateRecurrenceDto) {
     const future = await this.findFuture(userId, seriesId);
+    const changesValue =
+      dto.amount !== undefined || dto.accountId !== undefined || dto.dueDay !== undefined;
+    if (changesValue) await this.assertUnlocked(future);
     const accountChanged =
       dto.accountId !== undefined && future.some((o) => o.accountId !== dto.accountId);
     if (accountChanged || dto.categoryId !== undefined) {
@@ -188,6 +191,7 @@ export class RecurrencesService {
         userId,
         accountChanged ? dto.accountId : undefined,
         dto.categoryId,
+        future[0].type,
       );
     }
 
@@ -219,6 +223,7 @@ export class RecurrencesService {
   /** Pausar cancela as ocorrências de hoje em diante; reativar as confirma de novo. */
   async setActive(userId: string, seriesId: string, active: boolean) {
     const future = await this.findFuture(userId, seriesId);
+    await this.assertUnlocked(future);
     await this.prisma.transaction.updateMany({
       where: {
         userId,
@@ -235,11 +240,27 @@ export class RecurrencesService {
   /** Exclui as ocorrências de hoje em diante. As passadas não são afetadas. */
   async remove(userId: string, seriesId: string) {
     const future = await this.findFuture(userId, seriesId);
+    await this.assertUnlocked(future);
     await this.prisma.transaction.deleteMany({
       where: { userId, seriesId, transactionDate: this.fromToday() },
     });
     await this.recalculate(future);
     return { message: 'Recorrência excluída' };
+  }
+
+  /**
+   * Ocorrência de cartão em fatura fechada ou já paga não muda de valor, data
+   * nem status (mesma regra dos lançamentos avulsos).
+   */
+  private async assertUnlocked(
+    occurrences: { id: string; invoiceId: string | null; cardPaymentId: string | null }[],
+  ) {
+    const [reason] = (await this.cardLedger.lockReasons(occurrences)).values();
+    if (reason) {
+      throw new ConflictException(
+        `${reason} Altere a recorrência depois dessa ocorrência ou edite só a descrição e a categoria.`,
+      );
+    }
   }
 
   private async findFuture(userId: string, seriesId: string) {

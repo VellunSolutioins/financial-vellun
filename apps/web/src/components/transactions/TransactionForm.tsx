@@ -88,7 +88,8 @@ export function TransactionForm({ transaction, fixedOnly = false, onSuccess, onC
   } = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: {
-      type: transaction?.type ?? 'expense',
+      // Só receita e despesa chegam aqui (estorno e pagamento abrem os detalhes).
+      type: transaction?.type === 'income' ? 'income' : 'expense',
       amount: transaction ? formatCurrencyInput(Number(transaction.amount)) : '',
       description: transaction?.description ?? '',
       accountId: transaction?.accountId ?? '',

@@ -165,11 +165,12 @@ integration('faturas, ciclos e limite (PostgreSQL)', () => {
 
   it('editar a data reatribui; cancelar tira da fatura e some com a futura vazia', async () => {
     const card = await cardSince(10, 17);
-    const tx = await purchase(card.accountId, 30, '2026-02-05');
-    expect((await invoiceOf(tx.id))?.referenceMonth).toBe('2026-02');
+    // Fatura aberta (futura): edição livre, com reatribuição.
+    const tx = await purchase(card.accountId, 30, '2099-02-05');
+    expect((await invoiceOf(tx.id))?.referenceMonth).toBe('2099-02');
 
-    await transactions.update(userId, tx.id, { transactionDate: '2026-02-15' });
-    expect((await invoiceOf(tx.id))?.referenceMonth).toBe('2026-03');
+    await transactions.update(userId, tx.id, { transactionDate: '2099-02-15' });
+    expect((await invoiceOf(tx.id))?.referenceMonth).toBe('2099-03');
 
     const future = await purchase(card.accountId, 40, '2099-01-05');
     const futureInvoice = await invoiceOf(future.id);

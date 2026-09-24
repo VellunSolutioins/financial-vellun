@@ -21,7 +21,12 @@ import {
 
 import { healthFromPercentage, incomeHealthFromPercentage } from './card-health';
 import { cardNeedsSetup } from './card-setup';
-import { CardLedgerService, StoredSpan, toDbDate } from './card-ledger.service';
+import {
+  CardLedgerService,
+  INVOICE_ENTRY_TYPES,
+  StoredSpan,
+  toDbDate,
+} from './card-ledger.service';
 import { CreateCreditCardDto } from './dto/create-credit-card.dto';
 import { SetupCreditCardDto } from './dto/setup-credit-card.dto';
 import { UpdateCreditCardDto } from './dto/update-credit-card.dto';
@@ -330,19 +335,40 @@ export class CreditCardsService {
     return invoices.map((i) => invoiceView(i, today, current)).reverse();
   }
 
-  /** Uma fatura com os lançamentos (compras e parcelas) que a compõem, em `items`. */
+  /**
+   * Uma fatura com os lançamentos que a compõem (compras, parcelas e estornos,
+   * em `items`) e os pagamentos, ativos e revertidos (`paymentRecords`).
+   */
   async invoice(userId: string, id: string, invoiceId: string) {
     const card = await this.findOwned(userId, id);
     const views = await this.invoices(userId, card.id);
     const view = views.find((v) => v.id === invoiceId);
     if (!view) throw new NotFoundException('Fatura não encontrada');
 
-    const items = await this.prisma.transaction.findMany({
-      where: { invoiceId, status: 'confirmed', type: 'expense' },
-      include: { category: { select: { id: true, name: true, color: true } } },
-      orderBy: [{ transactionDate: 'asc' }, { createdAt: 'asc' }],
-    });
-    return { ...view, items };
+    const [items, paymentRecords] = await Promise.all([
+      this.prisma.transaction.findMany({
+        where: { invoiceId, status: 'confirmed', type: { in: [...INVOICE_ENTRY_TYPES] } },
+        include: { category: { select: { id: true, name: true, color: true } } },
+        orderBy: [{ transactionDate: 'asc' }, { createdAt: 'asc' }],
+      }),
+      this.prisma.cardPayment.findMany({
+        where: { invoiceId },
+        include: { sourceAccount: { select: { id: true, name: true } } },
+        orderBy: [{ paymentDate: 'asc' }, { createdAt: 'asc' }],
+      }),
+    ]);
+    return {
+      ...view,
+      items,
+      paymentRecords: paymentRecords.map((p) => ({
+        id: p.id,
+        amount: Number(p.amount),
+        paymentDate: p.paymentDate.toISOString().slice(0, 10),
+        status: p.status,
+        reversedAt: p.reversedAt,
+        sourceAccount: p.sourceAccount,
+      })),
+    };
   }
 
   async setPrimary(userId: string, id: string) {

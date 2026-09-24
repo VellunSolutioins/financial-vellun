@@ -62,7 +62,8 @@ export interface CardInvoice {
 
 export interface InvoiceItem {
   id: string;
-  type: 'expense';
+  /** Compra/parcela ou estorno. */
+  type: 'expense' | 'refund';
   description: string;
   amount: number;
   transactionDate: string;
@@ -71,9 +72,19 @@ export interface InvoiceItem {
   category: { id: string; name: string; color: string | null } | null;
 }
 
-/** Fatura com os lançamentos que a compõem. */
+export interface InvoicePayment {
+  id: string;
+  amount: number;
+  paymentDate: string;
+  status: 'active' | 'reversed';
+  reversedAt: string | null;
+  sourceAccount: { id: string; name: string };
+}
+
+/** Fatura com os lançamentos que a compõem e os pagamentos. */
 export interface CardInvoiceDetail extends CardInvoice {
   items: InvoiceItem[];
+  paymentRecords: InvoicePayment[];
 }
 
 export interface CreditCardSummary {

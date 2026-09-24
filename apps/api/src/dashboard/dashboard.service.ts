@@ -3,6 +3,12 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { REGULAR_ACCOUNT_WHERE } from '../accounts/account-types';
 import {
+  NET_EXPENSE_TYPES,
+  netExpenseByCategory,
+  netExpenseOf,
+  roundCents,
+} from '../transactions/net-expense';
+import {
   ResourceFilterDto,
   ResourceScope,
   ScopedAccountIds,
@@ -29,7 +35,8 @@ const PENDING_PREVIEW_LIMIT = 5;
 /** Linha do comparativo mensal, como o Postgres devolve. */
 export type MonthlyTotalRow = {
   month: string;
-  type: 'income' | 'expense';
+  /** `refund` é subtraído da despesa do mês. */
+  type: 'income' | 'expense' | 'refund';
   /** `numeric` vem como texto para não passar por float no caminho. */
   total: string | null;
 };
@@ -94,27 +101,27 @@ export class DashboardService {
           },
           _sum: { amount: true },
         }),
-        this.prisma.transaction.aggregate({
+        this.prisma.transaction.groupBy({
+          by: ['type'],
           where: {
             userId,
             ...inScope,
-            type: 'expense',
+            type: { in: [...NET_EXPENSE_TYPES] },
             status: 'confirmed',
             transactionDate: { gte: start, lte: end },
           },
           _sum: { amount: true },
         }),
         this.prisma.transaction.groupBy({
-          by: ['categoryId'],
+          by: ['categoryId', 'type'],
           where: {
             userId,
             ...inScope,
-            type: 'expense',
+            type: { in: [...NET_EXPENSE_TYPES] },
             status: 'confirmed',
             transactionDate: { gte: start, lte: end },
           },
           _sum: { amount: true },
-          orderBy: { _sum: { amount: 'desc' } },
         }),
         this.prisma.transaction.findMany({
           where: { userId, ...inScope },
@@ -138,22 +145,12 @@ export class DashboardService {
 
     const totalBalance = accounts.reduce((sum, a) => sum + Number(a.currentBalance), 0);
     const totalIncome = Number(incomeAgg._sum.amount ?? 0);
-    const totalExpense = Number(expenseAgg._sum.amount ?? 0);
-
-    // Resolve category names
-    const categoryIds = expensesByCategory.map((e) => e.categoryId).filter(Boolean) as string[];
-    const categories = await this.prisma.category.findMany({
-      where: { id: { in: categoryIds } },
-      select: { id: true, name: true },
-    });
-    const categoryMap = Object.fromEntries(categories.map((c) => [c.id, c.name]));
-
-    const expensesByCategoryResult = expensesByCategory.map((e) => ({
-      categoryId: e.categoryId,
-      categoryName: e.categoryId ? (categoryMap[e.categoryId] ?? 'Sem categoria') : 'Sem categoria',
-      total: Number(e._sum.amount ?? 0),
-      percentage: totalExpense > 0 ? (Number(e._sum.amount ?? 0) / totalExpense) * 100 : 0,
-    }));
+    // Despesa líquida de estornos (competência).
+    const totalExpense = roundCents(netExpenseOf(expenseAgg));
+    const expensesByCategoryResult = await this.categoryTotals(
+      netExpenseByCategory(expensesByCategory),
+      totalExpense,
+    );
 
     // Monthly comparison (last 12 months) — usado no gráfico de evolução mensal
     const monthlyComparison = await this.getMonthlyComparison(userId, 12, scoped);
@@ -207,29 +204,28 @@ export class DashboardService {
           userId,
           ...inScope,
           status: 'confirmed',
-          type: { in: ['income', 'expense'] },
+          type: { in: ['income', 'expense', 'refund', 'transfer'] },
           transactionDate: { gte: start, lte: end },
         },
         select: {
           type: true,
           amount: true,
           transactionDate: true,
+          transferDirection: true,
           account: { select: { type: true } },
         },
         orderBy: { transactionDate: 'asc' },
       }),
       this.prisma.transaction.groupBy({
-        by: ['categoryId'],
+        by: ['categoryId', 'type'],
         where: {
           userId,
           ...inScope,
-          type: 'expense',
+          type: { in: [...NET_EXPENSE_TYPES] },
           status: 'confirmed',
           transactionDate: { gte: start, lte: end },
         },
         _sum: { amount: true },
-        orderBy: { _sum: { amount: 'desc' } },
-        take: 5,
       }),
       this.prisma.transaction.findMany({
         where: { userId, ...inScope, type: 'income', ...upcoming },
@@ -261,17 +257,26 @@ export class DashboardService {
     const dailyMap = new Map<string, { income: number; expense: number }>();
     for (const t of confirmedInPeriod) {
       const amount = Number(t.amount);
+      // Competência: receita e despesa líquida de estornos.
       if (t.type === 'income') totalIncome += amount;
-      else totalExpense += amount;
+      else if (t.type === 'expense') totalExpense += amount;
+      else if (t.type === 'refund') totalExpense -= amount;
 
-      // Caixa: só o que passou por conta comum.
+      // Caixa: só o que passou por conta comum. Estorno é entrada; pagamento de
+      // fatura (perna que sai da conta) é saída; transferência sem direção
+      // (legado) não conta.
       if (t.account.type === 'credit_card') continue;
+      const cashIn = t.type === 'income' || t.type === 'refund';
+      const cashOut =
+        t.type === 'expense' || (t.type === 'transfer' && t.transferDirection === 'out');
+      if (!cashIn && !cashOut) continue;
       const day = t.transactionDate.toISOString().slice(0, 10);
       const entry = dailyMap.get(day) ?? { income: 0, expense: 0 };
-      if (t.type === 'income') entry.income += amount;
+      if (cashIn) entry.income += amount;
       else entry.expense += amount;
       dailyMap.set(day, entry);
     }
+    totalExpense = roundCents(totalExpense);
 
     // Fluxo de caixa diário com saldo acumulado no período
     let runningBalance = 0;
@@ -282,19 +287,9 @@ export class DashboardService {
         return { date, income, expense, balance: runningBalance };
       });
 
-    const categoryIds = expensesByCategory.map((e) => e.categoryId).filter(Boolean) as string[];
-    const categories = await this.prisma.category.findMany({
-      where: { id: { in: categoryIds } },
-      select: { id: true, name: true },
-    });
-    const categoryMap = Object.fromEntries(categories.map((c) => [c.id, c.name]));
-
-    const topExpenseCategories = expensesByCategory.map((e) => ({
-      categoryId: e.categoryId,
-      categoryName: e.categoryId ? (categoryMap[e.categoryId] ?? 'Sem categoria') : 'Sem categoria',
-      total: Number(e._sum.amount ?? 0),
-      percentage: totalExpense > 0 ? (Number(e._sum.amount ?? 0) / totalExpense) * 100 : 0,
-    }));
+    const topExpenseCategories = (
+      await this.categoryTotals(netExpenseByCategory(expensesByCategory), totalExpense)
+    ).slice(0, 5);
 
     const receivableAgg = pendingTotals.find((p) => p.type === 'income');
     const payableAgg = pendingTotals.find((p) => p.type === 'expense');
@@ -347,7 +342,7 @@ export class DashboardService {
         userId,
         ...scopeWhere(scoped),
         status: 'confirmed',
-        type: { in: ['income', 'expense'] },
+        type: { in: ['income', ...NET_EXPENSE_TYPES] },
         transactionDate: { gte: start, lte: end },
       },
       select: { type: true, amount: true, transactionDate: true },
@@ -361,7 +356,8 @@ export class DashboardService {
       const entry = byDay.get(day);
       if (!entry) continue;
       if (t.type === 'income') entry.income += Number(t.amount);
-      else entry.expense += Number(t.amount);
+      else if (t.type === 'expense') entry.expense += Number(t.amount);
+      else entry.expense -= Number(t.amount);
     }
 
     return {
@@ -392,6 +388,25 @@ export class DashboardService {
    * como zero: a grade dos meses é montada aqui, e o resultado do banco só a
    * preenche.
    */
+  /** Categorias de despesa líquida, com nome e participação, da maior para a menor. */
+  private async categoryTotals(byCategory: Map<string | null, number>, totalExpense: number) {
+    const categoryIds = [...byCategory.keys()].filter(Boolean) as string[];
+    const categories = await this.prisma.category.findMany({
+      where: { id: { in: categoryIds } },
+      select: { id: true, name: true },
+    });
+    const nameOf = new Map(categories.map((c) => [c.id, c.name]));
+    return [...byCategory]
+      .map(([categoryId, total]) => ({
+        categoryId,
+        categoryName: (categoryId && nameOf.get(categoryId)) || 'Sem categoria',
+        total: roundCents(total),
+        percentage: totalExpense > 0 ? (total / totalExpense) * 100 : 0,
+      }))
+      .filter((c) => c.total !== 0)
+      .sort((a, b) => b.total - a.total);
+  }
+
   private async getMonthlyComparison(
     userId: string,
     months: number,
@@ -413,7 +428,7 @@ export class DashboardService {
         FROM "transactions"
        WHERE "user_id" = ${userId}
          AND "status" = 'confirmed'
-         AND "type" IN ('income', 'expense')
+         AND "type" IN ('income', 'expense', 'refund')
          ${inScope}
          AND "transaction_date" >= ${first.toISOString().slice(0, 10)}::date
          AND "transaction_date" <= ${last.toISOString().slice(0, 10)}::date
@@ -451,7 +466,9 @@ export function buildMonthlySeries(
     // Linha fora da janela (dado de borda) é ignorada, em vez de virar um mês
     // extra no meio do gráfico.
     if (index === undefined) continue;
-    series[index][row.type] = Number(row.total ?? 0);
+    const total = Number(row.total ?? 0);
+    if (row.type === 'refund') series[index].expense = roundCents(series[index].expense - total);
+    else series[index][row.type] = roundCents(series[index][row.type] + total);
   }
 
   return series;

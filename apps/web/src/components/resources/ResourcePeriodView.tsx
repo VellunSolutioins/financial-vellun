@@ -9,6 +9,7 @@ import { useTransactions } from '@/hooks/useTransactions';
 import { useTransactionSummary } from '@/hooks/useTransactionSummary';
 import { resourceQuery, type ResourceSelection } from '@/hooks/useResourceFilter';
 import { cn, formatDateBR } from '@/lib/utils';
+import { isInflow, signOf, typeLabel } from '@/lib/transaction-display';
 
 function formatCurrency(v: number) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
@@ -137,16 +138,19 @@ export function ResourcePeriodView({ selection, basis = 'competence' }: Props) {
                           : ''}
                       </p>
                       <p className="truncate text-xs text-muted-foreground">
-                        {formatDateBR(tx.transactionDate)} · {tx.category?.name ?? 'Sem categoria'}
+                        {formatDateBR(tx.transactionDate)} ·{' '}
+                        {tx.type === 'income' || tx.type === 'expense'
+                          ? (tx.category?.name ?? 'Sem categoria')
+                          : typeLabel(tx)}
                       </p>
                     </div>
                     <span
                       className={cn(
                         'shrink-0 text-sm font-semibold',
-                        tx.type === 'income' ? 'text-emerald-600' : 'text-rose-600',
+                        isInflow(tx) ? 'text-emerald-600' : 'text-rose-600',
                       )}
                     >
-                      {tx.type === 'income' ? '+' : '-'}
+                      {signOf(tx)}
                       {formatCurrency(Number(tx.amount))}
                     </span>
                   </li>

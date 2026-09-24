@@ -2,6 +2,11 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { useConfirm } from '@/components/ui/confirm';
+import { useToast } from '@/components/ui/toast';
+import { PayInvoiceForm } from '@/components/credit-cards/PayInvoiceForm';
+import { useFinancialResources } from '@/hooks/useFinancialResources';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
 import { Pagination } from '@/components/ui/pagination';
@@ -45,16 +50,18 @@ interface Props {
   card: CreditCard;
   /** Chamado quando uma ação na fatura muda os valores do cartão. */
   onChanged?: () => void;
-  /** Ações extras no detalhe da fatura (pagamentos, na fase 4). */
-  renderActions?: (invoice: CardInvoiceDetail, reload: () => void) => React.ReactNode;
 }
 
-/** Faturas do cartão (10 por página) e o detalhe de cada uma. */
-export function InvoicesTab({ card, onChanged, renderActions }: Props) {
+/** Faturas do cartão (10 por página), o detalhe de cada uma, pagamento e reversão. */
+export function InvoicesTab({ card, onChanged }: Props) {
   const [invoices, setInvoices] = useState<CardInvoice[] | null>(null);
   const [page, setPage] = useState(1);
   const [openId, setOpenId] = useState<string | null>(null);
   const [detail, setDetail] = useState<CardInvoiceDetail | null>(null);
+  const [paying, setPaying] = useState(false);
+  const { data: resources } = useFinancialResources();
+  const toast = useToast();
+  const confirm = useConfirm();
 
   const load = useCallback(() => {
     apiClient
@@ -76,6 +83,7 @@ export function InvoicesTab({ card, onChanged, renderActions }: Props) {
 
   useEffect(load, [load]);
   useEffect(() => {
+    setPaying(false);
     if (openId) loadDetail(openId);
   }, [openId, loadDetail]);
 
@@ -83,6 +91,28 @@ export function InvoicesTab({ card, onChanged, renderActions }: Props) {
     load();
     if (openId) loadDetail(openId);
     onChanged?.();
+  };
+
+  const reversePayment = async (paymentId: string) => {
+    if (!detail) return;
+    const ok = await confirm({
+      title: 'Reverter pagamento',
+      description:
+        'O valor volta para a conta de origem e a fatura fica em aberto de novo. O pagamento continua no histórico como revertido.',
+      confirmText: 'Reverter',
+      variant: 'destructive',
+    });
+    if (!ok) return;
+    try {
+      await apiClient.post(
+        `/credit-cards/${card.id}/invoices/${detail.id}/payments/${paymentId}/reverse`,
+        {},
+      );
+      toast.success('Pagamento revertido.');
+      reloadAll();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao reverter pagamento');
+    }
   };
 
   if (invoices === null) {
@@ -198,7 +228,60 @@ export function InvoicesTab({ card, onChanged, renderActions }: Props) {
               </dd>
             </dl>
 
-            {renderActions?.(detail, reloadAll)}
+            {paying ? (
+              <PayInvoiceForm
+                cardId={card.id}
+                invoice={detail}
+                accounts={resources?.accounts ?? []}
+                suggestedAccountId={card.paymentAccountId}
+                onSuccess={() => {
+                  setPaying(false);
+                  reloadAll();
+                }}
+                onCancel={() => setPaying(false)}
+              />
+            ) : (
+              <Button type="button" size="sm" className="w-full" onClick={() => setPaying(true)}>
+                {detail.remaining > 0 ? 'Pagar fatura' : 'Registrar pagamento'}
+              </Button>
+            )}
+
+            {detail.paymentRecords.length > 0 && (
+              <div className="space-y-1">
+                <p className="font-medium">Pagamentos</p>
+                <ul className="divide-y rounded-md border">
+                  {detail.paymentRecords.map((p) => (
+                    <li key={p.id} className="flex items-center justify-between gap-3 p-2">
+                      <div className="min-w-0">
+                        <p
+                          className={cn(
+                            'truncate',
+                            p.status === 'reversed' && 'text-muted-foreground line-through',
+                          )}
+                        >
+                          {formatCurrency(p.amount)} · {p.sourceAccount.name}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatDateBR(p.paymentDate)}
+                          {p.status === 'reversed' && ' · revertido'}
+                        </p>
+                      </div>
+                      {p.status === 'active' && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 shrink-0 px-2 text-destructive"
+                          onClick={() => void reversePayment(p.id)}
+                        >
+                          Reverter
+                        </Button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             <div className="space-y-1">
               <p className="font-medium">Lançamentos</p>
@@ -210,6 +293,11 @@ export function InvoicesTab({ card, onChanged, renderActions }: Props) {
                     <li key={item.id} className="flex items-center justify-between gap-3 p-2">
                       <div className="min-w-0">
                         <p className="truncate">
+                          {item.type === 'refund' && (
+                            <Badge variant="outline" className="mr-1 px-1.5 py-0 text-[10px]">
+                              Estorno
+                            </Badge>
+                          )}
                           {item.description}
                           {item.installmentTotal
                             ? ` (${item.installmentNumber}/${item.installmentTotal})`
@@ -220,7 +308,13 @@ export function InvoicesTab({ card, onChanged, renderActions }: Props) {
                           {item.category?.name ?? 'Sem categoria'}
                         </p>
                       </div>
-                      <span className="shrink-0 font-medium">
+                      <span
+                        className={cn(
+                          'shrink-0 font-medium',
+                          item.type === 'refund' && 'text-emerald-600',
+                        )}
+                      >
+                        {item.type === 'refund' ? '−' : ''}
                         {formatCurrency(Number(item.amount))}
                       </span>
                     </li>

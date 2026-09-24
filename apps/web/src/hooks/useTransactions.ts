@@ -2,10 +2,12 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { apiClient } from '@/lib/api-client';
+import type { LedgerType } from '@/lib/transaction-display';
 
 export interface Transaction {
   id: string;
-  type: 'income' | 'expense';
+  /** `refund` = estorno; `transfer` = perna de pagamento de fatura. */
+  type: LedgerType;
   amount: number;
   description: string;
   transactionDate: string;
@@ -20,6 +22,10 @@ export interface Transaction {
   seriesId?: string | null;
   installmentNumber?: number | null;
   installmentTotal?: number | null;
+  invoiceId?: string | null;
+  refundOfId?: string | null;
+  cardPaymentId?: string | null;
+  transferDirection?: 'in' | 'out' | null;
   createdAt: string;
 }
 

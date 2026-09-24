@@ -83,30 +83,35 @@ export class AccountsService {
   }
 
   /**
-   * Saldo = inicial + confirmados com data até hoje. Lançamento futuro (parcela
-   * ou mensalidade dos próximos meses) não entra: ele ainda não aconteceu. Por
-   * depender do dia, o saldo também é recomposto pelo `AccountBalanceScheduler`
-   * quando um lançamento futuro chega à sua data.
+   * Saldo = inicial + receitas − despesas + estornos − transferências que
+   * saíram + transferências que entraram, confirmados com data até hoje.
+   * Transferência antiga, sem direção, fica de fora como sempre ficou.
+   * Lançamento futuro (parcela ou mensalidade dos próximos meses) não entra:
+   * ele ainda não aconteceu. Por depender do dia, o saldo também é recomposto
+   * pelo `AccountBalanceScheduler` quando um lançamento futuro chega à sua data.
    */
   async recalculateBalance(accountId: string) {
     const account = await this.prisma.account.findUnique({ where: { id: accountId } });
     if (!account) return;
 
     const upToToday = { lte: endOfDayUtc(dateOnlyString(todaySaoPaulo())) };
-    const [income, expense] = await Promise.all([
-      this.prisma.transaction.aggregate({
-        where: { accountId, type: 'income', status: 'confirmed', transactionDate: upToToday },
-        _sum: { amount: true },
-      }),
-      this.prisma.transaction.aggregate({
-        where: { accountId, type: 'expense', status: 'confirmed', transactionDate: upToToday },
-        _sum: { amount: true },
-      }),
-    ]);
-
-    const totalIncome = Number(income._sum.amount ?? 0);
-    const totalExpense = Number(expense._sum.amount ?? 0);
-    const currentBalance = Number(account.initialBalance) + totalIncome - totalExpense;
+    const sums = await this.prisma.transaction.groupBy({
+      by: ['type', 'transferDirection'],
+      where: { accountId, status: 'confirmed', transactionDate: upToToday },
+      _sum: { amount: true },
+    });
+    const sign = (row: (typeof sums)[number]) => {
+      if (row.type === 'income' || row.type === 'refund') return 1;
+      if (row.type === 'expense') return -1;
+      if (row.type === 'transfer' && row.transferDirection === 'in') return 1;
+      if (row.type === 'transfer' && row.transferDirection === 'out') return -1;
+      return 0;
+    };
+    const movementCents = sums.reduce(
+      (total, row) => total + sign(row) * Math.round(Number(row._sum.amount ?? 0) * 100),
+      0,
+    );
+    const currentBalance = Number(account.initialBalance) + movementCents / 100;
 
     await this.prisma.account.update({
       where: { id: accountId },

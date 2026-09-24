@@ -60,7 +60,8 @@ class TransactionCreator:
         timeout ocorrido *depois* de o lancamento ter sido criado — gere um
         segundo lancamento: a API devolve o existente.
         """
-        account_id = await self._resolve_account(user_id, intent.account_name)
+        tx_type = intent.transaction_type.value if intent.transaction_type else "expense"
+        account_id = await self._resolve_account(user_id, intent.account_name, tx_type)
         if account_id is None:
             return {
                 "ok": False,
@@ -76,7 +77,7 @@ class TransactionCreator:
             "userId": user_id,
             "accountId": account_id,
             "categoryId": category_id,
-            "type": intent.transaction_type.value if intent.transaction_type else "expense",
+            "type": tx_type,
             "amount": intent.amount,
             "description": intent.description or raw_message,
             "transactionDate": intent.transaction_date or today_local().isoformat(),
@@ -118,16 +119,21 @@ class TransactionCreator:
         )
         return {"ok": True, "message": message, "transaction": transaction}
 
-    async def _resolve_account(self, user_id: str, account_name: str | None) -> str | None:
+    async def _resolve_account(
+        self, user_id: str, account_name: str | None, tx_type: str = "expense"
+    ) -> str | None:
         """``accountId`` do lançamento: conta comum ou conta interna de um cartão.
 
         O nome citado casa com contas e cartões (exato antes de parcial). Sem
         nome, ou sem casar, vale a primeira conta **comum** — uma compra só vai
-        para o cartão quando o usuário o menciona.
+        para o cartão quando o usuário o menciona. Receita nunca vai para cartão
+        (a API recusa: devolução de compra é estorno, feito no app).
         """
         # Mesma lista que o contexto do LLM já carregou neste job; dentro do
         # escopo de memo isto não gera chamada nova.
         resources = await user_catalog.accounts(user_id)
+        if tx_type == "income":
+            resources = [r for r in resources if not is_card(r)]
 
         if account_name:
             target = _normalize(account_name)
