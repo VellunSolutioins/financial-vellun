@@ -112,6 +112,7 @@ integration('visões por conta, cartão, conjunto e consolidado (PostgreSQL)', (
     const dash = (filter = {}) =>
       dashboard.getSummary(userId, period.periodStart, period.periodEnd, filter);
     expect((await dash()).totalExpense).toBe(550);
+    expect((await dash()).lastEntryMonth).toBe(month);
     expect((await dash({ accountIds: [accountId] })).totalExpense).toBe(200);
     expect((await dash({ cardIds: [cardId] })).totalExpense).toBe(350);
     const onlyCard = await dash({ cardIds: [cardId] });

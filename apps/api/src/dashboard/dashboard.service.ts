@@ -153,7 +153,21 @@ export class DashboardService {
     );
 
     // Monthly comparison (last 12 months) — usado no gráfico de evolução mensal
-    const monthlyComparison = await this.getMonthlyComparison(userId, 12, scoped);
+    const [monthlyComparison, lastEntry] = await Promise.all([
+      this.getMonthlyComparison(userId, 12, scoped),
+      // Até onde vão os lançamentos agendados (recorrências e parcelas): a tela
+      // oferece os meses futuros até aqui no seletor de mês.
+      this.prisma.transaction.aggregate({
+        where: {
+          userId,
+          ...inScope,
+          status: 'confirmed',
+          type: { in: ['income', ...NET_EXPENSE_TYPES] },
+        },
+        _max: { transactionDate: true },
+      }),
+    ]);
+    const lastDate = lastEntry._max.transactionDate;
 
     return {
       totalBalance,
@@ -164,6 +178,8 @@ export class DashboardService {
       recentTransactions,
       upcomingBills,
       monthlyComparison,
+      /** `YYYY-MM` do último lançamento confirmado (pode ser futuro); nulo se não há nenhum. */
+      lastEntryMonth: lastDate ? lastDate.toISOString().slice(0, 7) : null,
     };
   }
 

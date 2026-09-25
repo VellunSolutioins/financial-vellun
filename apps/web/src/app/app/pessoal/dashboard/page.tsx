@@ -45,6 +45,8 @@ interface DashboardSummary {
   }[];
   upcomingBills: UpcomingBill[];
   monthlyComparison: { month: string; income: number; expense: number }[];
+  /** `YYYY-MM` do último lançamento (pode ser futuro: recorrências e parcelas). */
+  lastEntryMonth: string | null;
 }
 
 interface DailyBreakdown {
@@ -114,6 +116,48 @@ function monthRange(month: string) {
     endDate.getUTCDate(),
   ).padStart(2, '0')}`;
   return { start, end };
+}
+
+/** Meses futuros no seletor: no máximo 5 anos, mesmo que haja recorrência mais longa. */
+const MAX_FUTURE_MONTHS = 60;
+
+function addMonths(ym: string, n: number) {
+  const [y, m] = ym.split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + n, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+/** Opções do seletor: os próximos meses (até o último lançamento agendado) e os anteriores. */
+function MonthOptions({ past, future }: { past: string[]; future: string[] }) {
+  if (future.length === 0) {
+    return (
+      <>
+        {past.map((m) => (
+          <option key={m} value={m}>
+            {monthLabelFull(m)}
+          </option>
+        ))}
+      </>
+    );
+  }
+  return (
+    <>
+      <optgroup label="Próximos meses (previsto)">
+        {future.map((m) => (
+          <option key={m} value={m}>
+            {monthLabelFull(m)}
+          </option>
+        ))}
+      </optgroup>
+      <optgroup label="Este mês e anteriores">
+        {past.map((m) => (
+          <option key={m} value={m}>
+            {monthLabelFull(m)}
+          </option>
+        ))}
+      </optgroup>
+    </>
+  );
 }
 
 function lastMonthWithMovement(months: DashboardSummary['monthlyComparison']) {
@@ -221,10 +265,22 @@ function DashboardContent() {
     [data, evolutionMonths],
   );
 
-  const monthOptions = useMemo(
-    () => (data?.monthlyComparison ?? []).map((m) => m.month).reverse(),
-    [data],
-  );
+  // O comparativo mensal termina no mês corrente; depois dele vêm os meses com
+  // lançamentos agendados (recorrências e parcelas), para o usuário vê-los.
+  const monthOptions = useMemo(() => {
+    const past = (data?.monthlyComparison ?? []).map((m) => m.month);
+    const current = past[past.length - 1];
+    const future: string[] = [];
+    if (current && data?.lastEntryMonth && data.lastEntryMonth > current) {
+      for (let i = 1; i <= MAX_FUTURE_MONTHS; i++) {
+        const month = addMonths(current, i);
+        if (month > data.lastEntryMonth) break;
+        future.push(month);
+      }
+    }
+    return { past: past.reverse(), future, current };
+  }, [data]);
+  const isFutureMonth = !!monthOptions.current && selectedMonth > monthOptions.current;
 
   const { incomeChange, expenseChange } = useMemo(() => {
     if (!data) return { incomeChange: null, expenseChange: null };
@@ -312,15 +368,17 @@ function DashboardContent() {
             onChange={(e) => setSelectedMonth(e.target.value)}
             className="h-9 w-auto text-sm"
           >
-            {monthOptions.map((m) => (
-              <option key={m} value={m}>
-                {monthLabelFull(m)}
-              </option>
-            ))}
+            <MonthOptions past={monthOptions.past} future={monthOptions.future} />
           </Select>
         </div>
       </div>
       <DateBasisNote />
+      {isFutureMonth && (
+        <p className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+          Mês futuro: receitas, despesas e categorias são previstas pelos lançamentos já agendados
+          (recorrências e parcelas). O saldo total é o de hoje.
+        </p>
+      )}
 
       {/* Cards de totais */}
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
@@ -362,7 +420,9 @@ function DashboardContent() {
           </div>
           <p className="text-xs text-muted-foreground">
             {data.totalIncome > 0
-              ? `Você está economizando ${savingsRate.toFixed(0)}% da sua receita neste período.`
+              ? isFutureMonth
+                ? `Previsão: economia de ${savingsRate.toFixed(0)}% da receita neste mês.`
+                : `Você está economizando ${savingsRate.toFixed(0)}% da sua receita neste período.`
               : 'Ainda sem receita registrada neste período para calcular.'}
           </p>
         </CardContent>
@@ -494,11 +554,7 @@ function DashboardContent() {
               onChange={(e) => setSelectedMonth(e.target.value)}
               className="h-8 w-auto text-xs"
             >
-              {monthOptions.map((m) => (
-                <option key={m} value={m}>
-                  {monthLabelFull(m)}
-                </option>
-              ))}
+              <MonthOptions past={monthOptions.past} future={monthOptions.future} />
             </Select>
           </CardHeader>
           <CardContent>
