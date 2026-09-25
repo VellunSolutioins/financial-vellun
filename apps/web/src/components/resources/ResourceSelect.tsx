@@ -15,18 +15,28 @@ interface Props extends Omit<SelectProps, 'children'> {
   purpose?: 'entry' | 'filter';
   /** Valor atual do lançamento em edição (mantém visível o cartão arquivado dele). */
   currentValue?: string;
+  /** `false` esconde os cartões (ex.: receita, que cartão não recebe). */
+  allowCards?: boolean;
 }
+
+/** `<option>` não aceita ícone: a estrela do preferencial vai no texto. */
+const star = (preferred: boolean) => (preferred ? ' ★' : '');
 
 /**
  * Seletor de conta ou cartão. O valor é sempre um `accountId` — no cartão, o da
  * conta interna dele —, porque é para ela que o lançamento aponta.
  */
 export const ResourceSelect = React.forwardRef<HTMLSelectElement, Props>(
-  ({ resources, emptyLabel, purpose = 'entry', currentValue, ...props }, ref) => {
+  (
+    { resources, emptyLabel, purpose = 'entry', currentValue, allowCards = true, ...props },
+    ref,
+  ) => {
     const accounts = resources?.accounts ?? [];
-    const cards = (resources?.cards ?? []).filter(
-      (c) => purpose === 'filter' || c.isActive || c.accountId === currentValue,
-    );
+    const cards = allowCards
+      ? (resources?.cards ?? []).filter(
+          (c) => purpose === 'filter' || c.isActive || c.accountId === currentValue,
+        )
+      : [];
 
     return (
       <Select ref={ref} {...props}>
@@ -36,6 +46,7 @@ export const ResourceSelect = React.forwardRef<HTMLSelectElement, Props>(
             {accounts.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name}
+                {star(a.isPreferred)}
               </option>
             ))}
           </optgroup>
@@ -45,6 +56,7 @@ export const ResourceSelect = React.forwardRef<HTMLSelectElement, Props>(
             {cards.map((c) => (
               <option key={c.id} value={c.accountId}>
                 {c.isActive ? c.name : `${c.name} (arquivado)`}
+                {star(c.isPreferred)}
               </option>
             ))}
           </optgroup>

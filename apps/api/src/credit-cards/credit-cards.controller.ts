@@ -106,12 +106,6 @@ export class CreditCardsController {
     return this.creditCardsService.update(user.id, id, dto);
   }
 
-  @Patch(':id/primary')
-  setPrimary(@Req() req: Request, @Param('id') id: string) {
-    const user = req.user as any;
-    return this.creditCardsService.setPrimary(user.id, id);
-  }
-
   @Delete(':id')
   remove(@Req() req: Request, @Param('id') id: string) {
     const user = req.user as any;

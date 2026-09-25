@@ -15,6 +15,9 @@ import { useConfirm } from '@/components/ui/confirm';
 import { CURRENCY_REGEX, currencyToNumber, maskCurrency } from '@/lib/masks';
 import { useAuth } from '@/contexts/auth-context';
 import Link from 'next/link';
+import { Star } from 'lucide-react';
+import { useFinancialResources } from '@/hooks/useFinancialResources';
+import { cn } from '@/lib/utils';
 
 interface Account {
   id: string;
@@ -67,12 +70,30 @@ export default function ContasPage() {
     defaultValues: { type: 'checking', initialBalance: '0,00' },
   });
 
+  const { data: resources, refetch: refetchResources, setPreferred } = useFinancialResources();
+  const preferredAccountId = resources?.preferredAccountId ?? null;
+
   const load = () =>
     apiClient
       .get<Account[]>('/accounts')
       .then(setAccounts)
       .catch(console.error)
       .finally(() => setLoading(false));
+
+  /** Liga ou desliga a conta como padrão dos novos lançamentos. */
+  const togglePreferred = async (acc: Account) => {
+    const isPreferred = acc.id === preferredAccountId;
+    try {
+      await setPreferred(isPreferred ? null : { accountId: acc.id });
+      toast.success(
+        isPreferred
+          ? 'Nenhuma conta ou cartão vem selecionado nos novos lançamentos.'
+          : `"${acc.name}" vem selecionada nos novos lançamentos.`,
+      );
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao definir o padrão dos lançamentos');
+    }
+  };
 
   useEffect(() => {
     void load();
@@ -121,6 +142,8 @@ export default function ContasPage() {
       await apiClient.delete(`/accounts/${id}`);
       toast.success('Conta desativada.');
       void load();
+      // Conta desativada deixa de ser a preferencial.
+      void refetchResources();
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Erro ao desativar conta');
     }
@@ -153,7 +176,15 @@ export default function ContasPage() {
           {accounts.map((acc) => (
             <Card key={acc.id}>
               <CardHeader className="pb-2">
-                <CardTitle className="text-base">{acc.name}</CardTitle>
+                <CardTitle className="flex min-w-0 items-center gap-1.5 text-base">
+                  <span className="truncate">{acc.name}</span>
+                  {acc.id === preferredAccountId && (
+                    <Star
+                      className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400"
+                      aria-label="Padrão nos lançamentos"
+                    />
+                  )}
+                </CardTitle>
                 <p className="text-xs text-muted-foreground">
                   {accountTypeLabels[acc.type] ?? acc.type}
                 </p>
@@ -180,6 +211,28 @@ export default function ContasPage() {
                     Desativar
                   </Button>
                 </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className={cn(
+                    'mt-2 h-8 px-2 text-xs',
+                    acc.id === preferredAccountId && 'font-medium text-amber-600',
+                  )}
+                  title={
+                    acc.id === preferredAccountId
+                      ? 'Deixar de usar como padrão'
+                      : 'Vir selecionada em novos lançamentos'
+                  }
+                  onClick={() => void togglePreferred(acc)}
+                >
+                  <Star
+                    className={cn(
+                      'mr-1 h-3.5 w-3.5',
+                      acc.id === preferredAccountId && 'fill-amber-400 text-amber-400',
+                    )}
+                  />
+                  {acc.id === preferredAccountId ? 'Padrão nos lançamentos' : 'Usar como padrão'}
+                </Button>
               </CardContent>
             </Card>
           ))}

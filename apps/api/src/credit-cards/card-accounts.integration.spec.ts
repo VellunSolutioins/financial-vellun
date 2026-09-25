@@ -10,7 +10,12 @@ import { CreditCardsService } from './credit-cards.service';
 const databaseUrl = process.env.SELECTED_FEATURES_TEST_DATABASE_URL;
 const integration = databaseUrl ? describe : describe.skip;
 
-/** Trecho de backfill da migração da fase 1, reexecutável (idempotente). */
+/**
+ * Trecho de backfill da migração da fase 1, reexecutável (idempotente). A
+ * coluna `is_primary` foi removida depois (migração `preferred_account`, ADR
+ * 0016): o `UPDATE` que marcava o "cartão principal" fica de fora e o `INSERT`
+ * perde a coluna. No banco, a migração original já rodou como estava.
+ */
 function backfillStatements(): string[] {
   const sql = readFileSync(
     join(__dirname, '../../prisma/migrations/20260924150000_card_account_integrity/migration.sql'),
@@ -22,8 +27,13 @@ function backfillStatements(): string[] {
     .filter((line) => !line.trim().startsWith('--'))
     .join('\n')
     .split(';')
-    .map((s) => s.trim())
-    .filter(Boolean);
+    .map((s) =>
+      s
+        .trim()
+        .replace('"account_id", "is_primary",', '"account_id",')
+        .replace('a."id", false,', 'a."id",'),
+    )
+    .filter((s) => s && !s.includes('is_primary'));
 }
 
 integration('contas e cartões separados (PostgreSQL)', () => {
@@ -99,7 +109,7 @@ integration('contas e cartões separados (PostgreSQL)', () => {
       paymentAccountId: checkingId,
       needsSetup: false,
       isActive: true,
-      isPrimary: true,
+      isPreferred: false,
     });
     expect(card.invoiceTrackingStart).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     const account = await prisma.account.findUniqueOrThrow({ where: { id: card.accountId } });
@@ -134,7 +144,11 @@ integration('contas e cartões separados (PostgreSQL)', () => {
   it('isola por usuário', async () => {
     const card = (await cards.findAll(userId))[0];
     expect(await cards.findAll(otherId)).toEqual([]);
-    expect(await resources.list(otherId)).toEqual({ accounts: [], cards: [] });
+    expect(await resources.list(otherId)).toEqual({
+      preferredAccountId: null,
+      accounts: [],
+      cards: [],
+    });
     await expect(cards.findOne(otherId, card.id)).rejects.toMatchObject({ status: 404 });
     await expect(cards.update(otherId, card.id, { name: 'x' })).rejects.toMatchObject({
       status: 404,
@@ -182,7 +196,6 @@ integration('contas e cartões separados (PostgreSQL)', () => {
     await expect(
       transactions.update(userId, tx.id, { accountId: tx.accountId, description: 'Editada' }),
     ).resolves.toMatchObject({ description: 'Editada' });
-    await expect(cards.setPrimary(userId, card.id)).rejects.toMatchObject({ status: 409 });
   });
 
   it('migração: conta de cartão órfã vira cartão pendente (PF) ou conta comum (PJ)', async () => {
@@ -214,7 +227,6 @@ integration('contas e cartões separados (PostgreSQL)', () => {
         closingDay: null,
         dueDay: null,
         invoiceTrackingStart: null,
-        isPrimary: true,
       });
       const view = await cards.findOne(legacyUser.id, migrated.id);
       expect(view).toMatchObject({

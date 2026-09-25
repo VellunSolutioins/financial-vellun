@@ -8,6 +8,8 @@ export interface ResourceAccount {
   name: string;
   type: string;
   currentBalance: number;
+  /** Pré-selecionado em novos lançamentos. */
+  isPreferred: boolean;
 }
 
 /** Cartão como recurso de lançamento: o valor gravado no lançamento é o `accountId`. */
@@ -17,12 +19,15 @@ export interface ResourceCard {
   name: string;
   brand: string | null;
   color: string | null;
-  isPrimary: boolean;
+  /** Pré-selecionado em novos lançamentos. */
+  isPreferred: boolean;
   needsSetup: boolean;
   isActive: boolean;
 }
 
 export interface FinancialResources {
+  /** `accountId` do preferencial (no cartão, o da conta interna); nulo = nenhum. */
+  preferredAccountId: string | null;
   accounts: ResourceAccount[];
   cards: ResourceCard[];
 }
@@ -43,5 +48,15 @@ export function useFinancialResources() {
     void refetch();
   }, [refetch]);
 
-  return { data, refetch };
+  /** Define a conta ou o cartão preferencial; `null` deixa sem preferência. */
+  const setPreferred = useCallback(
+    async (target: { accountId: string } | { cardId: string } | null) => {
+      setData(
+        await apiClient.patch<FinancialResources>('/financial-resources/preferred', target ?? {}),
+      );
+    },
+    [],
+  );
+
+  return { data, refetch, setPreferred };
 }

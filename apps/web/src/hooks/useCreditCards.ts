@@ -18,7 +18,8 @@ export interface CreditCard {
   /** Cartão legado sem fechamento/vencimento/início do controle. */
   needsSetup: boolean;
   isActive: boolean;
-  isPrimary: boolean;
+  /** Pré-selecionado em novos lançamentos (um só entre contas e cartões). */
+  isPreferred: boolean;
   // Indicadores: todos nulos enquanto a configuração estiver pendente.
   /** Total da fatura aberta hoje. */
   currentInvoice: number | null;

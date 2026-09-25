@@ -53,13 +53,21 @@ export default function CartoesPage() {
     void refetch();
   };
 
-  const handleSetPrimary = async (card: CreditCard) => {
+  /** Liga ou desliga o cartão como padrão dos novos lançamentos. */
+  const togglePreferred = async (card: CreditCard) => {
     try {
-      await apiClient.patch(`/credit-cards/${card.id}/primary`, {});
-      toast.success(`"${card.name}" agora é o cartão principal.`);
+      await apiClient.patch(
+        '/financial-resources/preferred',
+        card.isPreferred ? {} : { cardId: card.id },
+      );
+      toast.success(
+        card.isPreferred
+          ? 'Nenhuma conta ou cartão vem selecionado nos novos lançamentos.'
+          : `"${card.name}" vem selecionado nos novos lançamentos.`,
+      );
       void refetch();
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Erro ao definir cartão principal');
+      toast.error(e instanceof Error ? e.message : 'Erro ao definir o padrão dos lançamentos');
     }
   };
 
@@ -175,8 +183,11 @@ export default function CartoesPage() {
                           >
                             {card.name}
                           </Link>
-                          {card.isPrimary && (
-                            <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400" />
+                          {card.isPreferred && (
+                            <Star
+                              className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400"
+                              aria-label="Padrão nos lançamentos"
+                            />
                           )}
                         </div>
                         {card.brand && (
@@ -284,18 +295,30 @@ export default function CartoesPage() {
                   </div>
 
                   <div className="flex items-center justify-between gap-1">
-                    {!card.isPrimary ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 px-2 text-xs"
-                        onClick={() => void handleSetPrimary(card)}
-                      >
-                        Tornar principal
-                      </Button>
-                    ) : (
-                      <span className="text-xs font-medium text-amber-600">Cartão principal</span>
-                    )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className={cn(
+                        'h-7 min-w-0 px-2 text-xs',
+                        card.isPreferred && 'font-medium text-amber-600',
+                      )}
+                      title={
+                        card.isPreferred
+                          ? 'Deixar de usar como padrão'
+                          : 'Vir selecionado em novos lançamentos'
+                      }
+                      onClick={() => void togglePreferred(card)}
+                    >
+                      <Star
+                        className={cn(
+                          'mr-1 h-3.5 w-3.5 shrink-0',
+                          card.isPreferred && 'fill-amber-400 text-amber-400',
+                        )}
+                      />
+                      <span className="truncate">
+                        {card.isPreferred ? 'Padrão nos lançamentos' : 'Usar como padrão'}
+                      </span>
+                    </Button>
                     <div className="flex gap-1">
                       <Button
                         size="sm"

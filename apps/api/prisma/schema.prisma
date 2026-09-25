@@ -226,8 +226,13 @@ model User {
   securityEvents          UserSecurityEvent[]
   phoneVerifications      PhoneVerification[]
   creditCardInvoices      CreditCardInvoice[]
+  /// Conta ou cartão (pelo `accountId` da conta interna) pré-selecionado ao
+  /// criar um lançamento. Um só por usuário; nulo = sem preferência.
+  preferredAccountId      String?  @map("preferred_account_id")
+  preferredAccount        Account? @relation("UserPreferredAccount", fields: [preferredAccountId], references: [id], onDelete: SetNull)
   cardPayments            CardPayment[]
 
+  @@index([preferredAccountId])
   @@map("users")
 }
 
@@ -334,6 +339,8 @@ model Account {
   creditCard      CreditCard?
   /// Cartões que sugerem esta conta para pagar a fatura.
   paymentForCards CreditCard[]  @relation("CreditCardPaymentAccount")
+  /// Usuários que têm esta conta (ou o cartão dela) como preferencial.
+  preferredBy     User[]        @relation("UserPreferredAccount")
   /// Pagamentos de fatura que saíram desta conta.
   cardPayments    CardPayment[] @relation("CardPaymentSource")
   id              String        @id @default(uuid())
@@ -859,7 +866,6 @@ model CreditCard {
   invoiceTrackingStart DateTime? @map("invoice_tracking_start") @db.Date
   /// Conta comum sugerida para pagar a fatura. Só sugestão.
   paymentAccountId     String?   @map("payment_account_id")
-  isPrimary            Boolean   @default(false) @map("is_primary")
   createdAt            DateTime  @default(now()) @map("created_at")
   updatedAt            DateTime  @updatedAt @map("updated_at")
 

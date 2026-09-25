@@ -8,6 +8,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { dateOnlyString, endOfDayUtc, todaySaoPaulo } from '../common/date.util';
 import { REGULAR_ACCOUNT_WHERE } from './account-types';
+import { clearPreferredAccount } from '../financial-resources/preferred-account';
 import { CreateAccountDto } from './dto/create-account.dto';
 import { UpdateAccountDto } from './dto/update-account.dto';
 
@@ -71,7 +72,12 @@ export class AccountsService {
       );
     }
 
-    return this.prisma.account.update({ where: { id: account.id }, data: { isActive: false } });
+    const [deactivated] = await this.prisma.$transaction([
+      this.prisma.account.update({ where: { id: account.id }, data: { isActive: false } }),
+      // Conta desativada não recebe lançamento: deixa de ser a preferencial.
+      clearPreferredAccount(this.prisma, account.id),
+    ]);
+    return deactivated;
   }
 
   /** Qualquer conta do usuário, inclusive a interna de um cartão. */

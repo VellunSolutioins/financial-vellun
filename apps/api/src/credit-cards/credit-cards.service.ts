@@ -21,6 +21,7 @@ import {
 
 import { healthFromPercentage, incomeHealthFromPercentage } from './card-health';
 import { cardNeedsSetup } from './card-setup';
+import { clearPreferredAccount } from '../financial-resources/preferred-account';
 import {
   CardLedgerService,
   INVOICE_ENTRY_TYPES,
@@ -86,7 +87,11 @@ export class CreditCardsService {
    * limite saem das faturas, desde o início do controle. Cartão com
    * configuração pendente não tem esses números — só o cadastro.
    */
-  private toCardView(card: CardWithAccount, invoices: InvoiceAmounts<StoredSpan>[] = []) {
+  private toCardView(
+    card: CardWithAccount,
+    invoices: InvoiceAmounts<StoredSpan>[] = [],
+    preferredAccountId: string | null = null,
+  ) {
     const creditLimit = card.creditLimit ? Number(card.creditLimit) : null;
     const needsSetup = cardNeedsSetup(card);
     const base = {
@@ -104,7 +109,8 @@ export class CreditCardsService {
       paymentAccountId: card.paymentAccountId,
       needsSetup,
       isActive: card.account.isActive,
-      isPrimary: card.isPrimary,
+      /** Pré-selecionado em novos lançamentos (um só entre contas e cartões). */
+      isPreferred: card.account.isActive && card.account.id === preferredAccountId,
     };
     if (needsSetup) {
       return {
@@ -158,9 +164,17 @@ export class CreditCardsService {
     };
   }
 
-  private async views(cards: CardWithAccount[]) {
-    const amounts = await this.cardLedger.invoicesWithAmounts(cards.map((c) => c.id));
-    return cards.map((c) => this.toCardView(c, amounts.get(c.id)));
+  private async views(userId: string, cards: CardWithAccount[]) {
+    const [amounts, user] = await Promise.all([
+      this.cardLedger.invoicesWithAmounts(cards.map((c) => c.id)),
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { preferredAccountId: true },
+      }),
+    ]);
+    return cards.map((c) =>
+      this.toCardView(c, amounts.get(c.id), user?.preferredAccountId ?? null),
+    );
   }
 
   /** Cartões ativos; com `includeArchived`, também os arquivados (depois dos ativos). */
@@ -168,13 +182,15 @@ export class CreditCardsService {
     const cards = await this.prisma.creditCard.findMany({
       where: { account: { userId, ...(includeArchived ? {} : { isActive: true }) } },
       include: { account: true },
-      orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+      orderBy: { createdAt: 'asc' },
     });
-    return (await this.views(cards)).sort((a, b) => Number(b.isActive) - Number(a.isActive));
+    return (await this.views(userId, cards)).sort(
+      (a, b) => Number(b.isActive) - Number(a.isActive),
+    );
   }
 
   async findOne(userId: string, id: string) {
-    const [view] = await this.views([await this.findOwned(userId, id)]);
+    const [view] = await this.views(userId, [await this.findOwned(userId, id)]);
     return view;
   }
 
@@ -231,9 +247,6 @@ export class CreditCardsService {
     if (dto.paymentAccountId) await this.assertPaymentAccount(userId, dto.paymentAccountId);
 
     const card = await this.prisma.$transaction(async (tx) => {
-      const existingCount = await tx.creditCard.count({
-        where: { account: { userId, isActive: true } },
-      });
       const account = await tx.account.create({
         data: { userId, name: dto.name, type: 'credit_card', initialBalance: 0, currentBalance: 0 },
       });
@@ -250,7 +263,6 @@ export class CreditCardsService {
               .periodStart,
           ),
           paymentAccountId: dto.paymentAccountId ?? null,
-          isPrimary: existingCount === 0,
         },
         include: { account: true },
       });
@@ -371,44 +383,23 @@ export class CreditCardsService {
     };
   }
 
-  async setPrimary(userId: string, id: string) {
-    const existing = await this.findOwned(userId, id);
-    if (!existing.account.isActive) {
-      throw new ConflictException('Cartão arquivado não pode ser o principal');
-    }
-    await this.prisma.$transaction([
-      this.prisma.creditCard.updateMany({
-        where: { account: { userId, isActive: true } },
-        data: { isPrimary: false },
-      }),
-      this.prisma.creditCard.update({ where: { id: existing.id }, data: { isPrimary: true } }),
-    ]);
-    return this.findOne(userId, existing.id);
-  }
-
   /**
    * Arquiva o cartão. Cartão em uso tem lançamentos por definição — por isso
    * não passa pela regra de `AccountsService.deactivate` (desenhada para conta
    * comum, que recusa desativar conta com lançamentos). Arquivado, o cartão não
-   * recebe compras, mas o histórico continua consultável.
+   * recebe compras, mas o histórico continua consultável — e deixa de ser o
+   * preferencial dos lançamentos, se era.
    */
   async remove(userId: string, id: string) {
     const existing = await this.findOwned(userId, id);
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.account.update({ where: { id: existing.accountId }, data: { isActive: false } });
-      await tx.creditCard.update({ where: { id: existing.id }, data: { isPrimary: false } });
-
-      if (existing.isPrimary) {
-        const nextPrimary = await tx.creditCard.findFirst({
-          where: { account: { userId, isActive: true } },
-          orderBy: { createdAt: 'asc' },
-        });
-        if (nextPrimary) {
-          await tx.creditCard.update({ where: { id: nextPrimary.id }, data: { isPrimary: true } });
-        }
-      }
-    });
+    await this.prisma.$transaction([
+      this.prisma.account.update({
+        where: { id: existing.accountId },
+        data: { isActive: false },
+      }),
+      clearPreferredAccount(this.prisma, existing.accountId),
+    ]);
     return { success: true };
   }
 

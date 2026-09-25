@@ -84,6 +84,7 @@ export function TransactionForm({ transaction, fixedOnly = false, onSuccess, onC
     handleSubmit,
     watch,
     setValue,
+    getValues,
     formState: { errors },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -136,10 +137,24 @@ export function TransactionForm({ transaction, fixedOnly = false, onSuccess, onC
       .catch(console.error);
   }, []);
 
-  // As opções chegam depois do primeiro render: reaplica a seleção quando existem.
+  const isCardAccount = (accountId: string) =>
+    !!resources?.cards.some((c) => c.accountId === accountId);
+
+  /** Preferencial que serve para o tipo: cartão não recebe receita. */
+  const preferredFor = (type: FormData['type']) => {
+    const preferred = resources?.preferredAccountId ?? '';
+    return type === 'income' && isCardAccount(preferred) ? '' : preferred;
+  };
+
+  // As opções chegam depois do primeiro render: reaplica a seleção quando
+  // existem. Em lançamento novo, vem o preferencial — sem sobrescrever o que o
+  // usuário já tiver escolhido.
   useEffect(() => {
-    if (resources && transaction) setValue('accountId', transaction.accountId);
-  }, [resources, transaction, setValue]);
+    if (!resources) return;
+    if (transaction) setValue('accountId', transaction.accountId);
+    else if (!getValues('accountId')) setValue('accountId', preferredFor(getValues('type')));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resources, transaction, setValue, getValues]);
 
   const onSubmit = async (data: FormData) => {
     setSubmitting(true);
@@ -216,6 +231,11 @@ export function TransactionForm({ transaction, fixedOnly = false, onSuccess, onC
                   setValue('type', option.value, { shouldDirty: true, shouldValidate: true });
                   // Categoria de despesa não serve para receita (e vice-versa).
                   setValue('categoryId', '', { shouldDirty: true });
+                  // Receita não vai para cartão: troca pelo preferencial que serve.
+                  const current = getValues('accountId');
+                  if ((option.value === 'income' && isCardAccount(current)) || !current) {
+                    setValue('accountId', preferredFor(option.value), { shouldDirty: true });
+                  }
                 }}
                 className={cn(
                   'h-10 rounded-md border text-sm font-medium transition-colors',
@@ -260,6 +280,7 @@ export function TransactionForm({ transaction, fixedOnly = false, onSuccess, onC
             resources={resources}
             emptyLabel="Selecione..."
             currentValue={transaction?.accountId}
+            allowCards={selectedType !== 'income'}
             {...register('accountId')}
           />
           {errors.accountId && (
