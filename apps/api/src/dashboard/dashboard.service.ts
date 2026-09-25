@@ -393,13 +393,15 @@ export class DashboardService {
     const categoryIds = [...byCategory.keys()].filter(Boolean) as string[];
     const categories = await this.prisma.category.findMany({
       where: { id: { in: categoryIds } },
-      select: { id: true, name: true },
+      select: { id: true, name: true, color: true },
     });
-    const nameOf = new Map(categories.map((c) => [c.id, c.name]));
+    const byId = new Map(categories.map((c) => [c.id, c]));
     return [...byCategory]
       .map(([categoryId, total]) => ({
         categoryId,
-        categoryName: (categoryId && nameOf.get(categoryId)) || 'Sem categoria',
+        categoryName: (categoryId && byId.get(categoryId)?.name) || 'Sem categoria',
+        // A tela colore cada categoria igual em todos os gráficos.
+        color: (categoryId && byId.get(categoryId)?.color) || null,
         total: roundCents(total),
         percentage: totalExpense > 0 ? (total / totalExpense) * 100 : 0,
       }))

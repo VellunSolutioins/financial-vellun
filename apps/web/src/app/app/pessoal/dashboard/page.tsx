@@ -1,17 +1,6 @@
 'use client';
 import { Suspense, useEffect, useMemo, useState } from 'react';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  PieChart,
-  Pie,
-  Cell,
-  ResponsiveContainer,
-} from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import {
   Wallet,
   TrendingUp,
@@ -29,6 +18,8 @@ import { useFinancialResources } from '@/hooks/useFinancialResources';
 import { resourceQuery, useResourceFilter } from '@/hooks/useResourceFilter';
 import { ResourceFilter } from '@/components/resources/ResourceFilter';
 import { DateBasisNote } from '@/components/resources/DateBasisNote';
+import { CategoryDonut } from '@/components/dashboard/CategoryDonut';
+import { ResourceCategoryChart } from '@/components/dashboard/ResourceCategoryChart';
 import { apiClient } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 
@@ -45,7 +36,13 @@ interface DashboardSummary {
   totalIncome: number;
   totalExpense: number;
   netResult: number;
-  expensesByCategory: { categoryName: string; total: number; percentage: number }[];
+  expensesByCategory: {
+    categoryId: string | null;
+    categoryName: string;
+    color: string | null;
+    total: number;
+    percentage: number;
+  }[];
   upcomingBills: UpcomingBill[];
   monthlyComparison: { month: string; income: number; expense: number }[];
 }
@@ -54,16 +51,6 @@ interface DailyBreakdown {
   month: string;
   days: { day: number; income: number; expense: number }[];
 }
-
-const CATEGORY_COLORS = [
-  '#10b981',
-  '#3b82f6',
-  '#f59e0b',
-  '#8b5cf6',
-  '#ec4899',
-  '#ef4444',
-  '#14b8a6',
-];
 
 function formatCurrency(v: number) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
@@ -293,6 +280,19 @@ function DashboardContent() {
     },
   ];
 
+  // Gráficos por contas × cartões: mesmo período da tela e, se houver filtro,
+  // só os recursos dele (um tipo fora do filtro mostra o aviso de vazio).
+  const { start: periodStart, end: periodEnd } = monthRange(selectedMonth);
+  const filterActive = selection.accountIds.length + selection.cardIds.length > 0;
+  const chartAccounts =
+    resources?.accounts
+      .filter((a) => !filterActive || selection.accountIds.includes(a.id))
+      .map((a) => ({ id: a.id, name: a.name })) ?? null;
+  const chartCards =
+    resources?.cards
+      .filter((c) => !filterActive || selection.cardIds.includes(c.id))
+      .map((c) => ({ id: c.id, name: c.name, archived: !c.isActive })) ?? null;
+
   const health = financialHealth(savingsRate, data.totalIncome > 0);
   const healthBarWidth = Math.max(0, Math.min(100, ((savingsRate + 20) / 60) * 100));
 
@@ -407,58 +407,33 @@ function DashboardContent() {
           </CardContent>
         </Card>
 
-        <Card className="rounded-2xl">
-          <CardHeader>
-            <CardTitle className="text-base">Despesas por Categoria</CardTitle>
-            <p className="text-xs text-muted-foreground">Distribuição do período</p>
-          </CardHeader>
-          <CardContent>
-            {data.expensesByCategory.length === 0 ? (
-              <div className="flex h-[220px] items-center justify-center text-sm text-muted-foreground">
-                Sem despesas no período
-              </div>
-            ) : (
-              <div className="flex flex-col items-center gap-4 sm:flex-row">
-                <ResponsiveContainer width="100%" height={200} className="max-w-[220px]">
-                  <PieChart>
-                    <Pie
-                      data={data.expensesByCategory}
-                      dataKey="total"
-                      nameKey="categoryName"
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={55}
-                      outerRadius={85}
-                      paddingAngle={3}
-                      stroke="none"
-                    >
-                      {data.expensesByCategory.map((_, i) => (
-                        <Cell key={i} fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={tooltipCurrency} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <ul className="w-full space-y-2 text-sm sm:w-auto">
-                  {data.expensesByCategory.slice(0, 6).map((c, i) => (
-                    <li key={c.categoryName} className="flex items-center justify-between gap-4">
-                      <span className="flex items-center gap-2 truncate">
-                        <span
-                          className="h-2.5 w-2.5 shrink-0 rounded-full"
-                          style={{ backgroundColor: CATEGORY_COLORS[i % CATEGORY_COLORS.length] }}
-                        />
-                        <span className="truncate">{c.categoryName}</span>
-                      </span>
-                      <span className="shrink-0 font-medium text-muted-foreground">
-                        {formatCurrency(c.total)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <CategoryDonut
+          title="Despesas por Categoria"
+          subtitle={
+            filterActive
+              ? 'Contas e cartões do filtro · distribuição do período'
+              : 'Contas e cartões · distribuição do período'
+          }
+          slices={data.expensesByCategory}
+        />
+      </div>
+
+      {/* Despesas por categoria separadas: contas × cartões */}
+      <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
+        <ResourceCategoryChart
+          kind="accounts"
+          resources={chartAccounts}
+          periodStart={periodStart}
+          periodEnd={periodEnd}
+          emptyText={filterActive ? 'Nenhuma conta no filtro atual' : 'Nenhuma conta cadastrada'}
+        />
+        <ResourceCategoryChart
+          kind="cards"
+          resources={chartCards}
+          periodStart={periodStart}
+          periodEnd={periodEnd}
+          emptyText={filterActive ? 'Nenhum cartão no filtro atual' : 'Nenhum cartão cadastrado'}
+        />
       </div>
 
       {/* Próximas contas a pagar + Lançamentos diários */}
