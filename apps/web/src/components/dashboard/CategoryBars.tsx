@@ -1,12 +1,6 @@
 'use client';
-import { useId, useState } from 'react';
-
-import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { categoryColor, type CategorySlice } from '@/components/dashboard/CategoryDonut';
-
-/** Categorias visíveis antes de expandir a lista. */
-const INITIAL_VISIBLE = 6;
+import { categoryColor, type CategorySlice } from '@/components/dashboard/category-color';
 
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 const percent = new Intl.NumberFormat('pt-BR', {
@@ -37,8 +31,7 @@ interface Props {
  *
  * Mesmo recorte da rosca: categoria com despesa líquida zero ou negativa
  * (estorno maior que a despesa no período) fica de fora, e o total do card é a
- * soma das que ficaram. Os percentuais usam esse total, inclusive com parte da
- * lista recolhida.
+ * soma das que ficaram. Todas as categorias aparecem, sem limite de linhas.
  */
 export function CategoryBars({
   title,
@@ -47,17 +40,9 @@ export function CategoryBars({
   emptyText = 'Sem despesas no período',
   action,
 }: Props) {
-  const [expanded, setExpanded] = useState(false);
-  const listId = useId();
-
   const items = (slices ?? []).filter((s) => s.total > 0).sort((a, b) => b.total - a.total);
   const total = items.reduce((sum, s) => sum + s.total, 0);
   const shareOf = (value: number) => (total > 0 ? (value / total) * 100 : 0);
-
-  const collapsible = items.length > INITIAL_VISIBLE;
-  const visible = expanded || !collapsible ? items : items.slice(0, INITIAL_VISIBLE);
-  const hidden = items.slice(INITIAL_VISIBLE);
-  const hiddenTotal = hidden.reduce((sum, s) => sum + s.total, 0);
 
   return (
     <Card className="rounded-2xl">
@@ -84,8 +69,8 @@ export function CategoryBars({
               <p className="text-lg font-bold sm:text-xl">{currency.format(total)}</p>
             </div>
 
-            <ul id={listId} aria-label={`${title}: despesas por categoria`} className="space-y-3">
-              {visible.map((s) => {
+            <ul aria-label={`${title}: despesas por categoria`} className="space-y-3">
+              {items.map((s) => {
                 const share = shareOf(s.total);
                 return (
                   <li key={s.categoryId ?? 'none'} className="space-y-1.5">
@@ -109,32 +94,6 @@ export function CategoryBars({
                 );
               })}
             </ul>
-
-            {collapsible && (
-              <div className="space-y-2 border-t pt-3">
-                {!expanded && (
-                  <p className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-sm text-muted-foreground">
-                    <span>
-                      Outras {hidden.length} categoria{hidden.length === 1 ? '' : 's'}
-                    </span>
-                    <span className="whitespace-nowrap font-medium tabular-nums">
-                      {amountAndShare(hiddenTotal, shareOf(hiddenTotal))}
-                    </span>
-                  </p>
-                )}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 w-full text-xs"
-                  aria-expanded={expanded}
-                  aria-controls={listId}
-                  onClick={() => setExpanded((v) => !v)}
-                >
-                  {expanded ? 'Mostrar menos' : 'Ver todas as categorias'}
-                </Button>
-              </div>
-            )}
           </div>
         )}
       </CardContent>

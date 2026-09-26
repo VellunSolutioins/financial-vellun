@@ -2,7 +2,6 @@
 import { useState } from 'react';
 
 import { Select } from '@/components/ui/select';
-import { CategoryDonut } from '@/components/dashboard/CategoryDonut';
 import { CategoryBars } from '@/components/dashboard/CategoryBars';
 import { useTransactionSummary } from '@/hooks/useTransactionSummary';
 
@@ -24,8 +23,6 @@ interface Props {
   periodEnd: string;
   /** Texto quando não há recurso deste tipo (ou nenhum dentro do filtro da tela). */
   emptyText: string;
-  /** Rosca ou barras horizontais — mesmos dados e mesmo seletor. */
-  variant?: 'donut' | 'bars';
 }
 
 const LABELS = {
@@ -43,9 +40,7 @@ export function ResourceCategoryChart({
   periodStart,
   periodEnd,
   emptyText,
-  variant = 'donut',
 }: Props) {
-  const Chart = variant === 'bars' ? CategoryBars : CategoryDonut;
   const labels = LABELS[kind];
   const [selected, setSelected] = useState('');
   // Recurso que saiu da lista (ex.: filtro da tela mudou) volta para "todos".
@@ -53,7 +48,7 @@ export function ResourceCategoryChart({
 
   if (!resources || resources.length === 0) {
     return (
-      <Chart
+      <CategoryBars
         title={labels.title}
         subtitle="Distribuição do período"
         slices={resources ? [] : null}
@@ -82,7 +77,6 @@ export function ResourceCategoryChart({
 
   return (
     <ResourceCategoryData
-      Chart={Chart}
       title={labels.title}
       subtitle={
         current
@@ -106,13 +100,11 @@ export function ResourceCategoryChart({
  * devolveria o consolidado, e o gráfico de cartões mostraria as contas.
  */
 function ResourceCategoryData({
-  Chart,
   title,
   subtitle,
   action,
   query,
 }: {
-  Chart: typeof CategoryDonut | typeof CategoryBars;
   title: string;
   subtitle: string;
   action: React.ReactNode;
@@ -130,7 +122,7 @@ function ResourceCategoryData({
           total: c.total,
         }));
   return (
-    <Chart
+    <CategoryBars
       title={title}
       subtitle={subtitle}
       slices={slices}

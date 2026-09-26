@@ -20,7 +20,6 @@ import { useFinancialResources } from '@/hooks/useFinancialResources';
 import { resourceQuery, useResourceFilter } from '@/hooks/useResourceFilter';
 import { ResourceFilter } from '@/components/resources/ResourceFilter';
 import { DateBasisNote } from '@/components/resources/DateBasisNote';
-import { CategoryDonut } from '@/components/dashboard/CategoryDonut';
 import { CategoryBars } from '@/components/dashboard/CategoryBars';
 import { ResourceCategoryChart } from '@/components/dashboard/ResourceCategoryChart';
 import { apiClient } from '@/lib/api-client';
@@ -441,7 +440,7 @@ function DashboardContent() {
         </CardContent>
       </Card>
 
-      {/* Evolução mensal + Despesas por categoria */}
+      {/* Evolução mensal + Lançamentos diários */}
       <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
         <Card className="rounded-2xl">
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
@@ -477,143 +476,6 @@ function DashboardContent() {
                 <span className="h-2.5 w-2.5 rounded-full bg-[#f43f5e]" /> Despesas
               </span>
             </div>
-          </CardContent>
-        </Card>
-
-        <CategoryDonut
-          title="Despesas por Categoria"
-          subtitle={
-            filterActive
-              ? 'Contas e cartões do filtro · distribuição do período'
-              : 'Contas e cartões · distribuição do período'
-          }
-          slices={data.expensesByCategory}
-        />
-      </div>
-
-      {/* Despesas por categoria separadas: contas × cartões */}
-      <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
-        <ResourceCategoryChart
-          kind="accounts"
-          resources={chartAccounts}
-          periodStart={periodStart}
-          periodEnd={periodEnd}
-          emptyText={filterActive ? 'Nenhuma conta no filtro atual' : 'Nenhuma conta cadastrada'}
-        />
-        <ResourceCategoryChart
-          kind="cards"
-          resources={chartCards}
-          periodStart={periodStart}
-          periodEnd={periodEnd}
-          emptyText={filterActive ? 'Nenhum cartão no filtro atual' : 'Nenhum cartão cadastrado'}
-        />
-      </div>
-
-      {/*
-        Mesmos três gráficos em barras horizontais, para comparar com as roscas
-        acima (uma das duas versões sai depois).
-      */}
-      <div className="grid items-start gap-4 sm:gap-6 lg:grid-cols-3">
-        <CategoryBars
-          title="Despesas por Categoria"
-          subtitle={
-            filterActive
-              ? 'Contas e cartões do filtro · distribuição do período'
-              : 'Contas e cartões · distribuição do período'
-          }
-          slices={data.expensesByCategory}
-        />
-        <ResourceCategoryChart
-          variant="bars"
-          kind="accounts"
-          resources={chartAccounts}
-          periodStart={periodStart}
-          periodEnd={periodEnd}
-          emptyText={filterActive ? 'Nenhuma conta no filtro atual' : 'Nenhuma conta cadastrada'}
-        />
-        <ResourceCategoryChart
-          variant="bars"
-          kind="cards"
-          resources={chartCards}
-          periodStart={periodStart}
-          periodEnd={periodEnd}
-          emptyText={filterActive ? 'Nenhum cartão no filtro atual' : 'Nenhum cartão cadastrado'}
-        />
-      </div>
-
-      {/* Próximas contas a pagar + Lançamentos diários */}
-      <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
-        <Card className="rounded-2xl">
-          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
-            <CardTitle className="text-base">Próximas Contas a Pagar</CardTitle>
-            {data.upcomingBills.length > 0 && (
-              <Badge variant="secondary">{data.upcomingBills.length} a vencer</Badge>
-            )}
-          </CardHeader>
-          <CardContent>
-            {data.upcomingBills.length === 0 ? (
-              <div className="flex h-[120px] items-center justify-center text-sm text-muted-foreground">
-                Nenhuma conta a vencer 🎉
-              </div>
-            ) : (
-              <ul className="divide-y divide-border">
-                {data.upcomingBills.map((bill) => {
-                  const overdue = isOverdue(bill.transactionDate);
-                  const isInvoice = bill.kind === 'invoice';
-                  const Icon = isInvoice ? CreditCardIcon : Receipt;
-                  const content = (
-                    <>
-                      <div className="flex min-w-0 items-center gap-3">
-                        <span
-                          className={cn(
-                            'flex h-9 w-9 shrink-0 items-center justify-center rounded-full',
-                            isInvoice
-                              ? 'bg-violet-50 text-violet-600'
-                              : 'bg-amber-50 text-amber-600',
-                          )}
-                        >
-                          <Icon className="h-4 w-4" />
-                        </span>
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium">{bill.description}</p>
-                          <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-                            <span>Vence em {formatDueDate(bill.transactionDate)}</span>
-                            {overdue && (
-                              <Badge variant="destructive" className="px-1.5 py-0 text-[10px]">
-                                Vencido
-                              </Badge>
-                            )}
-                            {isInvoice && bill.invoiceState === 'open' && (
-                              <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
-                                Fatura aberta
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <span className="shrink-0 text-sm font-semibold">
-                        {formatCurrency(bill.amount)}
-                      </span>
-                    </>
-                  );
-                  return (
-                    <li key={`${bill.kind}-${bill.id}`} className="py-3 first:pt-0 last:pb-0">
-                      {isInvoice && bill.cardId ? (
-                        <Link
-                          href={`/app/pessoal/cartoes/${bill.cardId}`}
-                          className="-mx-2 flex items-center justify-between gap-3 rounded-lg px-2 transition-colors hover:bg-muted/40"
-                          aria-label={`${bill.description}, ${formatCurrency(bill.amount)}, vence em ${formatDueDate(bill.transactionDate)}`}
-                        >
-                          {content}
-                        </Link>
-                      ) : (
-                        <div className="flex items-center justify-between gap-3">{content}</div>
-                      )}
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
           </CardContent>
         </Card>
 
@@ -662,6 +524,106 @@ function DashboardContent() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Despesas por categoria: consolidado, contas e cartões */}
+      <div className="grid items-start gap-4 sm:gap-6 lg:grid-cols-3">
+        <CategoryBars
+          title="Despesas por Categoria"
+          subtitle={
+            filterActive
+              ? 'Contas e cartões do filtro · distribuição do período'
+              : 'Contas e cartões · distribuição do período'
+          }
+          slices={data.expensesByCategory}
+        />
+        <ResourceCategoryChart
+          kind="accounts"
+          resources={chartAccounts}
+          periodStart={periodStart}
+          periodEnd={periodEnd}
+          emptyText={filterActive ? 'Nenhuma conta no filtro atual' : 'Nenhuma conta cadastrada'}
+        />
+        <ResourceCategoryChart
+          kind="cards"
+          resources={chartCards}
+          periodStart={periodStart}
+          periodEnd={periodEnd}
+          emptyText={filterActive ? 'Nenhum cartão no filtro atual' : 'Nenhum cartão cadastrado'}
+        />
+      </div>
+
+      {/* Próximas contas a pagar */}
+      <Card className="rounded-2xl">
+        <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
+          <CardTitle className="text-base">Próximas Contas a Pagar</CardTitle>
+          {data.upcomingBills.length > 0 && (
+            <Badge variant="secondary">{data.upcomingBills.length} a vencer</Badge>
+          )}
+        </CardHeader>
+        <CardContent>
+          {data.upcomingBills.length === 0 ? (
+            <div className="flex h-[120px] items-center justify-center text-sm text-muted-foreground">
+              Nenhuma conta a vencer 🎉
+            </div>
+          ) : (
+            <ul className="divide-y divide-border">
+              {data.upcomingBills.map((bill) => {
+                const overdue = isOverdue(bill.transactionDate);
+                const isInvoice = bill.kind === 'invoice';
+                const Icon = isInvoice ? CreditCardIcon : Receipt;
+                const content = (
+                  <>
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span
+                        className={cn(
+                          'flex h-9 w-9 shrink-0 items-center justify-center rounded-full',
+                          isInvoice ? 'bg-violet-50 text-violet-600' : 'bg-amber-50 text-amber-600',
+                        )}
+                      >
+                        <Icon className="h-4 w-4" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">{bill.description}</p>
+                        <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                          <span>Vence em {formatDueDate(bill.transactionDate)}</span>
+                          {overdue && (
+                            <Badge variant="destructive" className="px-1.5 py-0 text-[10px]">
+                              Vencido
+                            </Badge>
+                          )}
+                          {isInvoice && bill.invoiceState === 'open' && (
+                            <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
+                              Fatura aberta
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <span className="shrink-0 text-sm font-semibold">
+                      {formatCurrency(bill.amount)}
+                    </span>
+                  </>
+                );
+                return (
+                  <li key={`${bill.kind}-${bill.id}`} className="py-3 first:pt-0 last:pb-0">
+                    {isInvoice && bill.cardId ? (
+                      <Link
+                        href={`/app/pessoal/cartoes/${bill.cardId}`}
+                        className="-mx-2 flex items-center justify-between gap-3 rounded-lg px-2 transition-colors hover:bg-muted/40"
+                        aria-label={`${bill.description}, ${formatCurrency(bill.amount)}, vence em ${formatDueDate(bill.transactionDate)}`}
+                      >
+                        {content}
+                      </Link>
+                    ) : (
+                      <div className="flex items-center justify-between gap-3">{content}</div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
