@@ -19,6 +19,7 @@ import { resourceQuery, useResourceFilter } from '@/hooks/useResourceFilter';
 import { ResourceFilter } from '@/components/resources/ResourceFilter';
 import { DateBasisNote } from '@/components/resources/DateBasisNote';
 import { CategoryDonut } from '@/components/dashboard/CategoryDonut';
+import { CategoryBars } from '@/components/dashboard/CategoryBars';
 import { ResourceCategoryChart } from '@/components/dashboard/ResourceCategoryChart';
 import { apiClient } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
@@ -488,6 +489,38 @@ function DashboardContent() {
           emptyText={filterActive ? 'Nenhuma conta no filtro atual' : 'Nenhuma conta cadastrada'}
         />
         <ResourceCategoryChart
+          kind="cards"
+          resources={chartCards}
+          periodStart={periodStart}
+          periodEnd={periodEnd}
+          emptyText={filterActive ? 'Nenhum cartão no filtro atual' : 'Nenhum cartão cadastrado'}
+        />
+      </div>
+
+      {/*
+        Mesmos três gráficos em barras horizontais, para comparar com as roscas
+        acima (uma das duas versões sai depois).
+      */}
+      <div className="grid items-start gap-4 sm:gap-6 lg:grid-cols-3">
+        <CategoryBars
+          title="Despesas por Categoria"
+          subtitle={
+            filterActive
+              ? 'Contas e cartões do filtro · distribuição do período'
+              : 'Contas e cartões · distribuição do período'
+          }
+          slices={data.expensesByCategory}
+        />
+        <ResourceCategoryChart
+          variant="bars"
+          kind="accounts"
+          resources={chartAccounts}
+          periodStart={periodStart}
+          periodEnd={periodEnd}
+          emptyText={filterActive ? 'Nenhuma conta no filtro atual' : 'Nenhuma conta cadastrada'}
+        />
+        <ResourceCategoryChart
+          variant="bars"
           kind="cards"
           resources={chartCards}
           periodStart={periodStart}
