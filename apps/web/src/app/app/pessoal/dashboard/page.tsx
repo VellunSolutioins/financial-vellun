@@ -10,7 +10,9 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   Scale,
+  CreditCard as CreditCardIcon,
 } from 'lucide-react';
+import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Select } from '@/components/ui/select';
@@ -24,12 +26,22 @@ import { ResourceCategoryChart } from '@/components/dashboard/ResourceCategoryCh
 import { apiClient } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 
+/**
+ * Item de "Próximas contas a pagar": uma despesa de conta (só a próxima
+ * ocorrência de cada série) ou uma fatura de cartão com saldo a pagar.
+ */
 interface UpcomingBill {
+  kind: 'transaction' | 'invoice';
   id: string;
   description: string;
+  /** Na fatura, o restante a pagar. */
   amount: number;
+  /** Na fatura, o vencimento. */
   transactionDate: string;
   category: { name: string } | null;
+  cardId?: string;
+  /** `open`: fatura ainda aberta, o valor pode crescer até o fechamento. */
+  invoiceState?: 'open' | 'closed';
 }
 
 interface DashboardSummary {
@@ -547,22 +559,33 @@ function DashboardContent() {
               <ul className="divide-y divide-border">
                 {data.upcomingBills.map((bill) => {
                   const overdue = isOverdue(bill.transactionDate);
-                  return (
-                    <li
-                      key={bill.id}
-                      className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
-                    >
+                  const isInvoice = bill.kind === 'invoice';
+                  const Icon = isInvoice ? CreditCardIcon : Receipt;
+                  const content = (
+                    <>
                       <div className="flex min-w-0 items-center gap-3">
-                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-50 text-amber-600">
-                          <Receipt className="h-4 w-4" />
+                        <span
+                          className={cn(
+                            'flex h-9 w-9 shrink-0 items-center justify-center rounded-full',
+                            isInvoice
+                              ? 'bg-violet-50 text-violet-600'
+                              : 'bg-amber-50 text-amber-600',
+                          )}
+                        >
+                          <Icon className="h-4 w-4" />
                         </span>
                         <div className="min-w-0">
                           <p className="truncate text-sm font-medium">{bill.description}</p>
-                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                             <span>Vence em {formatDueDate(bill.transactionDate)}</span>
                             {overdue && (
                               <Badge variant="destructive" className="px-1.5 py-0 text-[10px]">
                                 Vencido
+                              </Badge>
+                            )}
+                            {isInvoice && bill.invoiceState === 'open' && (
+                              <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
+                                Fatura aberta
                               </Badge>
                             )}
                           </div>
@@ -571,6 +594,21 @@ function DashboardContent() {
                       <span className="shrink-0 text-sm font-semibold">
                         {formatCurrency(bill.amount)}
                       </span>
+                    </>
+                  );
+                  return (
+                    <li key={`${bill.kind}-${bill.id}`} className="py-3 first:pt-0 last:pb-0">
+                      {isInvoice && bill.cardId ? (
+                        <Link
+                          href={`/app/pessoal/cartoes/${bill.cardId}`}
+                          className="-mx-2 flex items-center justify-between gap-3 rounded-lg px-2 transition-colors hover:bg-muted/40"
+                          aria-label={`${bill.description}, ${formatCurrency(bill.amount)}, vence em ${formatDueDate(bill.transactionDate)}`}
+                        >
+                          {content}
+                        </Link>
+                      ) : (
+                        <div className="flex items-center justify-between gap-3">{content}</div>
+                      )}
                     </li>
                   );
                 })}
