@@ -30,3 +30,25 @@ def now_local(now: datetime | None = None) -> datetime:
 def today_local(now: datetime | None = None) -> date:
     """Dia atual em Brasília."""
     return now_local(now).date()
+
+
+def local_date(instante: datetime | None) -> date:
+    """Dia em Brasília de um instante (ex.: quando a mensagem chegou).
+
+    Sem instante, vale hoje. É a referência de "hoje"/"ontem" de uma mensagem:
+    processada depois da meia-noite (fila, retry), ela continua sendo de ontem.
+    """
+    if instante is None:
+        return today_local()
+    if instante.tzinfo is None:
+        instante = instante.replace(tzinfo=timezone.utc)
+    return instante.astimezone(APP_TIMEZONE).date()
+
+
+_WEEKDAYS_PT = ("segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira",
+                "sábado", "domingo")
+
+
+def weekday_pt(dia: date) -> str:
+    """Nome do dia da semana em português (``date.weekday()``: 0 = segunda)."""
+    return _WEEKDAYS_PT[dia.weekday()]

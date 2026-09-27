@@ -112,8 +112,12 @@ def env(monkeypatch):
 
         fail_after_create = False
 
+        async def pending_question(self, intent, user_id):
+            return None
+
         async def create_from_intent(
-            self, intent, user_id, raw, ai_extracted_transaction_id=None, idempotency_key=None
+            self, intent, user_id, raw, ai_extracted_transaction_id=None,
+            idempotency_key=None, **kwargs
         ):
             rec.calls.append("create")
             rec.linked.append(ai_extracted_transaction_id)
@@ -408,8 +412,20 @@ async def test_recusa_da_api_e_repassada_ao_usuario(broker, consumer, env, monke
             "message": "Não consegui registrar o lançamento. Verifique os dados e tente de novo.",
         }
 
+    async def sem_pergunta(intent, user_id):
+        return None
+
     monkeypatch.setattr(
-        mp, "transaction_creator", type("Fake", (), {"create_from_intent": staticmethod(recusa)})()
+        mp,
+        "transaction_creator",
+        type(
+            "Fake",
+            (),
+            {
+                "create_from_intent": staticmethod(recusa),
+                "pending_question": staticmethod(sem_pergunta),
+            },
+        )(),
     )
 
     await publish_job(broker, make_job())

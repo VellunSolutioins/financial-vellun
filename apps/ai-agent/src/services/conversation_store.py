@@ -27,7 +27,12 @@ logger = logging.getLogger(__name__)
 #: v2 acrescentou o vínculo (usuário, contato e versão do vínculo). Estados v1
 #: são descartados: sem o vínculo, não há como saber se o número ainda pertence
 #: a quem recebeu a pergunta.
-STATE_SCHEMA_VERSION = 2
+#:
+#: v3 acrescentou o campo que a pergunta espera, a mensagem original, a data de
+#: referência e as tentativas. Um estado v2 continua valendo: sem o campo, a
+#: resposta é lida como confirmação genérica (o comportamento da v2).
+STATE_SCHEMA_VERSION = 3
+_READABLE_VERSIONS = (2, 3)
 
 
 def _utcnow() -> datetime:
@@ -45,6 +50,17 @@ class ConversationState:
     user_id: str | None = None
     contact_id: str | None = None
     link_version: int | None = None
+    # O que a pergunta pendente espera (ver ``confirmation_rules.FIELD_*``);
+    # ``None`` é a confirmação genérica dos estados v2.
+    awaiting_field: str | None = None
+    # A mensagem que abriu o lançamento: vira o ``rawInput`` e a descrição,
+    # em vez do texto da última resposta ("12", "Nubank").
+    original_message: str | None = None
+    # Dia (ISO) em que a mensagem original chegou: "ontem" numa resposta é
+    # relativo a ele, não ao dia em que a resposta foi processada.
+    reference_date: str | None = None
+    # Respostas seguidas que não responderam à pergunta.
+    attempts: int = 0
 
     def belongs_to(self, contact: dict) -> bool:
         """``True`` se o vínculo atual do número é o mesmo da pergunta pendente."""
@@ -68,6 +84,10 @@ class ConversationState:
                 "userId": self.user_id,
                 "contactId": self.contact_id,
                 "linkVersion": self.link_version,
+                "awaitingField": self.awaiting_field,
+                "originalMessage": self.original_message,
+                "referenceDate": self.reference_date,
+                "attempts": self.attempts,
             },
             ensure_ascii=False,
         )
@@ -80,7 +100,7 @@ class ConversationState:
         except (ValueError, TypeError):
             logger.warning("Estado de conversa corrompido; descartando")
             return None
-        if data.get("v") != STATE_SCHEMA_VERSION:
+        if data.get("v") not in _READABLE_VERSIONS:
             logger.info("Estado de conversa em versao antiga (%s); descartando", data.get("v"))
             return None
 
@@ -97,6 +117,7 @@ class ConversationState:
             last = _utcnow()
 
         link_version = data.get("linkVersion")
+        attempts = data.get("attempts")
         return ConversationState(
             pending_intent=intent,
             awaiting_confirmation=bool(data.get("awaitingConfirmation")),
@@ -104,6 +125,10 @@ class ConversationState:
             user_id=data.get("userId"),
             contact_id=data.get("contactId"),
             link_version=link_version if isinstance(link_version, int) else None,
+            awaiting_field=data.get("awaitingField"),
+            original_message=data.get("originalMessage"),
+            reference_date=data.get("referenceDate"),
+            attempts=attempts if isinstance(attempts, int) else 0,
         )
 
     def is_expired(self, ttl_seconds: int) -> bool:

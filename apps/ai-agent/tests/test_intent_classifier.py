@@ -7,7 +7,13 @@ serem determinísticos e independentes de `OPENAI_API_KEY`.
 import asyncio
 from datetime import timedelta
 
-from src.schemas.financial_intent import IntentType, TransactionTypeEnum
+from src.schemas.financial_intent import (
+    AmountBasisEnum,
+    IntentType,
+    RecurrenceFrequencyEnum,
+    RecurrenceTypeEnum,
+    TransactionTypeEnum,
+)
 from src.services.clock import today_local
 from src.services.intent_classifier import IntentClassifier
 
@@ -73,3 +79,42 @@ def test_help_intent():
 def test_query_summary_intent():
     result = classify("qual meu saldo?")
     assert result.intent == IntentType.query_summary
+
+
+def test_sem_valor_nem_tipo_e_unknown():
+    # Antes as regras nunca devolviam unknown: "oi" virava "Não identifiquei o valor…".
+    assert classify("oi, tudo bem?").intent == IntentType.unknown
+
+
+def test_parcelas_nao_sao_confundidas_com_o_valor():
+    result = classify("comprei uma tv em 10x de 300")
+    assert result.amount == 300
+    assert result.recurrence_type == RecurrenceTypeEnum.parcelado
+    assert result.installments == 10
+    assert result.amount_basis == AmountBasisEnum.installment
+
+
+def test_recorrente_pelas_regras():
+    result = classify("paguei 55 da netflix todo mês")
+    assert result.recurrence_type == RecurrenceTypeEnum.fixo
+    assert result.recurrence_frequency == RecurrenceFrequencyEnum.monthly
+
+
+def test_data_explicita_e_relativa_ao_dia_do_contexto():
+    result = classify("gastei 50 no mercado dia 10", {"today": "2026-09-27"})
+    assert result.transaction_date == "2026-09-10"
+
+
+def test_categoria_do_dicionario_so_vale_se_existir_no_catalogo():
+    catalogo = {"expense_categories": ["Casa", "Outros"], "income_categories": ["Salário"]}
+    # "Aluguel" é categoria do perfil PJ; o usuário não a tem.
+    assert classify("paguei 1500 de aluguel", catalogo).category_name is None
+    # Nome do próprio catálogo citado na mensagem.
+    assert classify("gastei 80 com a casa", catalogo).category_name == "Casa"
+
+
+def test_categoria_de_receita_nao_e_sugerida_para_despesa():
+    catalogo = {"expense_categories": ["Mercado"], "income_categories": ["Salário"]}
+    assert classify("recebi 5000 de salário", catalogo).category_name == "Salário"
+    # Despesa: "salário" aponta para uma categoria de receita, que não serve.
+    assert classify("paguei 900 de salário da diarista", catalogo).category_name is None

@@ -98,6 +98,9 @@ def mundo(monkeypatch) -> Mundo:
             )
 
     class Lancamentos:
+        async def pending_question(self, intent, user_id):
+            return None
+
         async def create_from_intent(self, intent, user_id, raw, **kwargs):
             chave = kwargs["idempotency_key"]
             mundo.criados.setdefault(chave, {"amount": intent.amount})

@@ -76,6 +76,13 @@ KNOWN_COUNTERS = (
     "phone_verification_expired",
     # Confirmação pendente descartada porque o número mudou de dono
     "pending_discarded_link_changed",
+    # Resposta a uma pergunta pendente: não respondeu (pergunta de novo), era
+    # um lançamento novo (o pendente é descartado) ou esgotou as tentativas.
+    "pending_reply_unparsed",
+    "pending_replaced_by_new_message",
+    "pending_abandoned",
+    # Mensagem sem intenção reconhecida nem valor ("oi")
+    "intent_not_understood",
     "message_too_long",
     "subscription_blocked",
     "ai_daily_limit_reached",
