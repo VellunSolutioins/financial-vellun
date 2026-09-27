@@ -96,9 +96,9 @@ const navItems: Record<
     { href: '/app/pessoal/parcelamentos', label: 'Parcelamentos', icon: Layers },
     { href: '/app/pessoal/metas', label: 'Metas de Gastos', icon: Target },
     { href: '/app/pessoal/cartoes', label: 'Cartões', icon: CreditCard },
+    { href: '/app/pessoal/contas', label: 'Contas', icon: Wallet },
     { href: '/app/pessoal/agenda', label: 'Agenda e Lembretes', icon: Calendar },
     { href: '/app/pessoal/anotacoes', label: 'Anotações', icon: StickyNote },
-    { href: '/app/pessoal/contas', label: 'Contas', icon: Wallet },
     { href: '/app/pessoal/categorias', label: 'Categorias', icon: Tag },
   ],
   business: [
