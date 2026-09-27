@@ -1,5 +1,6 @@
 import {
   IsEnum,
+  IsIn,
   IsNotEmpty,
   IsNumber,
   IsOptional,
@@ -7,7 +8,8 @@ import {
   IsString,
   MaxLength,
 } from 'class-validator';
-import { TransactionType, TransactionStatus } from '@prisma/client';
+import { TransactionStatus } from '@prisma/client';
+import { ENTRY_TYPES, EntryType } from '../../transactions/entry-types';
 
 export class CreateAiTransactionDto {
   @IsString()
@@ -22,8 +24,8 @@ export class CreateAiTransactionDto {
   @IsString()
   categoryId?: string;
 
-  @IsEnum(TransactionType)
-  type!: TransactionType;
+  @IsIn(ENTRY_TYPES)
+  type!: EntryType;
 
   @IsNumber()
   @IsPositive()

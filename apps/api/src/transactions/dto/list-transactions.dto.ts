@@ -1,9 +1,15 @@
-import { IsDateString, IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import { RecurrenceType } from '@prisma/client';
+import { IsDateString, IsEnum, IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { TransactionSource, TransactionStatus, TransactionType } from '@prisma/client';
+import { TransactionSource, TransactionStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
+import { ENTRY_TYPES, EntryType } from '../entry-types';
 
 export class ListTransactionsDto {
+  @IsOptional()
+  @IsEnum(RecurrenceType)
+  recurrenceType?: RecurrenceType;
+
   @ApiProperty({ required: false })
   @IsOptional()
   @IsDateString()
@@ -14,10 +20,10 @@ export class ListTransactionsDto {
   @IsDateString()
   periodEnd?: string;
 
-  @ApiProperty({ enum: TransactionType, required: false })
+  @ApiProperty({ enum: ENTRY_TYPES, required: false })
   @IsOptional()
-  @IsEnum(TransactionType)
-  type?: TransactionType;
+  @IsIn(ENTRY_TYPES)
+  type?: EntryType;
 
   @ApiProperty({ required: false })
   @IsOptional()
@@ -57,9 +63,9 @@ export class ListTransactionsDto {
    * uma tela que em celular já exigia rolagem na metade disso.
    *
    * O teto existe porque o parâmetro é público: sem ele, `?limit=1000000` é uma
-   * varredura da tabela inteira por request. 500 é o que a tela de pendentes
-   * pede hoje (`PendingTransactionsView`), então o teto não muda nada que já
-   * funciona — só fecha a porta do abuso.
+   * varredura da tabela inteira por request. 500 é o que a tela de contas a
+   * pagar/receber pede hoje (`PendingTransactionsView`), então o teto não muda
+   * nada que já funciona — só fecha a porta do abuso.
    */
   @ApiProperty({ default: 10, maximum: 500, required: false })
   @IsOptional()

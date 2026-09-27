@@ -1,3 +1,8 @@
+import { CreditCardsModule } from './credit-cards/credit-cards.module';
+import { SpendingGoalsModule } from './spending-goals/spending-goals.module';
+import { NotesModule } from './notes/notes.module';
+import { RemindersModule } from './reminders/reminders.module';
+import { AgendaEventsModule } from './agenda-events/agenda-events.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -28,6 +33,11 @@ import { OpsModule } from './ops/ops.module';
 
 @Module({
   imports: [
+    CreditCardsModule,
+    SpendingGoalsModule,
+    NotesModule,
+    RemindersModule,
+    AgendaEventsModule,
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',

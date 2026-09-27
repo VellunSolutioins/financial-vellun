@@ -7,13 +7,11 @@ export type ProfileType = (typeof ProfileType)[keyof typeof ProfileType];
 export const TransactionType = {
   INCOME: 'income',
   EXPENSE: 'expense',
-  TRANSFER: 'transfer',
 } as const;
 export type TransactionType = (typeof TransactionType)[keyof typeof TransactionType];
 
 export const TransactionStatus = {
   CONFIRMED: 'confirmed',
-  PENDING: 'pending',
   CANCELLED: 'cancelled',
 } as const;
 export type TransactionStatus = (typeof TransactionStatus)[keyof typeof TransactionStatus];

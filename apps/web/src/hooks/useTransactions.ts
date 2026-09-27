@@ -1,19 +1,25 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
+
 import { apiClient } from '@/lib/api-client';
 
 export interface Transaction {
   id: string;
-  type: 'income' | 'expense' | 'transfer';
+  type: 'income' | 'expense';
   amount: number;
   description: string;
   transactionDate: string;
-  status: 'confirmed' | 'pending' | 'cancelled';
+  status: 'confirmed' | 'cancelled';
   source: 'manual' | 'whatsapp' | 'ai' | 'import' | 'recurring';
   categoryId?: string;
   accountId: string;
   category?: { id: string; name: string };
   account?: { id: string; name: string };
+  recurrenceType: 'avulso' | 'fixo' | 'parcelado';
+  recurrenceFrequency?: 'monthly' | 'bimonthly' | 'semiannual' | 'annual' | null;
+  seriesId?: string | null;
+  installmentNumber?: number | null;
+  installmentTotal?: number | null;
   createdAt: string;
 }
 
@@ -26,6 +32,7 @@ export interface TransactionFilters {
   status?: string;
   source?: string;
   search?: string;
+  recurrenceType?: string;
   periodStart?: string;
   periodEnd?: string;
   sortBy?: string;
@@ -45,7 +52,7 @@ interface TransactionsResponse {
 
 export function useTransactions(filters: TransactionFilters) {
   const [data, setData] = useState<Transaction[]>([]);
-  const [meta, setMeta] = useState({ total: 0, page: 1, limit: 10, total_pages: 1 });
+  const [meta, setMeta] = useState({ total: 0, page: 1, limit: 20, total_pages: 1 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 

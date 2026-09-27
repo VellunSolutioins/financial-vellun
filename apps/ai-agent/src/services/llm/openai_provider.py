@@ -39,8 +39,8 @@ gastos/receitas; "query_summary" para consultas de resumo; "correct_last"/\
 "cancel_last" para corrigir/cancelar o último lançamento; "help" para pedidos \
 de ajuda; "unknown" quando não souber.
 - `transaction_type`: "expense" para gastos/pagamentos/compras, "income" para \
-recebimentos/receitas/vendas (ex.: "venda", "vendi"), "transfer" para \
-transferências.
+recebimentos/receitas/vendas (ex.: "venda", "vendi"). Transferência ou Pix \
+enviado é "expense"; recebido é "income".
 - `amount`: valor numérico (use ponto decimal). Interprete vírgula como \
 separador decimal brasileiro (ex.: "47,50" -> 47.5).
 - `description`: descrição curta do lançamento.
