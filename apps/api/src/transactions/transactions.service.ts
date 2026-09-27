@@ -89,7 +89,9 @@ export class TransactionsService {
       this.prisma.transaction.findMany({
         where,
         include: { category: true, account: true },
-        orderBy: { [orderByField]: order },
+        // Desempate estável: vários lançamentos no mesmo dia sem critério
+        // secundário podem repetir ou sumir entre páginas.
+        orderBy: [{ [orderByField]: order }, { createdAt: order }, { id: order }],
         skip: (page - 1) * limit,
         take: limit,
       }),
