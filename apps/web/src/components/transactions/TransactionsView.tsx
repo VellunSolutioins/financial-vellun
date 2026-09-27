@@ -31,6 +31,7 @@ import { resourceQuery, useResourceFilter } from '@/hooks/useResourceFilter';
 import { ResourceFilter } from '@/components/resources/ResourceFilter';
 import { DateBasisNote } from '@/components/resources/DateBasisNote';
 import { RefundForm } from '@/components/transactions/RefundForm';
+import { DeleteInstallmentDialog } from '@/components/transactions/DeleteInstallmentDialog';
 import { isEditableEntry, isInflow, signOf, typeLabel } from '@/lib/transaction-display';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ui/toast';
@@ -181,6 +182,8 @@ function TransacoesContent() {
   const [editingTx, setEditingTx] = useState<Transaction | undefined>();
   const [viewingTx, setViewingTx] = useState<Transaction | undefined>();
   const [refundingTx, setRefundingTx] = useState<Transaction | undefined>();
+  // Parcela de compra parcelada: a exclusão pergunta o escopo (parcela, futuras, compra).
+  const [deletingParcel, setDeletingParcel] = useState<Transaction | undefined>();
   const selectedMonth = searchParams.get('month') ?? currentMonth();
   const { start: monthStart, end: monthEnd } = monthRange(selectedMonth);
   const { data: resources } = useFinancialResources();
@@ -232,6 +235,10 @@ function TransacoesContent() {
     void refetch();
   };
   const handleDelete = async (tx: Transaction) => {
+    if (tx.recurrenceType === 'parcelado' && tx.seriesId) {
+      setDeletingParcel(tx);
+      return;
+    }
     const ok = await confirm({
       title: 'Excluir lançamento',
       description: `Excluir o lançamento "${tx.description}"? Esta ação não pode ser desfeita.`,
@@ -587,6 +594,18 @@ function TransacoesContent() {
           />
         )}
       </Dialog>
+
+      <DeleteInstallmentDialog
+        seriesId={deletingParcel?.seriesId ?? undefined}
+        parcel={deletingParcel}
+        open={!!deletingParcel}
+        onClose={() => setDeletingParcel(undefined)}
+        onDeleted={() => {
+          setDeletingParcel(undefined);
+          refetchTotals();
+          void refetch();
+        }}
+      />
     </div>
   );
 }
