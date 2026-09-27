@@ -16,7 +16,8 @@ export interface Transaction {
   categoryId?: string;
   accountId: string;
   category?: { id: string; name: string };
-  account?: { id: string; name: string };
+  /** `type: credit_card` = conta interna de um cartão. */
+  account?: { id: string; name: string; type?: string };
   recurrenceType: 'avulso' | 'fixo' | 'parcelado';
   recurrenceFrequency?: 'monthly' | 'bimonthly' | 'semiannual' | 'annual' | null;
   seriesId?: string | null;

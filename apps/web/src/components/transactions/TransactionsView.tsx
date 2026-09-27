@@ -1,7 +1,16 @@
 'use client';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useEffect, useState, Suspense } from 'react';
-import { ArrowLeftRight, Eye, Plus, TrendingDown, TrendingUp, Undo2 } from 'lucide-react';
+import {
+  ArrowLeftRight,
+  CreditCard as CreditCardIcon,
+  Eye,
+  Plus,
+  TrendingDown,
+  TrendingUp,
+  Undo2,
+  Wallet,
+} from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -268,11 +277,12 @@ function TransacoesContent() {
               Nenhum lançamento encontrado.
             </div>
           ) : (
-            <table className="w-full min-w-[620px] text-sm">
+            <table className="w-full min-w-[760px] text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-xs font-medium text-muted-foreground">
                   <th className="p-3">Descrição</th>
                   <th className="p-3">Categoria</th>
+                  <th className="p-3">Conta/Cartão</th>
                   <th className="p-3 text-right">Valor</th>
                   <th className="p-3" />
                 </tr>
@@ -327,6 +337,25 @@ function TransacoesContent() {
                       </td>
                       <td className="whitespace-nowrap p-3 text-muted-foreground">
                         {tx.category?.name ?? '—'}
+                      </td>
+                      <td className="p-3 text-muted-foreground">
+                        {tx.account ? (
+                          <span className="flex max-w-[12rem] items-center gap-1.5">
+                            {tx.account.type === 'credit_card' ? (
+                              <CreditCardIcon
+                                className="h-3.5 w-3.5 shrink-0"
+                                aria-label="Cartão"
+                              />
+                            ) : (
+                              <Wallet className="h-3.5 w-3.5 shrink-0" aria-label="Conta" />
+                            )}
+                            <span className="truncate" title={tx.account.name}>
+                              {tx.account.name}
+                            </span>
+                          </span>
+                        ) : (
+                          '—'
+                        )}
                       </td>
                       <td
                         className={cn(
