@@ -6,15 +6,15 @@ funcionando mesmo sem `OPENAI_API_KEY`.
 """
 
 import logging
-import re
 import time
-from datetime import timedelta
+from datetime import date
 
 from ..schemas.financial_intent import FinancialIntent, IntentType, TransactionTypeEnum
 from .clock import today_local
 from .llm.base import LlmProvider
 from .llm.factory import create_llm_provider
 from .metrics import metrics
+from .reply_parsers import detect_recurrence, match_names, normalize, parse_amount, parse_date
 
 logger = logging.getLogger(__name__)
 
@@ -87,15 +87,27 @@ CATEGORY_KEYWORDS: dict[str, str] = {
     "venda": "Vendas",
 }
 
-# Captura valores como "100", "5000", "47,50", "1.250,00", "R$ 30".
-# A primeira alternativa exige separador de milhar; a segunda cobre inteiros
-# simples e decimais com vírgula/ponto.
-_AMOUNT_RE = re.compile(
-    r"(?:r\$\s*)?(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)"
-)
-
-
 _UNSET = object()
+
+
+def _reference_date(context: dict) -> date:
+    """"Hoje" da mensagem: a data do contexto (quando ela chegou) ou o dia atual."""
+    try:
+        return date.fromisoformat(context["today"])
+    except (KeyError, TypeError, ValueError):
+        return today_local()
+
+
+def _catalog_names(context: dict, tx_type: TransactionTypeEnum | None) -> list[str] | None:
+    """Categorias do usuário compatíveis com o tipo; ``None`` sem catálogo."""
+    typed_key = {
+        TransactionTypeEnum.income: "income_categories",
+        TransactionTypeEnum.expense: "expense_categories",
+    }.get(tx_type)
+    names = context.get(typed_key) if typed_key and typed_key in context else None
+    if names is None:
+        names = context.get("categories")
+    return list(names) if names else None
 
 
 class IntentClassifier:
@@ -175,8 +187,15 @@ class IntentClassifier:
 
         transaction_type = self._detect_type(text)
         amount = self._extract_amount(text)
-        category_name = self._detect_category(text)
-        transaction_date = self._detect_date(text)
+        if amount is None and transaction_type is None:
+            # Sem valor e sem verbo de gasto/receita ("oi", "tudo bem?"): não é
+            # um lançamento. Antes virava "Não identifiquei o valor…".
+            return FinancialIntent(intent=IntentType.unknown, confidence=0.3)
+
+        category_name = self._detect_category(text, context, transaction_type)
+        today = _reference_date(context)
+        transaction_date = parse_date(text, today) or today
+        recurrence = detect_recurrence(text)
 
         intent = FinancialIntent(
             intent=IntentType.create_transaction,
@@ -184,7 +203,12 @@ class IntentClassifier:
             amount=amount,
             description=message.strip(),
             category_name=category_name,
-            transaction_date=transaction_date or today_local().isoformat(),
+            transaction_date=transaction_date.isoformat(),
+            recurrence_type=recurrence.recurrence_type,
+            installments=recurrence.installments,
+            amount_basis=recurrence.amount_basis,
+            recurrence_frequency=recurrence.frequency,
+            occurrences=recurrence.occurrences,
         )
 
         intent.confidence = self._estimate_confidence(intent)
@@ -198,36 +222,32 @@ class IntentClassifier:
         return None
 
     def _extract_amount(self, text: str) -> float | None:
-        match = _AMOUNT_RE.search(text)
-        if not match:
-            return None
-        raw = match.group(1)
-        # Normaliza formato brasileiro.
-        if "," in raw:
-            # Vírgula é decimal; pontos são separadores de milhar.
-            raw = raw.replace(".", "").replace(",", ".")
-        elif raw.count(".") == 1 and len(raw.split(".")[1]) == 3:
-            # Ex.: "1.250" -> separador de milhar, não decimal.
-            raw = raw.replace(".", "")
-        try:
-            return float(raw)
-        except ValueError:
-            return None
+        # Ignora datas, "10x" e "12 meses": em "10x de 300" o valor é 300.
+        return parse_amount(text)
 
-    def _detect_category(self, text: str) -> str | None:
+    def _detect_category(
+        self, text: str, context: dict, tx_type: TransactionTypeEnum | None
+    ) -> str | None:
+        """Categoria pela palavra-chave, desde que exista no catálogo do usuário.
+
+        O dicionário tem nomes dos dois perfis (PF e PJ): sem a checagem, um
+        "aluguel" sugeria uma categoria que o usuário nem tem. Sem catálogo
+        (API fora), vale o nome padrão.
+        """
+        names = _catalog_names(context, tx_type)
         for keyword, category in CATEGORY_KEYWORDS.items():
-            if keyword in text:
+            if keyword not in text:
+                continue
+            if names is None:
                 return category
-        return None
-
-    def _detect_date(self, text: str) -> str | None:
-        today = today_local()
-        if "anteontem" in text:
-            return (today - timedelta(days=2)).isoformat()
-        if "ontem" in text:
-            return (today - timedelta(days=1)).isoformat()
-        if "hoje" in text:
-            return today.isoformat()
+            matches = match_names(category, names)
+            if matches:
+                return names[matches[0]]
+        # O próprio nome de uma categoria do usuário citado na mensagem ("pets").
+        normalized = normalize(text)
+        for name in names or []:
+            if len(name) >= 3 and normalize(name) in normalized:
+                return name
         return None
 
     def _estimate_confidence(self, intent: FinancialIntent) -> float:

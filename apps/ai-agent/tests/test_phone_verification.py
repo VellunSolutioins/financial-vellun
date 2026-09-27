@@ -153,6 +153,9 @@ class FakeTxCreator:
     def __init__(self):
         self.users: list[str] = []
 
+    async def pending_question(self, intent, user_id):
+        return None
+
     async def create_from_intent(self, intent, user_id, raw, **kwargs):
         self.users.append(user_id)
         return {"ok": True, "message": "Lançamento criado"}

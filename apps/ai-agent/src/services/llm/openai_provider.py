@@ -3,9 +3,11 @@ import logging
 
 from openai import AsyncOpenAI
 
+from datetime import date
+
 from ...config import settings
 from ...schemas.financial_intent import FinancialIntent
-from ..clock import today_local
+from ..clock import today_local, weekday_pt
 from .base import LlmProvider
 
 logger = logging.getLogger(__name__)
@@ -20,10 +22,16 @@ caso contrário, "unknown" com confiança baixa.
 comprovante indicar recebimento.
 - `amount`: valor total (use ponto decimal; vírgula é decimal no Brasil).
 - `description`: estabelecimento/recebedor ou um resumo curto do comprovante.
-- `category_name`: escolha entre as categorias disponíveis do usuário; se nada \
-encaixar com clareza, deixe nulo.
+- `category_name`: escolha entre as categorias disponíveis do usuário, do grupo \
+compatível com o tipo (despesa ou receita); se nada encaixar com clareza, deixe nulo.
+- `account_name` / `account_kind`: se o comprovante ou a legenda indicar o cartão \
+ou a conta usados, o nome exatamente como aparece em "Contas e cartões \
+disponíveis" e `account_kind` ("card" para cartão de crédito); senão, nulos.
 - `transaction_date`: data do comprovante em ISO (YYYY-MM-DD); use a data atual \
 se estiver ilegível.
+- `recurrence_type`: "parcelado" se o comprovante mostrar parcelamento (ex.: \
+"3x", "parcela 1/3"), com `installments` e `amount_basis` ("total" se o valor \
+lido for o total da compra, "installment" se for o de uma parcela); senão "avulso".
 - `confidence`: 0.0 a 1.0, sua confiança na leitura da imagem.
 """
 
@@ -45,13 +53,36 @@ enviado é "expense"; recebido é "income".
 separador decimal brasileiro (ex.: "47,50" -> 47.5).
 - `description`: descrição curta do lançamento.
 - `category_name`: escolha a categoria mais provável dentre as disponíveis do \
-usuário. Se nenhuma se encaixar com clareza, deixe nulo.
-- `account_name`: conta ou cartão mencionado, se houver, com o nome como \
-aparece em "Contas disponíveis" (sem o sufixo "(cartão de crédito)"). Itens \
-com esse sufixo são cartões de crédito: use-os só quando o usuário indicar que \
-pagou no cartão. Sem menção, deixe nulo.
-- `transaction_date`: data em formato ISO (YYYY-MM-DD). Resolva datas \
-relativas ("hoje", "ontem") usando a data atual fornecida.
+usuário, **só do grupo do tipo do lançamento** ("Categorias de despesa" para \
+expense, "Categorias de receita" para income), com o nome exatamente como \
+aparece. Se nenhuma se encaixar com clareza, deixe nulo.
+- `account_name`: conta ou cartão mencionado, com o nome exatamente como \
+aparece em "Contas e cartões disponíveis", **incluindo** o sufixo "(cartão de \
+crédito)" quando for o cartão. Se existir uma conta e um cartão com o mesmo \
+nome, use o cartão só quando o usuário indicar cartão/crédito. Sem menção a \
+conta ou cartão, deixe nulo (o sistema usa a conta padrão do usuário).
+- `account_kind`: "card" quando o usuário indicar que pagou no cartão de \
+crédito ("no cartão", "no crédito"), mesmo sem dizer qual; "account" quando \
+indicar conta, débito, Pix ou dinheiro; nulo sem indicação.
+- `transaction_date`: data em formato ISO (YYYY-MM-DD), resolvida a partir da \
+"Data atual" fornecida: "hoje", "ontem", "anteontem"; "dia 10" é o dia 10 do \
+mês atual, ou do mês anterior se o dia 10 ainda não chegou (exceto em conta a \
+pagar ou lançamento que ainda vai acontecer); "sexta", "sexta passada" é a \
+última sexta que já passou; "17/06" sem ano é do ano atual. Sem data na \
+mensagem, use a data atual.
+- `recurrence_type`: "avulso" (padrão, uma única vez); "parcelado" para compra \
+parcelada ("parcelado", "parcelei", "em 10x", "em 10 vezes", "10 parcelas"); \
+"fixo" para lançamento que se repete ("todo mês", "mensal", "mensalidade", \
+"assinatura", "recorrente", "fixo", "anual"). "1x" ou "à vista" é "avulso".
+- `installments`: no parcelado, o número de parcelas, se informado; senão nulo.
+- `amount_basis`: no parcelado, "installment" se `amount` for o valor de cada \
+parcela ("10x de 300"), "total" se for o valor da compra inteira ("3000 em \
+10x"); nulo se não der para saber. Não multiplique nem divida o valor.
+- `recurrence_frequency`: no fixo, "monthly" (mensal), "bimonthly" (bimestral), \
+"semiannual" (semestral) ou "annual" (anual), se informada; nulo se não for \
+informada ou for outra (semanal, diária).
+- `occurrences`: no fixo, quantas vezes o lançamento se repete ("por 12 meses" \
+no mensal = 12; "por 2 anos" no mensal = 24), se informado; senão nulo.
 - `confidence`: 0.0 a 1.0, sua confiança na extração.
 - `needs_confirmation`: true quando faltar valor, tipo, ou houver ambiguidade.
 - `confirmation_question`: pergunta a fazer ao usuário quando \
@@ -89,25 +120,16 @@ class OpenAiProvider(LlmProvider):
         self._model = settings.openai_model
 
     async def extract_intent(self, message: str, context: dict) -> FinancialIntent:
-        today = context.get("today") or today_local().isoformat()
-        categories = context.get("categories") or []
-        accounts = context.get("accounts") or []
         recent_messages = context.get("recent_messages") or []
+        header = self._context_header(context)
+        current = f"Mensagem atual consolidada: {message}"
 
-        history_block = self._format_history(recent_messages)
+        # Limite de segurança no tamanho total do prompt (§13). Só o histórico
+        # encolhe: cortar pelo começo levava justamente a data e o catálogo.
+        budget = settings.conversation_context_max_chars - len(header) - len(current)
+        history_block = self._format_history(recent_messages, max_chars=max(budget, 0))
 
-        user_prompt = (
-            f"Data atual: {today}\n"
-            f"Categorias disponíveis: {', '.join(categories) or 'nenhuma informada'}\n"
-            f"Contas disponíveis: {', '.join(accounts) or 'nenhuma informada'}\n\n"
-            f"{history_block}"
-            f"Mensagem atual consolidada: {message}"
-        )
-
-        # Limite de segurança no tamanho total do prompt (§13).
-        max_chars = settings.conversation_context_max_chars
-        if len(user_prompt) > max_chars:
-            user_prompt = user_prompt[-max_chars:]
+        user_prompt = f"{header}{history_block}{current}"
 
         completion = await self._client.beta.chat.completions.parse(
             model=self._model,
@@ -130,17 +152,11 @@ class OpenAiProvider(LlmProvider):
     async def extract_intent_from_image(
         self, image_bytes: bytes, mime: str, caption: str | None, context: dict
     ) -> FinancialIntent:
-        today = context.get("today") or today_local().isoformat()
-        categories = context.get("categories") or []
-        accounts = context.get("accounts") or []
-
         b64 = base64.b64encode(image_bytes).decode()
         data_url = f"data:{mime or 'image/jpeg'};base64,{b64}"
 
         text_block = (
-            f"Data atual: {today}\n"
-            f"Categorias disponíveis: {', '.join(categories) or 'nenhuma informada'}\n"
-            f"Contas disponíveis: {', '.join(accounts) or 'nenhuma informada'}\n"
+            self._context_header(context)
             + (f"Legenda enviada pelo usuário: {caption}\n" if caption else "")
             + "Extraia o lançamento a partir do comprovante na imagem."
         )
@@ -166,8 +182,38 @@ class OpenAiProvider(LlmProvider):
         return parsed
 
     @staticmethod
-    def _format_history(recent_messages: list[dict]) -> str:
-        """Formata o histórico recente como bloco textual para o prompt."""
+    def _context_header(context: dict) -> str:
+        """Data, perfil e catálogo do usuário: o que o LLM precisa para resolver
+        datas relativas, categoria e conta."""
+        today_iso = context.get("today") or today_local().isoformat()
+        try:
+            today = f"{today_iso} ({weekday_pt(date.fromisoformat(today_iso))})"
+        except ValueError:
+            today = today_iso
+
+        def joined(items: list[str] | None) -> str:
+            return ", ".join(items or []) or "nenhuma informada"
+
+        profile = {"individual": "pessoa física", "business": "pessoa jurídica"}.get(
+            context.get("profile_type") or ""
+        )
+        lines = [f"Data atual: {today}"]
+        if profile:
+            lines.append(f"Perfil: {profile}")
+        if "expense_categories" in context or "income_categories" in context:
+            lines.append(f"Categorias de despesa: {joined(context.get('expense_categories'))}")
+            lines.append(f"Categorias de receita: {joined(context.get('income_categories'))}")
+        else:
+            lines.append(f"Categorias disponíveis: {joined(context.get('categories'))}")
+        lines.append(f"Contas e cartões disponíveis: {joined(context.get('accounts'))}")
+        return "\n".join(lines) + "\n\n"
+
+    @staticmethod
+    def _format_history(recent_messages: list[dict], max_chars: int | None = None) -> str:
+        """Formata o histórico recente como bloco textual para o prompt.
+
+        Com ``max_chars``, descarta as mensagens mais antigas até caber.
+        """
         if not recent_messages:
             return ""
 
@@ -182,6 +228,9 @@ class OpenAiProvider(LlmProvider):
             if content:
                 lines.append(f"- {who}: {content}")
 
-        if not lines:
-            return ""
-        return "Histórico recente:\n" + "\n".join(lines) + "\n\n"
+        def render(kept: list[str]) -> str:
+            return "Histórico recente:\n" + "\n".join(kept) + "\n\n" if kept else ""
+
+        while lines and max_chars is not None and len(render(lines)) > max_chars:
+            lines.pop(0)
+        return render(lines)

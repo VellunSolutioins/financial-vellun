@@ -133,6 +133,9 @@ def test_happy_path_calls_services_in_order():
             )
 
     class FakeTxCreator:
+        async def pending_question(self, intent, user_id):
+            return None
+
         async def create_from_intent(self, intent, user_id, raw, **kwargs):
             rec.calls.append("create_transaction")
             return {"ok": True, "message": "Lançamento criado!"}
@@ -154,8 +157,8 @@ def test_happy_path_calls_services_in_order():
             rec.sent.append(text)
 
     # Sem confirmação necessária.
-    def fake_needs_confirmation(intent, message):
-        return (False, "")
+    def fake_next_question(intent, message):
+        return None
 
     originals = _patch(
         {
@@ -164,7 +167,7 @@ def test_happy_path_calls_services_in_order():
             "transaction_creator": FakeTxCreator(),
             "audit_service": FakeAudit(),
             "messenger": FakeMessenger(),
-            "needs_confirmation": fake_needs_confirmation,
+            "next_question": fake_next_question,
             "subscription_gate": _FakeGate(allowed=True),
         }
     )
@@ -206,6 +209,9 @@ def test_pending_category_reply_uses_user_categories():
             return contact
 
     class FakeTxCreator:
+        async def pending_question(self, intent, user_id):
+            return None
+
         async def create_from_intent(self, intent, user_id, raw, **kwargs):
             rec.calls.append(f"create:{intent.category_name}")
             return {"ok": True, "message": f"Criado em {intent.category_name}"}

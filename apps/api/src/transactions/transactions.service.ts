@@ -1,4 +1,3 @@
-import { randomUUID } from 'crypto';
 import {
   BadRequestException,
   ConflictException,
@@ -17,7 +16,6 @@ import { ResourceScope, scopeWhere } from '../common/resource-scope';
 import { CardLedgerService } from '../credit-cards/card-ledger.service';
 import { NET_EXPENSE_TYPES, netExpenseByCategory, netExpenseOf, roundCents } from './net-expense';
 import {
-  addMonthsUtc,
   calendarDayFromUtcDate,
   compareCalendarDays,
   endOfDayUtc,
@@ -25,7 +23,7 @@ import {
   startOfDayUtc,
   todaySaoPaulo,
 } from '../common/date.util';
-import { FREQUENCY_STEP_MONTHS } from './recurrence-frequency';
+import { buildSeries } from './recurrence-series';
 
 @Injectable()
 export class TransactionsService {
@@ -194,62 +192,34 @@ export class TransactionsService {
   async create(userId: string, dto: CreateTransactionDto) {
     await this.validateOwnership(userId, dto.accountId, dto.categoryId, dto.type);
 
-    const recurrenceType = dto.recurrenceType ?? 'avulso';
-    const recurrenceFrequency =
-      recurrenceType === 'fixo' ? (dto.recurrenceFrequency ?? 'monthly') : null;
-    // Parcelas são sempre mensais; o fixo segue a frequência escolhida.
-    const stepMonths = recurrenceFrequency ? FREQUENCY_STEP_MONTHS[recurrenceFrequency] : 1;
-    const firstDate = parseDateOnly(dto.transactionDate);
+    const series = buildSeries({
+      recurrenceType: dto.recurrenceType,
+      recurrenceFrequency: dto.recurrenceFrequency,
+      installments: dto.installments,
+      recurrenceMonths: dto.recurrenceMonths,
+      amount: dto.amount,
+      firstDate: parseDateOnly(dto.transactionDate),
+    });
     const baseData = {
       userId,
       accountId: dto.accountId,
       categoryId: dto.categoryId || null,
       type: dto.type,
-      amount: dto.amount,
       description: dto.description,
       source: 'manual' as const,
-      recurrenceType,
-      recurrenceFrequency,
+      recurrenceType: series.recurrenceType,
+      recurrenceFrequency: series.recurrenceFrequency,
     };
 
-    let occurrences: number;
-    if (recurrenceType === 'parcelado') {
-      if (!dto.installments || dto.installments < 2 || dto.installments > 72) {
-        throw new BadRequestException('Número de parcelas inválido (mínimo 2, máximo 72)');
-      }
-      occurrences = dto.installments;
-    } else if (recurrenceType === 'fixo') {
-      if (!dto.recurrenceMonths || dto.recurrenceMonths < 2 || dto.recurrenceMonths > 120) {
-        throw new BadRequestException('Quantidade de ocorrências inválida (mínimo 2, máximo 120)');
-      }
-      occurrences = dto.recurrenceMonths;
-    } else {
-      occurrences = 1;
-    }
-
-    const seriesId = occurrences > 1 ? randomUUID() : null;
-
-    // Em "parcelado" o usuário informa o valor TOTAL da compra e o backend
-    // divide; em "fixo" o valor é o de cada ocorrência (uma mensalidade de
-    // R$ 200 por 12 meses são 12 lançamentos de R$ 200, não de R$ 16,67).
-    const amountFor =
-      recurrenceType === 'parcelado'
-        ? installmentAmounts(dto.amount, occurrences)
-        : () => dto.amount;
-
     const created = await this.prisma.$transaction(
-      Array.from({ length: occurrences }, (_, i) =>
+      series.rows.map((row) =>
         this.prisma.transaction.create({
           data: {
             ...baseData,
-            amount: amountFor(i),
-            transactionDate: i === 0 ? firstDate : addMonthsUtc(firstDate, i * stepMonths),
+            ...row,
             // Todas nascem confirmadas: as futuras ficam fora do saldo pela data,
             // não por status (ver AccountsService.recalculateBalance).
             status: 'confirmed',
-            seriesId,
-            installmentNumber: seriesId ? i + 1 : null,
-            installmentTotal: seriesId ? occurrences : null,
           },
           include: {
             category: true,
@@ -577,9 +547,4 @@ export function assertAccountAcceptsEntries(account: { isActive: boolean; type: 
   );
 }
 
-export function installmentAmounts(total: number, count: number): (index: number) => number {
-  const totalCents = Math.round(total * 100);
-  const baseCents = Math.floor(totalCents / count);
-  const remainderCents = totalCents - baseCents * count;
-  return (index) => (index === count - 1 ? baseCents + remainderCents : baseCents) / 100;
-}
+export { installmentAmounts } from './recurrence-series';

@@ -1,14 +1,18 @@
 import {
   IsEnum,
   IsIn,
+  IsInt,
   IsNotEmpty,
   IsNumber,
   IsOptional,
   IsPositive,
   IsString,
+  Matches,
+  Max,
   MaxLength,
+  Min,
 } from 'class-validator';
-import { TransactionStatus } from '@prisma/client';
+import { RecurrenceFrequency, RecurrenceType, TransactionStatus } from '@prisma/client';
 import { ENTRY_TYPES, EntryType } from '../../transactions/entry-types';
 
 export class CreateAiTransactionDto {
@@ -27,6 +31,7 @@ export class CreateAiTransactionDto {
   @IsIn(ENTRY_TYPES)
   type!: EntryType;
 
+  /** No parcelado, o valor TOTAL da compra (a API divide); no fixo, o de cada ocorrência. */
   @IsNumber()
   @IsPositive()
   amount!: number;
@@ -35,8 +40,9 @@ export class CreateAiTransactionDto {
   @IsNotEmpty()
   description!: string;
 
+  /** Data da (primeira) ocorrência, só a data: `YYYY-MM-DD`. */
   @IsString()
-  @IsNotEmpty()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'transactionDate deve estar no formato YYYY-MM-DD' })
   transactionDate!: string;
 
   @IsOptional()
@@ -64,4 +70,28 @@ export class CreateAiTransactionDto {
   @IsString()
   @MaxLength(255)
   idempotencyKey?: string;
+
+  /** Mesma regra do formulário: avulso (única vez), fixo (repete) ou parcelado. */
+  @IsOptional()
+  @IsEnum(RecurrenceType)
+  recurrenceType?: RecurrenceType;
+
+  /** Só no fixo; padrão mensal. */
+  @IsOptional()
+  @IsEnum(RecurrenceFrequency)
+  recurrenceFrequency?: RecurrenceFrequency;
+
+  /** Número de parcelas — obrigatório no parcelado. */
+  @IsOptional()
+  @IsInt()
+  @Min(2)
+  @Max(72)
+  installments?: number;
+
+  /** Quantidade de ocorrências — obrigatório no fixo. */
+  @IsOptional()
+  @IsInt()
+  @Min(2)
+  @Max(120)
+  recurrenceMonths?: number;
 }

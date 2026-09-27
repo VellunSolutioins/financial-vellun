@@ -19,6 +19,8 @@ import {
   assertAccountAcceptsType,
 } from '../transactions/transactions.service';
 import { CardLedgerService } from '../credit-cards/card-ledger.service';
+import { cardNeedsSetup } from '../credit-cards/card-setup';
+import { buildSeries } from '../transactions/recurrence-series';
 
 /** Vínculo que identifica o usuário: verificado e não revogado. */
 function isLinked(contact: { userId: string | null; isVerified: boolean; revokedAt: Date | null }) {
@@ -105,18 +107,32 @@ export class InternalService {
    * Contas comuns e cartões ativos do usuário, marcados com `kind`. O `id` é
    * sempre o da `Account` — no cartão, a conta interna dele —, que é o que o
    * lançamento grava. Cartão arquivado não aparece: não recebe compra.
+   *
+   * `isPreferred` marca o recurso "Padrão nos lançamentos" (no máximo um), que
+   * o agente usa quando a mensagem não cita conta nem cartão. `needsSetup`
+   * marca o cartão sem fechamento/vencimento: a compra entra, mas sem fatura.
    */
   async listAccounts(userId: string) {
     await this.assertCanUseProduct(userId);
-    const accounts = await this.prisma.account.findMany({
-      where: { userId, isActive: true },
-      include: { creditCard: { select: { id: true } } },
-      orderBy: { createdAt: 'asc' },
-    });
+    const [accounts, user] = await Promise.all([
+      this.prisma.account.findMany({
+        where: { userId, isActive: true },
+        include: {
+          creditCard: {
+            select: { id: true, closingDay: true, dueDay: true, invoiceTrackingStart: true },
+          },
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      this.prisma.user.findUnique({ where: { id: userId }, select: { preferredAccountId: true } }),
+    ]);
+    const preferredAccountId = user?.preferredAccountId ?? null;
     return accounts.map(({ creditCard, ...account }) => ({
       ...account,
       kind: creditCard || account.type === 'credit_card' ? ('card' as const) : ('account' as const),
       cardId: creditCard?.id ?? null,
+      isPreferred: account.id === preferredAccountId,
+      needsSetup: creditCard ? cardNeedsSetup(creditCard) : false,
     }));
   }
 
@@ -189,6 +205,18 @@ export class InternalService {
       if (!category || (category.userId !== null && category.userId !== dto.userId)) {
         throw new BadRequestException('Categoria inválida para o usuário');
       }
+      // O LLM escolhe a categoria pelo nome: sem esta checagem, uma categoria
+      // de receita (ou do outro perfil) entrava numa despesa.
+      if (category.type !== dto.type) {
+        throw new BadRequestException('Categoria incompatível com o tipo do lançamento');
+      }
+      const user = await this.prisma.user.findUnique({
+        where: { id: dto.userId },
+        select: { profileType: true },
+      });
+      if (user && category.profileType !== user.profileType) {
+        throw new BadRequestException('Categoria de outro perfil');
+      }
     }
 
     let transaction: Awaited<ReturnType<typeof this.persistAiTransaction>>;
@@ -221,40 +249,66 @@ export class InternalService {
    * Recalcular de novo é seguro: `recalculateBalance` recompõe o saldo do zero a
    * partir dos agregados, sem somar em cima do valor anterior.
    */
-  private async comSaldoGarantido<T extends { id: string; status: string; accountId: string }>(
-    transaction: T,
-  ): Promise<T> {
+  private async comSaldoGarantido<
+    T extends { id: string; status: string; accountId: string; seriesId?: string | null },
+  >(transaction: T): Promise<T> {
     if (transaction.status === 'confirmed') {
       await this.accountsService.recalculateBalance(transaction.accountId);
     }
     // Mesma lógica do saldo vale para a fatura do cartão: sincronizar de novo
     // na reentrega é seguro e cobre o processo que morreu antes de sincronizar.
-    await this.cardLedger.syncTransactions([transaction.id]);
+    // Numa série (parcelas), cada ocorrência vai para a sua fatura.
+    const ids = transaction.seriesId
+      ? (
+          await this.prisma.transaction.findMany({
+            where: { seriesId: transaction.seriesId },
+            select: { id: true },
+          })
+        ).map((t) => t.id)
+      : [transaction.id];
+    await this.cardLedger.syncTransactions(ids);
     return transaction;
   }
 
   /**
-   * Grava o lançamento e a rastreabilidade da extração na **mesma** transação
-   * de banco: ou os dois existem, ou nenhum.
+   * Grava o lançamento — ou a série inteira, no fixo e no parcelado — e a
+   * rastreabilidade da extração na **mesma** transação de banco: ou tudo
+   * existe, ou nada.
+   *
+   * A chave de idempotência e a extração ficam só na 1ª ocorrência (a chave é
+   * única no banco): a reentrega encontra a 1ª e devolve a série já criada.
    */
   private persistAiTransaction(dto: CreateAiTransactionDto) {
+    const series = buildSeries({
+      recurrenceType: dto.recurrenceType,
+      recurrenceFrequency: dto.recurrenceFrequency,
+      installments: dto.installments,
+      recurrenceMonths: dto.recurrenceMonths,
+      amount: dto.amount,
+      firstDate: parseDateOnly(dto.transactionDate),
+    });
+
     return this.prisma.$transaction(async (tx) => {
+      const [first, ...rest] = series.rows;
+      const baseData = {
+        userId: dto.userId,
+        accountId: dto.accountId,
+        categoryId: dto.categoryId,
+        type: dto.type,
+        description: dto.description,
+        status: dto.status ?? ('confirmed' as const),
+        source: dto.source ?? ('ai' as const),
+        rawInput: dto.rawInput,
+        recurrenceType: series.recurrenceType,
+        recurrenceFrequency: series.recurrenceFrequency,
+      };
       const transaction = await tx.transaction.create({
-        data: {
-          userId: dto.userId,
-          accountId: dto.accountId,
-          categoryId: dto.categoryId,
-          type: dto.type,
-          amount: dto.amount,
-          description: dto.description,
-          transactionDate: parseDateOnly(dto.transactionDate),
-          status: dto.status ?? 'confirmed',
-          source: dto.source ?? 'ai',
-          rawInput: dto.rawInput,
-          idempotencyKey: dto.idempotencyKey,
-        },
+        data: { ...baseData, ...first, idempotencyKey: dto.idempotencyKey },
         include: { category: true, account: true },
       });
+      for (const row of rest) {
+        await tx.transaction.create({ data: { ...baseData, ...row } });
+      }
 
       if (dto.aiExtractedTransactionId) {
         await tx.aiExtractedTransaction.update({

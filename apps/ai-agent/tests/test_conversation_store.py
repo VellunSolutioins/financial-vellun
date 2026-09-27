@@ -113,3 +113,36 @@ def test_intent_incompativel_e_descartado():
         '"awaitingConfirmation": true, "lastMessageAt": "2026-09-05T12:00:00+00:00"}'
     )
     assert ConversationState.from_json(payload) is None
+
+
+def test_estado_v3_guarda_o_campo_esperado_e_a_mensagem_original():
+    original = ConversationState(
+        pending_intent=pending_intent(),
+        awaiting_confirmation=True,
+        awaiting_field="installments",
+        original_message="geladeira 3000 parcelado",
+        reference_date="2026-09-27",
+        attempts=1,
+    )
+
+    restaurado = ConversationState.from_json(original.to_json())
+
+    assert restaurado.awaiting_field == "installments"
+    assert restaurado.original_message == "geladeira 3000 parcelado"
+    assert restaurado.reference_date == "2026-09-27"
+    assert restaurado.attempts == 1
+
+
+def test_estado_v2_gravado_antes_do_deploy_continua_valendo():
+    payload = (
+        '{"v": 2, "pendingIntent": {"intent": "create_transaction", "amount": 50}, '
+        '"awaitingConfirmation": true, "lastMessageAt": "2026-09-05T12:00:00+00:00", '
+        '"userId": "u1", "contactId": "c1", "linkVersion": 1}'
+    )
+
+    estado = ConversationState.from_json(payload)
+
+    assert estado is not None
+    assert estado.pending_intent.amount == 50
+    assert estado.awaiting_field is None  # confirmação genérica
+    assert estado.attempts == 0
