@@ -34,7 +34,12 @@ const schema = z
 type FormData = z.infer<typeof schema>;
 
 interface Props {
-  transaction: Transaction;
+  transaction: Pick<
+    Transaction,
+    'id' | 'description' | 'amount' | 'recurrenceType' | 'installmentTotal'
+  >;
+  /** Escopo inicial; `series` abre direto em "Compra inteira" (tela de Parcelamentos). */
+  defaultScope?: 'single' | 'series';
   onSuccess: () => void;
   onCancel: () => void;
 }
@@ -44,7 +49,7 @@ interface Props {
  * em conta comum, devolve o valor ao saldo. Nos dois casos abate a despesa da
  * categoria da compra — não é receita.
  */
-export function RefundForm({ transaction, onSuccess, onCancel }: Props) {
+export function RefundForm({ transaction, defaultScope = 'single', onSuccess, onCancel }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const toast = useToast();
   const isInstallment =
@@ -59,7 +64,7 @@ export function RefundForm({ transaction, onSuccess, onCancel }: Props) {
   } = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: {
-      scope: 'single',
+      scope: defaultScope,
       amount: formatCurrencyInput(Number(transaction.amount)),
       date: todayLocal(),
     },

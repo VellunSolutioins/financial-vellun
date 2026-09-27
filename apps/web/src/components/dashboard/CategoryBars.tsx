@@ -14,6 +14,7 @@ function amountAndShare(total: number, share: number) {
 }
 
 interface Props {
+  /** Um `\n` marca onde quebrar a linha quando os cards ficam lado a lado (lg). */
   title: string;
   subtitle: string;
   /** `null` enquanto carrega. */
@@ -37,18 +38,29 @@ export function CategoryBars({
   title,
   subtitle,
   slices,
-  emptyText = 'Sem despesas no período',
+  emptyText = 'Sem despesas no mês',
   action,
 }: Props) {
   const items = (slices ?? []).filter((s) => s.total > 0).sort((a, b) => b.total - a.total);
   const total = items.reduce((sum, s) => sum + s.total, 0);
   const shareOf = (value: number) => (total > 0 ? (value / total) * 100 : 0);
+  const [firstLine, secondLine] = title.split('\n');
+  const plainTitle = title.replace('\n', ' ');
 
   return (
     <Card className="rounded-2xl">
       <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-2 space-y-0">
         <div className="min-w-0">
-          <CardTitle className="text-base">{title}</CardTitle>
+          <CardTitle className="text-base">
+            {firstLine}
+            {secondLine && (
+              <>
+                {' '}
+                <br className="hidden lg:inline" />
+                {secondLine}
+              </>
+            )}
+          </CardTitle>
           <p className="text-xs text-muted-foreground">{subtitle}</p>
         </div>
         {action}
@@ -65,11 +77,11 @@ export function CategoryBars({
         ) : (
           <div className="space-y-4">
             <div>
-              <p className="text-xs text-muted-foreground">Total no período</p>
+              <p className="text-xs text-muted-foreground">Total do mês</p>
               <p className="text-lg font-bold sm:text-xl">{currency.format(total)}</p>
             </div>
 
-            <ul aria-label={`${title}: despesas por categoria`} className="space-y-3">
+            <ul aria-label={`${plainTitle}: despesas por categoria`} className="space-y-3">
               {items.map((s) => {
                 const share = shareOf(s.total);
                 return (

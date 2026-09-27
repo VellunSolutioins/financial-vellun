@@ -369,9 +369,7 @@ function DashboardContent() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold sm:text-2xl">Dashboard</h1>
-          <p className="text-sm text-muted-foreground">
-            Visão geral das suas finanças neste período.
-          </p>
+          <p className="text-sm text-muted-foreground">Visão geral das suas finanças neste mês.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ResourceFilter resources={resources} value={selection} onChange={setSelection} />
@@ -434,11 +432,38 @@ function DashboardContent() {
             {data.totalIncome > 0
               ? isFutureMonth
                 ? `Previsão: economia de ${savingsRate.toFixed(0)}% da receita neste mês.`
-                : `Você está economizando ${savingsRate.toFixed(0)}% da sua receita neste período.`
-              : 'Ainda sem receita registrada neste período para calcular.'}
+                : `Você está economizando ${savingsRate.toFixed(0)}% da sua receita neste mês.`
+              : 'Ainda sem receita registrada neste mês para calcular.'}
           </p>
         </CardContent>
       </Card>
+
+      {/* Despesas por categoria: consolidado, contas e cartões */}
+      <div className="grid items-start gap-4 sm:gap-6 lg:grid-cols-3">
+        <CategoryBars
+          title={'Para onde foi\nseu dinheiro'}
+          subtitle={
+            filterActive
+              ? 'Contas e cartões do filtro · por categoria'
+              : 'Contas e cartões · por categoria'
+          }
+          slices={data.expensesByCategory}
+        />
+        <ResourceCategoryChart
+          kind="accounts"
+          resources={chartAccounts}
+          periodStart={periodStart}
+          periodEnd={periodEnd}
+          emptyText={filterActive ? 'Nenhuma conta no filtro atual' : 'Nenhuma conta cadastrada'}
+        />
+        <ResourceCategoryChart
+          kind="cards"
+          resources={chartCards}
+          periodStart={periodStart}
+          periodEnd={periodEnd}
+          emptyText={filterActive ? 'Nenhum cartão no filtro atual' : 'Nenhum cartão cadastrado'}
+        />
+      </div>
 
       {/* Evolução mensal + Lançamentos diários */}
       <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
@@ -523,33 +548,6 @@ function DashboardContent() {
             )}
           </CardContent>
         </Card>
-      </div>
-
-      {/* Despesas por categoria: consolidado, contas e cartões */}
-      <div className="grid items-start gap-4 sm:gap-6 lg:grid-cols-3">
-        <CategoryBars
-          title="Despesas por Categoria"
-          subtitle={
-            filterActive
-              ? 'Contas e cartões do filtro · distribuição do período'
-              : 'Contas e cartões · distribuição do período'
-          }
-          slices={data.expensesByCategory}
-        />
-        <ResourceCategoryChart
-          kind="accounts"
-          resources={chartAccounts}
-          periodStart={periodStart}
-          periodEnd={periodEnd}
-          emptyText={filterActive ? 'Nenhuma conta no filtro atual' : 'Nenhuma conta cadastrada'}
-        />
-        <ResourceCategoryChart
-          kind="cards"
-          resources={chartCards}
-          periodStart={periodStart}
-          periodEnd={periodEnd}
-          emptyText={filterActive ? 'Nenhum cartão no filtro atual' : 'Nenhum cartão cadastrado'}
-        />
       </div>
 
       {/* Próximas contas a pagar */}

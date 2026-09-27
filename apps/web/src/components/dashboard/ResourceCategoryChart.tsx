@@ -26,8 +26,8 @@ interface Props {
 }
 
 const LABELS = {
-  accounts: { title: 'Despesas nas Contas', all: 'Todas as contas' },
-  cards: { title: 'Despesas nos Cartões', all: 'Todos os cartões' },
+  accounts: { title: 'Saiu da conta', all: 'Todas as contas' },
+  cards: { title: 'Foi no cartão', all: 'Todos os cartões' },
 } as const;
 
 /**
@@ -50,7 +50,7 @@ export function ResourceCategoryChart({
     return (
       <CategoryBars
         title={labels.title}
-        subtitle="Distribuição do período"
+        subtitle="Por categoria"
         slices={resources ? [] : null}
         emptyText={emptyText}
       />
@@ -78,13 +78,8 @@ export function ResourceCategoryChart({
   return (
     <ResourceCategoryData
       title={labels.title}
-      subtitle={
-        current
-          ? (resources.find((r) => r.id === current)?.name ?? '')
-          : resources.length === 1
-            ? resources[0].name
-            : labels.all
-      }
+      // Com um recurso só, o nome dele; com vários, o seletor já diz qual.
+      subtitle={resources.length === 1 ? `${resources[0].name} · por categoria` : 'Por categoria'}
       action={selector}
       query={{
         periodStart,
@@ -127,7 +122,7 @@ function ResourceCategoryData({
       subtitle={subtitle}
       slices={slices}
       action={action}
-      emptyText={data ? 'Sem despesas no período' : 'Não foi possível carregar'}
+      emptyText={data ? 'Sem despesas no mês' : 'Não foi possível carregar'}
     />
   );
 }

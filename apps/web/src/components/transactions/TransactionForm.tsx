@@ -68,11 +68,19 @@ const typeOptions = [
 interface Props {
   transaction?: Transaction;
   fixedOnly?: boolean;
+  /** Tela de Parcelamentos: nasce como "parcelado" e sem o seletor de recorrência. */
+  installmentOnly?: boolean;
   onSuccess: () => void;
   onCancel: () => void;
 }
 
-export function TransactionForm({ transaction, fixedOnly = false, onSuccess, onCancel }: Props) {
+export function TransactionForm({
+  transaction,
+  fixedOnly = false,
+  installmentOnly = false,
+  onSuccess,
+  onCancel,
+}: Props) {
   const { data: resources } = useFinancialResources();
   const [categories, setCategories] = useState<{ id: string; name: string; type: string }[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -98,7 +106,13 @@ export function TransactionForm({ transaction, fixedOnly = false, onSuccess, onC
       transactionDate: transaction?.transactionDate
         ? new Date(transaction.transactionDate).toISOString().slice(0, 10)
         : new Date().toISOString().slice(0, 10),
-      recurrenceType: !transaction && fixedOnly ? 'fixo' : 'avulso',
+      recurrenceType: transaction
+        ? 'avulso'
+        : fixedOnly
+          ? 'fixo'
+          : installmentOnly
+            ? 'parcelado'
+            : 'avulso',
       recurrenceFrequency: 'monthly',
       installments: '',
       recurrenceMonths: '',
@@ -308,8 +322,8 @@ export function TransactionForm({ transaction, fixedOnly = false, onSuccess, onC
       </div>
       {!transaction && (
         <div className="space-y-1">
-          {/* Na tela de Recorrências o tipo já é "fixo" (valor padrão do form): o seletor sai. */}
-          {!fixedOnly && (
+          {/* Em Recorrências/Parcelamentos o tipo já vem no valor padrão do form: o seletor sai. */}
+          {!fixedOnly && !installmentOnly && (
             <>
               <Label>Recorrência</Label>
               <Select {...register('recurrenceType')}>
@@ -323,8 +337,11 @@ export function TransactionForm({ transaction, fixedOnly = false, onSuccess, onC
           )}
           {selectedRecurrenceType === 'parcelado' && (
             <div className="pt-1">
+              {installmentOnly && <Label htmlFor="installment-count">Número de parcelas</Label>}
               <Input
+                id="installment-count"
                 type="number"
+                inputMode="numeric"
                 min={2}
                 max={72}
                 placeholder="Número de parcelas"
@@ -379,7 +396,9 @@ export function TransactionForm({ transaction, fixedOnly = false, onSuccess, onC
               ? 'Salvar alterações'
               : fixedOnly
                 ? 'Criar recorrência'
-                : 'Criar lançamento'}
+                : installmentOnly
+                  ? 'Criar parcelamento'
+                  : 'Criar lançamento'}
         </Button>
         {transaction && (
           <Button type="button" variant="destructive" onClick={handleCancel}>
