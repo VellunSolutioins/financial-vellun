@@ -1,9 +1,4 @@
-import {
-  BadRequestException,
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { ProfileType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
@@ -14,13 +9,27 @@ export class CategoriesService {
   constructor(private prisma: PrismaService) {}
 
   async findAll(userId: string, profileType: ProfileType) {
-    return this.prisma.category.findMany({
+    const categories = await this.prisma.category.findMany({
       where: {
         profileType,
         OR: [{ userId }, { isDefault: true, userId: null }],
       },
       orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
+      // Contagem só do próprio usuário: categorias padrão são compartilhadas.
+      include: {
+        _count: {
+          select: {
+            transactions: { where: { userId } },
+            spendingGoals: { where: { userId } },
+          },
+        },
+      },
     });
+    return categories.map(({ _count, ...category }) => ({
+      ...category,
+      transactionCount: _count.transactions,
+      spendingGoalCount: _count.spendingGoals,
+    }));
   }
 
   async create(userId: string, profileType: ProfileType, dto: CreateCategoryDto) {
@@ -45,13 +54,16 @@ export class CategoriesService {
       throw new ForbiddenException('Não é possível excluir esta categoria');
     }
 
-    const hasTransactions = await this.prisma.transaction.count({ where: { categoryId: id } });
-    if (hasTransactions > 0) {
-      throw new BadRequestException(
-        'Categoria possui lançamentos vinculados e não pode ser excluída',
-      );
-    }
-
-    return this.prisma.category.delete({ where: { id } });
+    // Lançamentos vinculados passam a "Sem categoria" (null), estado que o
+    // resto do sistema já trata. Metas da categoria somem junto (FK cascade):
+    // meta de gasto sem categoria não tem o que medir.
+    return this.prisma.$transaction(async (tx) => {
+      const { count } = await tx.transaction.updateMany({
+        where: { categoryId: id },
+        data: { categoryId: null },
+      });
+      await tx.category.delete({ where: { id } });
+      return { id, uncategorizedTransactions: count };
+    });
   }
 }
