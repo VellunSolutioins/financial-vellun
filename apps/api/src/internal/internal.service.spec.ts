@@ -32,6 +32,11 @@ function createPrismaMock() {
   return mock;
 }
 
+/** Cartão com fechamento, vencimento e início do controle definidos. */
+function configuredCard(id: string) {
+  return { id, closingDay: 3, dueDay: 10, invoiceTrackingStart: new Date('2026-01-01') };
+}
+
 describe('InternalService', () => {
   let prisma: ReturnType<typeof createPrismaMock>;
   let service: InternalService;
@@ -158,7 +163,16 @@ describe('InternalService', () => {
       const result = await service.listAccounts('u1');
 
       expect(access.canUseProduct).toHaveBeenCalledWith('u1');
-      expect(result).toEqual([{ id: 'a1', type: 'checking', kind: 'account', cardId: null }]);
+      expect(result).toEqual([
+        {
+          id: 'a1',
+          type: 'checking',
+          kind: 'account',
+          cardId: null,
+          isPreferred: false,
+          needsSetup: false,
+        },
+      ]);
     });
 
     it('createTransactionFromAi bloqueia antes de tocar no banco quando sem assinatura', async () => {
@@ -177,7 +191,7 @@ describe('InternalService', () => {
 
       const result = await service.listAccounts('u1');
 
-      expect(result).toEqual([{ id: 'a1', type: 'checking', kind: 'account', cardId: null }]);
+      expect(result).toMatchObject([{ id: 'a1', kind: 'account', cardId: null }]);
       expect(access.canUseProduct).not.toHaveBeenCalled();
     });
 
@@ -208,15 +222,62 @@ describe('InternalService', () => {
     it('listAccounts marca cartões com kind = card e o id da conta interna', async () => {
       prisma.account.findMany.mockResolvedValue([
         { id: 'a1', name: 'Itaú', type: 'checking', creditCard: null },
-        { id: 'a2', name: 'Nubank', type: 'credit_card', creditCard: { id: 'c1' } },
+        { id: 'a2', name: 'Nubank', type: 'credit_card', creditCard: configuredCard('c1') },
       ]);
 
       const result = await service.listAccounts('u1');
 
       expect(result).toEqual([
-        { id: 'a1', name: 'Itaú', type: 'checking', kind: 'account', cardId: null },
-        { id: 'a2', name: 'Nubank', type: 'credit_card', kind: 'card', cardId: 'c1' },
+        {
+          id: 'a1',
+          name: 'Itaú',
+          type: 'checking',
+          kind: 'account',
+          cardId: null,
+          isPreferred: false,
+          needsSetup: false,
+        },
+        {
+          id: 'a2',
+          name: 'Nubank',
+          type: 'credit_card',
+          kind: 'card',
+          cardId: 'c1',
+          isPreferred: false,
+          needsSetup: false,
+        },
       ]);
+    });
+
+    // O agente usa o "Padrão nos lançamentos" quando a mensagem não cita conta.
+    it('listAccounts marca o recurso preferencial do usuário, inclusive cartão', async () => {
+      prisma.account.findMany.mockResolvedValue([
+        { id: 'a1', name: 'Itaú', type: 'checking', creditCard: null },
+        { id: 'a2', name: 'Nubank', type: 'credit_card', creditCard: configuredCard('c1') },
+      ]);
+      prisma.user.findUnique.mockResolvedValue({ preferredAccountId: 'a2' });
+
+      const result = await service.listAccounts('u1');
+
+      expect(result.map((r) => [r.id, r.isPreferred])).toEqual([
+        ['a1', false],
+        ['a2', true],
+      ]);
+    });
+
+    it('listAccounts marca o cartão sem fechamento/vencimento como needsSetup', async () => {
+      prisma.account.findMany.mockResolvedValue([
+        {
+          id: 'a2',
+          name: 'Nubank',
+          type: 'credit_card',
+          creditCard: { ...configuredCard('c1'), closingDay: null },
+        },
+      ]);
+
+      const [card] = await service.listAccounts('u1');
+
+      expect(card.needsSetup).toBe(true);
     });
 
     it('createTransactionFromAi rejeita categoria de outro usuário', async () => {
@@ -230,6 +291,172 @@ describe('InternalService', () => {
           categoryId: 'cat1',
         } as any),
       ).rejects.toThrow('Categoria inválida para o usuário');
+      expect(prisma.transaction.create).not.toHaveBeenCalled();
+    });
+
+    it('createTransactionFromAi rejeita categoria de receita numa despesa', async () => {
+      prisma.account.findUnique.mockResolvedValue({ id: 'a1', userId: 'u1', isActive: true });
+      prisma.category.findUnique.mockResolvedValue({
+        id: 'cat1',
+        userId: null,
+        type: 'income',
+        profileType: 'individual',
+      });
+
+      await expect(
+        service.createTransactionFromAi({
+          userId: 'u1',
+          accountId: 'a1',
+          categoryId: 'cat1',
+          type: 'expense',
+        } as any),
+      ).rejects.toThrow('Categoria incompatível com o tipo do lançamento');
+      expect(prisma.transaction.create).not.toHaveBeenCalled();
+    });
+
+    it('createTransactionFromAi rejeita categoria do outro perfil (PF x PJ)', async () => {
+      prisma.account.findUnique.mockResolvedValue({ id: 'a1', userId: 'u1', isActive: true });
+      prisma.category.findUnique.mockResolvedValue({
+        id: 'cat1',
+        userId: null,
+        type: 'expense',
+        profileType: 'business',
+      });
+      prisma.user.findUnique.mockResolvedValue({ profileType: 'individual' });
+
+      await expect(
+        service.createTransactionFromAi({
+          userId: 'u1',
+          accountId: 'a1',
+          categoryId: 'cat1',
+          type: 'expense',
+        } as any),
+      ).rejects.toThrow('Categoria de outro perfil');
+      expect(prisma.transaction.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('createTransactionFromAi (recorrência)', () => {
+    const base = {
+      userId: 'u1',
+      accountId: 'a1',
+      type: 'expense',
+      description: 'TV',
+      transactionDate: '2026-09-27',
+      source: 'whatsapp',
+      idempotencyKey: 'job-9',
+    } as any;
+
+    beforeEach(() => {
+      prisma.account.findUnique.mockResolvedValue({ id: 'a1', userId: 'u1', isActive: true });
+      prisma.transaction.findUnique.mockResolvedValue(null);
+      let n = 0;
+      prisma.transaction.create.mockImplementation(async ({ data }: any) => ({
+        id: `t${++n}`,
+        accountId: 'a1',
+        status: 'confirmed',
+        ...data,
+      }));
+      prisma.transaction.findMany = jest.fn(async () =>
+        prisma.transaction.create.mock.calls.map((_: unknown, i: number) => ({ id: `t${i + 1}` })),
+      );
+      service = new InternalService(
+        prisma as any,
+        { recalculateBalance: jest.fn() } as any,
+        access as any,
+        ledger as any,
+      );
+    });
+
+    const created = () => prisma.transaction.create.mock.calls.map(([arg]: any) => arg.data);
+    const dates = (rows: any[]) =>
+      rows.map((r) => (r.transactionDate as Date).toISOString().slice(0, 10));
+
+    it('sem recorrência cria um único lançamento avulso', async () => {
+      await service.createTransactionFromAi({ ...base, amount: 50 });
+
+      expect(created()).toHaveLength(1);
+      expect(created()[0]).toMatchObject({ recurrenceType: 'avulso', seriesId: null });
+    });
+
+    it('parcelado divide o total em N parcelas mensais e vincula todas às faturas', async () => {
+      await service.createTransactionFromAi({
+        ...base,
+        amount: 100,
+        recurrenceType: 'parcelado',
+        installments: 3,
+      });
+
+      const rows = created();
+      expect(rows.map((r: any) => r.amount)).toEqual([33.33, 33.33, 33.34]);
+      expect(rows.map((r: any) => r.installmentNumber)).toEqual([1, 2, 3]);
+      expect(rows.every((r: any) => r.installmentTotal === 3)).toBe(true);
+      expect(new Set(rows.map((r: any) => r.seriesId)).size).toBe(1);
+      expect(rows[0].seriesId).toEqual(expect.any(String));
+      expect(dates(rows)).toEqual(['2026-09-27', '2026-10-27', '2026-11-27']);
+      expect(ledger.syncTransactions).toHaveBeenCalledWith(['t1', 't2', 't3']);
+    });
+
+    it('fixo repete o valor na frequência pedida', async () => {
+      await service.createTransactionFromAi({
+        ...base,
+        amount: 55,
+        recurrenceType: 'fixo',
+        recurrenceFrequency: 'bimonthly',
+        recurrenceMonths: 3,
+      });
+
+      const rows = created();
+      expect(rows.map((r: any) => r.amount)).toEqual([55, 55, 55]);
+      expect(rows[0]).toMatchObject({ recurrenceType: 'fixo', recurrenceFrequency: 'bimonthly' });
+      expect(dates(rows)).toEqual(['2026-09-27', '2026-11-27', '2027-01-27']);
+    });
+
+    // A chave é única no banco: repetida em cada parcela, a 2ª linha estourava.
+    it('grava a chave de idempotência e a extração só na 1ª ocorrência', async () => {
+      await service.createTransactionFromAi({
+        ...base,
+        amount: 100,
+        recurrenceType: 'parcelado',
+        installments: 2,
+        aiExtractedTransactionId: 'ext1',
+      });
+
+      const rows = created();
+      expect(rows[0].idempotencyKey).toBe('job-9');
+      expect(rows[1].idempotencyKey).toBeUndefined();
+      expect(prisma.aiExtractedTransaction.update).toHaveBeenCalledWith({
+        where: { id: 'ext1' },
+        data: { transactionId: 't1', status: 'confirmed' },
+      });
+    });
+
+    it('reentrega com a mesma chave devolve a série existente sem criar outra', async () => {
+      prisma.transaction.findUnique.mockResolvedValue({
+        id: 't1',
+        userId: 'u1',
+        accountId: 'a1',
+        status: 'confirmed',
+        seriesId: 's1',
+      });
+      prisma.transaction.findMany = jest.fn().mockResolvedValue([{ id: 't1' }, { id: 't2' }]);
+
+      const result = await service.createTransactionFromAi({
+        ...base,
+        amount: 100,
+        recurrenceType: 'parcelado',
+        installments: 2,
+      });
+
+      expect(result).toMatchObject({ id: 't1', idempotent: true });
+      expect(prisma.transaction.create).not.toHaveBeenCalled();
+      expect(ledger.syncTransactions).toHaveBeenCalledWith(['t1', 't2']);
+    });
+
+    it('parcelado sem número de parcelas é recusado', async () => {
+      await expect(
+        service.createTransactionFromAi({ ...base, amount: 100, recurrenceType: 'parcelado' }),
+      ).rejects.toThrow('Número de parcelas inválido');
       expect(prisma.transaction.create).not.toHaveBeenCalled();
     });
   });
