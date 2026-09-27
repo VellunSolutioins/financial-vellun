@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   AreaChart,
@@ -13,6 +13,10 @@ import {
 } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { apiClient } from '@/lib/api-client';
+import { useFinancialResources } from '@/hooks/useFinancialResources';
+import { resourceQuery, useResourceFilter } from '@/hooks/useResourceFilter';
+import { ResourceFilter } from '@/components/resources/ResourceFilter';
+import { DateBasisNote } from '@/components/resources/DateBasisNote';
 import { formatDateBR } from '@/lib/utils';
 
 interface PendingTransaction {
@@ -49,31 +53,54 @@ function monthRange(date: Date) {
 }
 
 export default function EmpresaDashboardPage() {
+  return (
+    <Suspense>
+      <EmpresaDashboardContent />
+    </Suspense>
+  );
+}
+
+function currentMonth() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function EmpresaDashboardContent() {
   const [data, setData] = useState<BusinessSummary | null>(null);
   const [loading, setLoading] = useState(true);
-  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  // Mês local do navegador: `toISOString` dava o mês UTC, errado depois das 21h.
+  const [month, setMonth] = useState(currentMonth);
+  const { data: resources } = useFinancialResources();
+  const { selection, setSelection } = useResourceFilter();
+  const scopeParams = new URLSearchParams(resourceQuery(selection)).toString();
 
   useEffect(() => {
     setLoading(true);
     const { start, end } = monthRange(new Date(`${month}-01T00:00:00`));
     apiClient
-      .get<BusinessSummary>(`/dashboard/business/summary?period_start=${start}&period_end=${end}`)
+      .get<BusinessSummary>(
+        `/dashboard/business/summary?period_start=${start}&period_end=${end}&${scopeParams}`,
+      )
       .then(setData)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [month]);
+  }, [month, scopeParams]);
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <h1 className="text-2xl font-bold">Dashboard Empresarial</h1>
-        <input
-          type="month"
-          value={month}
-          onChange={(e) => setMonth(e.target.value)}
-          className="border rounded-md px-3 py-2 text-sm"
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          <ResourceFilter resources={resources} value={selection} onChange={setSelection} />
+          <input
+            type="month"
+            value={month}
+            onChange={(e) => setMonth(e.target.value)}
+            className="h-9 rounded-md border px-3 text-sm"
+          />
+        </div>
       </div>
+      <DateBasisNote />
 
       {loading ? (
         <div className="text-muted-foreground">Carregando...</div>
@@ -110,6 +137,7 @@ export default function EmpresaDashboardPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Fluxo de Caixa</CardTitle>
+              <DateBasisNote variant="cash" />
             </CardHeader>
             <CardContent>
               {data.cashFlow.length === 0 ? (

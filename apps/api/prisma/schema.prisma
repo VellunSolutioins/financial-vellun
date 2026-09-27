@@ -27,12 +27,28 @@ enum ProfileType {
   business
 }
 
-/// `transfer` não é mais aceito pela API nem oferecido nas telas; o valor fica
-/// no enum só para não invalidar registros antigos.
+/// `income`/`expense` são os tipos que o usuário lança.
+/// `transfer` só existe nas duas pernas de um pagamento de fatura
+/// (`cardPaymentId` + `transferDirection`); registros antigos sem direção são
+/// ignorados nos saldos. `refund` é o estorno de uma despesa (`refundOfId`):
+/// reduz a despesa da categoria e nunca é receita. Ver docs/adrs/0015.
 enum TransactionType {
   income
   expense
   transfer
+  refund
+}
+
+/// Lado de uma perna de transferência: `out` sai da conta de origem, `in`
+/// entra no cartão.
+enum TransferDirection {
+  in
+  out
+}
+
+enum CardPaymentStatus {
+  active
+  reversed
 }
 
 /// Não existe "pendente": o que ainda vai acontecer é definido pela data do
@@ -209,7 +225,14 @@ model User {
   sessions                UserSession[]
   securityEvents          UserSecurityEvent[]
   phoneVerifications      PhoneVerification[]
+  creditCardInvoices      CreditCardInvoice[]
+  /// Conta ou cartão (pelo `accountId` da conta interna) pré-selecionado ao
+  /// criar um lançamento. Um só por usuário; nulo = sem preferência.
+  preferredAccountId      String?  @map("preferred_account_id")
+  preferredAccount        Account? @relation("UserPreferredAccount", fields: [preferredAccountId], references: [id], onDelete: SetNull)
+  cardPayments            CardPayment[]
 
+  @@index([preferredAccountId])
   @@map("users")
 }
 
@@ -313,17 +336,23 @@ model BusinessProfile {
 // ── Financial ─────────────────────────────────────────────────────────────────
 
 model Account {
-  creditCard     CreditCard?
-  id             String      @id @default(uuid())
-  userId         String      @map("user_id")
-  name           String
-  type           AccountType
-  initialBalance Decimal     @default(0) @map("initial_balance") @db.Decimal(15, 2)
-  currentBalance Decimal     @default(0) @map("current_balance") @db.Decimal(15, 2)
-  currency       String      @default("BRL")
-  isActive       Boolean     @default(true) @map("is_active")
-  createdAt      DateTime    @default(now()) @map("created_at")
-  updatedAt      DateTime    @updatedAt @map("updated_at")
+  creditCard      CreditCard?
+  /// Cartões que sugerem esta conta para pagar a fatura.
+  paymentForCards CreditCard[]  @relation("CreditCardPaymentAccount")
+  /// Usuários que têm esta conta (ou o cartão dela) como preferencial.
+  preferredBy     User[]        @relation("UserPreferredAccount")
+  /// Pagamentos de fatura que saíram desta conta.
+  cardPayments    CardPayment[] @relation("CardPaymentSource")
+  id              String        @id @default(uuid())
+  userId          String        @map("user_id")
+  name            String
+  type            AccountType
+  initialBalance  Decimal       @default(0) @map("initial_balance") @db.Decimal(15, 2)
+  currentBalance  Decimal       @default(0) @map("current_balance") @db.Decimal(15, 2)
+  currency        String        @default("BRL")
+  isActive        Boolean       @default(true) @map("is_active")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
 
   user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   transactions Transaction[]
@@ -354,33 +383,46 @@ model Category {
 }
 
 model Transaction {
-  recurrenceType    RecurrenceType    @default(avulso) @map("recurrence_type")
+  recurrenceType      RecurrenceType       @default(avulso) @map("recurrence_type")
   // Só em "fixo". Uma recorrência não é outra entidade: é a série de
   // lançamentos fixos com o mesmo `seriesId`.
   recurrenceFrequency RecurrenceFrequency? @map("recurrence_frequency")
-  seriesId          String?           @map("series_id")
-  installmentNumber Int?              @map("installment_number")
-  installmentTotal  Int?              @map("installment_total")
-  id                String            @id @default(uuid())
-  userId            String            @map("user_id")
-  accountId         String            @map("account_id")
-  categoryId        String?           @map("category_id")
-  type              TransactionType
-  amount            Decimal           @db.Decimal(15, 2)
-  description       String
-  transactionDate   DateTime          @map("transaction_date") @db.Date
-  status            TransactionStatus @default(confirmed)
-  source            TransactionSource @default(manual)
-  rawInput          String?           @map("raw_input")
+  seriesId            String?              @map("series_id")
+  installmentNumber   Int?                 @map("installment_number")
+  installmentTotal    Int?                 @map("installment_total")
+  id                  String               @id @default(uuid())
+  userId              String               @map("user_id")
+  accountId           String               @map("account_id")
+  categoryId          String?              @map("category_id")
+  type                TransactionType
+  amount              Decimal              @db.Decimal(15, 2)
+  description         String
+  transactionDate     DateTime             @map("transaction_date") @db.Date
+  status              TransactionStatus    @default(confirmed)
+  source              TransactionSource    @default(manual)
+  rawInput            String?              @map("raw_input")
   // Chave de idempotencia da origem (ex.: jobId do pipeline do WhatsApp).
   // Um retry apos timeout devolve o lancamento existente em vez de duplicar.
-  idempotencyKey    String?           @unique @map("idempotency_key")
-  createdAt         DateTime          @default(now()) @map("created_at")
-  updatedAt         DateTime          @updatedAt @map("updated_at")
+  idempotencyKey      String?              @unique @map("idempotency_key")
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
 
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  account  Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  category Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  // Fatura do cartão em que o lançamento é cobrado. Nula fora de cartão, em
+  // cartão com configuração pendente e antes do início do controle.
+  invoiceId         String?            @map("invoice_id")
+  // Pernas de pagamento de fatura (type = transfer).
+  transferDirection TransferDirection? @map("transfer_direction")
+  cardPaymentId     String?            @map("card_payment_id")
+  // Estorno (type = refund): a despesa estornada.
+  refundOfId        String?            @map("refund_of_id")
+
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account     Account            @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  category    Category?          @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  invoice     CreditCardInvoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  cardPayment CardPayment?       @relation(fields: [cardPaymentId], references: [id], onDelete: NoAction)
+  refundOf    Transaction?       @relation("TransactionRefunds", fields: [refundOfId], references: [id], onDelete: NoAction)
+  refunds     Transaction[]      @relation("TransactionRefunds")
 
   aiExtractedTransactions AiExtractedTransaction[]
 
@@ -406,6 +448,9 @@ model Transaction {
   // nenhum composto acima os cobre.
   @@index([categoryId])
   @@index([accountId])
+  @@index([invoiceId])
+  @@index([cardPaymentId])
+  @@index([refundOfId])
   @@map("transactions")
 }
 
@@ -800,21 +845,93 @@ enum ReminderStatus {
   paid
 }
 
+/// Cartão de crédito. Os lançamentos continuam em uma `Account` interna
+/// (`type: credit_card`, 1:1 por `accountId`), que nunca aparece em Contas.
+///
+/// Sem `closingDay`, `dueDay` ou `invoiceTrackingStart` o cartão está em
+/// "configuração pendente": cartões anteriores ao controle de faturas não
+/// ganham datas inventadas (ver docs/adrs/0012).
 model CreditCard {
-  id          String   @id @default(uuid())
-  accountId   String   @unique @map("account_id")
-  brand       String?
-  color       String?
-  creditLimit Decimal? @map("credit_limit") @db.Decimal(15, 2)
-  /// Dia do mês em que a fatura vence (1–28).
-  dueDay      Int      @map("due_day")
-  isPrimary   Boolean  @default(false) @map("is_primary")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id                   String    @id @default(uuid())
+  accountId            String    @unique @map("account_id")
+  brand                String?
+  color                String?
+  creditLimit          Decimal?  @map("credit_limit") @db.Decimal(15, 2)
+  /// Dia do mês em que a fatura fecha (1–31; nos meses curtos, o último dia).
+  closingDay           Int?      @map("closing_day")
+  /// Dia do mês em que a fatura vence (1–31; nos meses curtos, o último dia).
+  dueDay               Int?      @map("due_day")
+  /// A partir desta data os lançamentos do cartão contam como dívida e entram
+  /// em faturas. Os anteriores ficam "quitados antes do controle".
+  invoiceTrackingStart DateTime? @map("invoice_tracking_start") @db.Date
+  /// Conta comum sugerida para pagar a fatura. Só sugestão.
+  paymentAccountId     String?   @map("payment_account_id")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
 
-  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  account        Account             @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  paymentAccount Account?            @relation("CreditCardPaymentAccount", fields: [paymentAccountId], references: [id], onDelete: SetNull)
+  invoices       CreditCardInvoice[]
+  payments       CardPayment[]
 
+  @@index([paymentAccountId])
   @@map("credit_cards")
+}
+
+/// Fatura de um cartão. Criada quando o primeiro lançamento cai no ciclo; as
+/// datas são gravadas nesse momento e só mudam, numa troca de fechamento ou
+/// vencimento, para faturas futuras (`periodStart` depois de hoje). Cobre as
+/// compras de `periodStart` até a véspera de `closingDate`.
+model CreditCardInvoice {
+  id             String   @id @default(uuid())
+  userId         String   @map("user_id")
+  creditCardId   String   @map("credit_card_id")
+  /// `YYYY-MM` do vencimento: a identidade da fatura no cartão.
+  referenceMonth String   @map("reference_month")
+  periodStart    DateTime @map("period_start") @db.Date
+  closingDate    DateTime @map("closing_date") @db.Date
+  dueDate        DateTime @map("due_date") @db.Date
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  creditCard   CreditCard    @relation(fields: [creditCardId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+  payments     CardPayment[]
+
+  @@unique([creditCardId, referenceMonth])
+  @@index([userId])
+  @@map("credit_card_invoices")
+}
+
+/// Pagamento de fatura. Gera duas pernas `transfer` (saída da conta de origem,
+/// entrada no cartão), nunca receita ou despesa. Reverter marca `reversed` e
+/// cancela as pernas: o histórico fica.
+model CardPayment {
+  id              String            @id @default(uuid())
+  userId          String            @map("user_id")
+  creditCardId    String            @map("credit_card_id")
+  invoiceId       String            @map("invoice_id")
+  sourceAccountId String            @map("source_account_id")
+  amount          Decimal           @db.Decimal(15, 2)
+  paymentDate     DateTime          @map("payment_date") @db.Date
+  status          CardPaymentStatus @default(active)
+  /// Gerada pela tela a cada abertura do diálogo: um duplo clique ou retry
+  /// devolve o mesmo pagamento.
+  idempotencyKey  String            @unique @map("idempotency_key")
+  reversedAt      DateTime?         @map("reversed_at")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  creditCard    CreditCard        @relation(fields: [creditCardId], references: [id], onDelete: Cascade)
+  invoice       CreditCardInvoice @relation(fields: [invoiceId], references: [id], onDelete: NoAction)
+  sourceAccount Account           @relation("CardPaymentSource", fields: [sourceAccountId], references: [id], onDelete: NoAction)
+  transactions  Transaction[]
+
+  @@index([invoiceId])
+  @@index([userId])
+  @@map("card_payments")
 }
 
 model Reminder {

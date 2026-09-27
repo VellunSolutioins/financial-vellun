@@ -398,7 +398,11 @@ class MessageProcessor:
         from ..services.user_catalog import user_catalog
 
         categories = [c["name"] for c in await user_catalog.categories(user_id)]
-        accounts = [a["name"] for a in await user_catalog.accounts(user_id)]
+        from ..services.transaction_creator import display_name
+
+        # Cartões entram na mesma lista, marcados, para o LLM distinguir
+        # "paguei no Nubank" (cartão) de "saiu da conta do Nubank".
+        accounts = [display_name(a) for a in await user_catalog.accounts(user_id)]
 
         recent_messages = await conversation_history_service.get_recent_messages(
             phone, settings.conversation_context_message_limit

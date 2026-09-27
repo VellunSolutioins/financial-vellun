@@ -37,14 +37,17 @@ describe('InternalService', () => {
   let service: InternalService;
 
   let access: { canUseProduct: jest.Mock; isEnforced: jest.Mock };
+  // A atribuição de fatura tem teste próprio (integração com o banco).
+  const ledger = { syncTransactions: jest.fn().mockResolvedValue(undefined) };
 
   beforeEach(() => {
+    ledger.syncTransactions.mockClear();
     prisma = createPrismaMock();
     access = {
       canUseProduct: jest.fn().mockResolvedValue({ allowed: true }),
       isEnforced: jest.fn().mockReturnValue(true),
     };
-    service = new InternalService(prisma as any, {} as any, access as any);
+    service = new InternalService(prisma as any, {} as any, access as any, ledger as any);
   });
 
   describe('findContactByPhone (vínculo verificado)', () => {
@@ -150,12 +153,12 @@ describe('InternalService', () => {
 
     it('listAccounts libera usuário com assinatura', async () => {
       access.canUseProduct.mockResolvedValue({ allowed: true });
-      prisma.account.findMany.mockResolvedValue([{ id: 'a1' }]);
+      prisma.account.findMany.mockResolvedValue([{ id: 'a1', type: 'checking', creditCard: null }]);
 
       const result = await service.listAccounts('u1');
 
       expect(access.canUseProduct).toHaveBeenCalledWith('u1');
-      expect(result).toEqual([{ id: 'a1' }]);
+      expect(result).toEqual([{ id: 'a1', type: 'checking', kind: 'account', cardId: null }]);
     });
 
     it('createTransactionFromAi bloqueia antes de tocar no banco quando sem assinatura', async () => {
@@ -170,17 +173,17 @@ describe('InternalService', () => {
     it('libera listAccounts quando a obrigatoriedade está desligada (rollout)', async () => {
       access.isEnforced.mockReturnValue(false);
       access.canUseProduct.mockResolvedValue({ allowed: false });
-      prisma.account.findMany.mockResolvedValue([{ id: 'a1' }]);
+      prisma.account.findMany.mockResolvedValue([{ id: 'a1', type: 'checking', creditCard: null }]);
 
       const result = await service.listAccounts('u1');
 
-      expect(result).toEqual([{ id: 'a1' }]);
+      expect(result).toEqual([{ id: 'a1', type: 'checking', kind: 'account', cardId: null }]);
       expect(access.canUseProduct).not.toHaveBeenCalled();
     });
 
     it('createTransactionFromAi rejeita conta de outro usuário (userId manipulado)', async () => {
       access.canUseProduct.mockResolvedValue({ allowed: true });
-      prisma.account.findUnique.mockResolvedValue({ id: 'a1', userId: 'outro' });
+      prisma.account.findUnique.mockResolvedValue({ id: 'a1', userId: 'outro', isActive: true });
 
       await expect(
         service.createTransactionFromAi({ userId: 'u1', accountId: 'a1' } as any),
@@ -188,8 +191,36 @@ describe('InternalService', () => {
       expect(prisma.transaction.create).not.toHaveBeenCalled();
     });
 
+    it('createTransactionFromAi recusa compra em cartão arquivado', async () => {
+      prisma.account.findUnique.mockResolvedValue({
+        id: 'a1',
+        userId: 'u1',
+        type: 'credit_card',
+        isActive: false,
+      });
+
+      await expect(
+        service.createTransactionFromAi({ userId: 'u1', accountId: 'a1' } as any),
+      ).rejects.toThrow('Cartão arquivado não recebe novas compras');
+      expect(prisma.transaction.create).not.toHaveBeenCalled();
+    });
+
+    it('listAccounts marca cartões com kind = card e o id da conta interna', async () => {
+      prisma.account.findMany.mockResolvedValue([
+        { id: 'a1', name: 'Itaú', type: 'checking', creditCard: null },
+        { id: 'a2', name: 'Nubank', type: 'credit_card', creditCard: { id: 'c1' } },
+      ]);
+
+      const result = await service.listAccounts('u1');
+
+      expect(result).toEqual([
+        { id: 'a1', name: 'Itaú', type: 'checking', kind: 'account', cardId: null },
+        { id: 'a2', name: 'Nubank', type: 'credit_card', kind: 'card', cardId: 'c1' },
+      ]);
+    });
+
     it('createTransactionFromAi rejeita categoria de outro usuário', async () => {
-      prisma.account.findUnique.mockResolvedValue({ id: 'a1', userId: 'u1' });
+      prisma.account.findUnique.mockResolvedValue({ id: 'a1', userId: 'u1', isActive: true });
       prisma.category.findUnique.mockResolvedValue({ id: 'cat1', userId: 'outro' });
 
       await expect(
@@ -216,7 +247,7 @@ describe('InternalService', () => {
     } as any;
 
     beforeEach(() => {
-      prisma.account.findUnique.mockResolvedValue({ id: 'a1', userId: 'u1' });
+      prisma.account.findUnique.mockResolvedValue({ id: 'a1', userId: 'u1', isActive: true });
     });
 
     it('devolve o lançamento existente sem criar outro quando a chave já foi usada', async () => {
@@ -240,11 +271,13 @@ describe('InternalService', () => {
         status: 'confirmed',
       });
       const accounts = { recalculateBalance: jest.fn() };
-      service = new InternalService(prisma as any, accounts as any, access as any);
+      service = new InternalService(prisma as any, accounts as any, access as any, ledger as any);
 
       await service.createTransactionFromAi(dto);
 
       expect(accounts.recalculateBalance).toHaveBeenCalledWith('a1');
+      // A fatura do cartão também é garantida na reentrega.
+      expect(ledger.syncTransactions).toHaveBeenCalledWith(['t1']);
       expect(prisma.transaction.create).not.toHaveBeenCalled();
     });
 
@@ -256,7 +289,7 @@ describe('InternalService', () => {
         new Prisma.PrismaClientKnownRequestError('unique', { code: 'P2002', clientVersion: '5' }),
       );
       const accounts = { recalculateBalance: jest.fn() };
-      service = new InternalService(prisma as any, accounts as any, access as any);
+      service = new InternalService(prisma as any, accounts as any, access as any, ledger as any);
 
       await service.createTransactionFromAi(dto);
 
@@ -271,7 +304,7 @@ describe('InternalService', () => {
         status: 'cancelled',
       });
       const accounts = { recalculateBalance: jest.fn() };
-      service = new InternalService(prisma as any, accounts as any, access as any);
+      service = new InternalService(prisma as any, accounts as any, access as any, ledger as any);
 
       await service.createTransactionFromAi(dto);
 
@@ -287,7 +320,7 @@ describe('InternalService', () => {
       });
 
       const accounts = { recalculateBalance: jest.fn() };
-      service = new InternalService(prisma as any, accounts as any, access as any);
+      service = new InternalService(prisma as any, accounts as any, access as any, ledger as any);
 
       const result = await service.createTransactionFromAi(dto);
 
@@ -357,7 +390,7 @@ describe('InternalService', () => {
         status: 'confirmed',
       });
       const accounts = { recalculateBalance: jest.fn() };
-      service = new InternalService(prisma as any, accounts as any, access as any);
+      service = new InternalService(prisma as any, accounts as any, access as any, ledger as any);
 
       await service.createTransactionFromAi({
         ...dto,

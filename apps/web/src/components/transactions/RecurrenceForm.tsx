@@ -11,6 +11,8 @@ import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ui/toast';
 import type { Recurrence } from '@/hooks/useRecurrences';
 import { CURRENCY_REGEX, currencyToNumber, formatCurrencyInput, maskCurrency } from '@/lib/masks';
+import { useFinancialResources } from '@/hooks/useFinancialResources';
+import { ResourceSelect } from '@/components/resources/ResourceSelect';
 
 const schema = z.object({
   description: z.string().min(1, 'Descrição obrigatória'),
@@ -41,7 +43,7 @@ interface Props {
  * como estão; para mexer em uma só, use a tela de Lançamentos.
  */
 export function RecurrenceForm({ recurrence, onSuccess, onCancel }: Props) {
-  const [accounts, setAccounts] = useState<{ id: string; name: string }[]>([]);
+  const { data: resources } = useFinancialResources();
   const [categories, setCategories] = useState<{ id: string; name: string; type: string }[]>([]);
   const toast = useToast();
 
@@ -62,22 +64,17 @@ export function RecurrenceForm({ recurrence, onSuccess, onCancel }: Props) {
   });
 
   useEffect(() => {
-    Promise.all([
-      apiClient.get<{ id: string; name: string }[]>('/accounts'),
-      apiClient.get<{ id: string; name: string; type: string }[]>('/categories'),
-    ])
-      .then(([acc, cat]) => {
-        setAccounts(acc);
-        setCategories(cat.filter((c) => c.type === recurrence.type));
-      })
+    apiClient
+      .get<{ id: string; name: string; type: string }[]>('/categories')
+      .then((cat) => setCategories(cat.filter((c) => c.type === recurrence.type)))
       .catch(console.error);
   }, [recurrence.type]);
 
   // As opções chegam depois do primeiro render: reaplica a seleção quando existem.
   useEffect(() => {
-    if (accounts.length) setValue('accountId', recurrence.accountId);
+    if (resources) setValue('accountId', recurrence.accountId);
     if (categories.length) setValue('categoryId', recurrence.categoryId ?? '');
-  }, [accounts, categories, recurrence.accountId, recurrence.categoryId, setValue]);
+  }, [resources, categories, recurrence.accountId, recurrence.categoryId, setValue]);
 
   const onSubmit = async (data: FormData) => {
     try {
@@ -136,14 +133,13 @@ export function RecurrenceForm({ recurrence, onSuccess, onCancel }: Props) {
       </div>
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1">
-          <Label htmlFor="recurrence-account">Conta</Label>
-          <Select id="recurrence-account" {...register('accountId')}>
-            {accounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </Select>
+          <Label htmlFor="recurrence-account">Conta ou cartão</Label>
+          <ResourceSelect
+            id="recurrence-account"
+            resources={resources}
+            currentValue={recurrence.accountId}
+            {...register('accountId')}
+          />
           {errors.accountId && (
             <p className="text-xs text-destructive">{errors.accountId.message}</p>
           )}

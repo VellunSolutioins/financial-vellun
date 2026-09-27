@@ -5,6 +5,8 @@ import { Select } from '@/components/ui/select';
 import { apiClient } from '@/lib/api-client';
 import { DataTable, type DataTableColumn } from '@/components/ui/table';
 import { useTransactions, type Transaction } from '@/hooks/useTransactions';
+import { useFinancialResources } from '@/hooks/useFinancialResources';
+import { ResourceSelect } from '@/components/resources/ResourceSelect';
 import { formatDateBR } from '@/lib/utils';
 
 function formatCurrency(v: number) {
@@ -30,7 +32,7 @@ function todayLocal() {
  */
 export function PendingTransactionsView({ type, title }: Props) {
   const [categories, setCategories] = useState<{ id: string; name: string; type: string }[]>([]);
-  const [accounts, setAccounts] = useState<{ id: string; name: string }[]>([]);
+  const { data: resources } = useFinancialResources();
 
   const [periodStart, setPeriodStart] = useState(todayLocal);
   const [periodEnd, setPeriodEnd] = useState('');
@@ -54,14 +56,9 @@ export function PendingTransactionsView({ type, title }: Props) {
   const { data, loading } = useTransactions(filters);
 
   useEffect(() => {
-    Promise.all([
-      apiClient.get<{ id: string; name: string; type: string }[]>('/categories'),
-      apiClient.get<{ id: string; name: string }[]>('/accounts'),
-    ])
-      .then(([cat, acc]) => {
-        setCategories(cat.filter((c) => c.type === type));
-        setAccounts(acc);
-      })
+    apiClient
+      .get<{ id: string; name: string; type: string }[]>('/categories')
+      .then((cat) => setCategories(cat.filter((c) => c.type === type)))
       .catch(console.error);
   }, [type]);
 
@@ -88,7 +85,7 @@ export function PendingTransactionsView({ type, title }: Props) {
     },
     {
       key: 'account',
-      header: 'Conta',
+      header: 'Conta/cartão',
       cellClassName: 'text-muted-foreground',
       cell: (tx) => tx.account?.name ?? '—',
     },
@@ -127,14 +124,14 @@ export function PendingTransactionsView({ type, title }: Props) {
             </option>
           ))}
         </Select>
-        <Select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
-          <option value="">Todas as contas</option>
-          {accounts.map((a) => (
-            <option key={a.id} value={a.id}>
-              {a.name}
-            </option>
-          ))}
-        </Select>
+        <ResourceSelect
+          aria-label="Conta ou cartão"
+          resources={resources}
+          purpose="filter"
+          emptyLabel="Todas as contas e cartões"
+          value={accountId}
+          onChange={(e) => setAccountId(e.target.value)}
+        />
       </div>
 
       {/* Tabela */}

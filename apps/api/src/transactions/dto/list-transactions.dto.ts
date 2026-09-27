@@ -4,8 +4,13 @@ import { ApiProperty } from '@nestjs/swagger';
 import { TransactionSource, TransactionStatus } from '@prisma/client';
 import { Type } from 'class-transformer';
 import { ENTRY_TYPES, EntryType } from '../entry-types';
+import { ResourceFilterDto } from '../../common/resource-scope';
 
-export class ListTransactionsDto {
+/**
+ * Filtros de lançamentos, sem paginação. A listagem e os totais
+ * (`GET /transactions/summary`) usam exatamente os mesmos.
+ */
+export class TransactionFiltersDto extends ResourceFilterDto {
   @IsOptional()
   @IsEnum(RecurrenceType)
   recurrenceType?: RecurrenceType;
@@ -49,7 +54,9 @@ export class ListTransactionsDto {
   @IsOptional()
   @IsString()
   search?: string;
+}
 
+export class ListTransactionsDto extends TransactionFiltersDto {
   @ApiProperty({ default: 1, required: false })
   @IsOptional()
   @Type(() => Number)

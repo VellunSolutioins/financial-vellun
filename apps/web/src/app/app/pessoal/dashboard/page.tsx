@@ -1,17 +1,6 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  PieChart,
-  Pie,
-  Cell,
-  ResponsiveContainer,
-} from 'recharts';
+import { Suspense, useEffect, useMemo, useState } from 'react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import {
   Wallet,
   TrendingUp,
@@ -21,19 +10,37 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   Scale,
+  CreditCard as CreditCardIcon,
 } from 'lucide-react';
+import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Select } from '@/components/ui/select';
+import { useFinancialResources } from '@/hooks/useFinancialResources';
+import { resourceQuery, useResourceFilter } from '@/hooks/useResourceFilter';
+import { ResourceFilter } from '@/components/resources/ResourceFilter';
+import { DateBasisNote } from '@/components/resources/DateBasisNote';
+import { CategoryBars } from '@/components/dashboard/CategoryBars';
+import { ResourceCategoryChart } from '@/components/dashboard/ResourceCategoryChart';
 import { apiClient } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 
+/**
+ * Item de "Próximas contas a pagar": uma despesa de conta (só a próxima
+ * ocorrência de cada série) ou uma fatura de cartão com saldo a pagar.
+ */
 interface UpcomingBill {
+  kind: 'transaction' | 'invoice';
   id: string;
   description: string;
+  /** Na fatura, o restante a pagar. */
   amount: number;
+  /** Na fatura, o vencimento. */
   transactionDate: string;
   category: { name: string } | null;
+  cardId?: string;
+  /** `open`: fatura ainda aberta, o valor pode crescer até o fechamento. */
+  invoiceState?: 'open' | 'closed';
 }
 
 interface DashboardSummary {
@@ -41,25 +48,23 @@ interface DashboardSummary {
   totalIncome: number;
   totalExpense: number;
   netResult: number;
-  expensesByCategory: { categoryName: string; total: number; percentage: number }[];
+  expensesByCategory: {
+    categoryId: string | null;
+    categoryName: string;
+    color: string | null;
+    total: number;
+    percentage: number;
+  }[];
   upcomingBills: UpcomingBill[];
   monthlyComparison: { month: string; income: number; expense: number }[];
+  /** `YYYY-MM` do último lançamento (pode ser futuro: recorrências e parcelas). */
+  lastEntryMonth: string | null;
 }
 
 interface DailyBreakdown {
   month: string;
   days: { day: number; income: number; expense: number }[];
 }
-
-const CATEGORY_COLORS = [
-  '#10b981',
-  '#3b82f6',
-  '#f59e0b',
-  '#8b5cf6',
-  '#ec4899',
-  '#ef4444',
-  '#14b8a6',
-];
 
 function formatCurrency(v: number) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
@@ -125,6 +130,48 @@ function monthRange(month: string) {
   return { start, end };
 }
 
+/** Meses futuros no seletor: no máximo 5 anos, mesmo que haja recorrência mais longa. */
+const MAX_FUTURE_MONTHS = 60;
+
+function addMonths(ym: string, n: number) {
+  const [y, m] = ym.split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + n, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+/** Opções do seletor: os próximos meses (até o último lançamento agendado) e os anteriores. */
+function MonthOptions({ past, future }: { past: string[]; future: string[] }) {
+  if (future.length === 0) {
+    return (
+      <>
+        {past.map((m) => (
+          <option key={m} value={m}>
+            {monthLabelFull(m)}
+          </option>
+        ))}
+      </>
+    );
+  }
+  return (
+    <>
+      <optgroup label="Próximos meses (previsto)">
+        {future.map((m) => (
+          <option key={m} value={m}>
+            {monthLabelFull(m)}
+          </option>
+        ))}
+      </optgroup>
+      <optgroup label="Este mês e anteriores">
+        {past.map((m) => (
+          <option key={m} value={m}>
+            {monthLabelFull(m)}
+          </option>
+        ))}
+      </optgroup>
+    </>
+  );
+}
+
 function lastMonthWithMovement(months: DashboardSummary['monthlyComparison']) {
   const month = [...months].reverse().find((m) => m.income > 0 || m.expense > 0);
   return month?.month ?? months[months.length - 1]?.month ?? '';
@@ -167,8 +214,19 @@ function TrendBadge({ value, invert = false }: { value: number | null; invert?: 
 }
 
 export default function DashboardPage() {
+  return (
+    <Suspense>
+      <DashboardContent />
+    </Suspense>
+  );
+}
+
+function DashboardContent() {
   const [data, setData] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
+  const { data: resources } = useFinancialResources();
+  const { selection, setSelection } = useResourceFilter();
+  const scopeParams = new URLSearchParams(resourceQuery(selection)).toString();
 
   const [evolutionMonths, setEvolutionMonths] = useState(12);
   const [selectedMonth, setSelectedMonth] = useState('');
@@ -177,13 +235,15 @@ export default function DashboardPage() {
 
   useEffect(() => {
     apiClient
-      .get<DashboardSummary>('/dashboard/summary')
+      .get<DashboardSummary>(`/dashboard/summary?${scopeParams}`)
       .then((d) => {
         setData(d);
-        setSelectedMonth(lastMonthWithMovement(d.monthlyComparison));
+        setSelectedMonth((current) => current || lastMonthWithMovement(d.monthlyComparison));
       })
       .catch(console.error)
       .finally(() => setLoading(false));
+    // Só a primeira carga escolhe o mês; as seguintes seguem o efeito abaixo.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -191,21 +251,23 @@ export default function DashboardPage() {
     const { start, end } = monthRange(selectedMonth);
     setLoading(true);
     apiClient
-      .get<DashboardSummary>(`/dashboard/summary?period_start=${start}&period_end=${end}`)
+      .get<DashboardSummary>(
+        `/dashboard/summary?period_start=${start}&period_end=${end}&${scopeParams}`,
+      )
       .then(setData)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [selectedMonth]);
+  }, [selectedMonth, scopeParams]);
 
   useEffect(() => {
     if (!selectedMonth) return;
     setDailyLoading(true);
     apiClient
-      .get<DailyBreakdown>(`/dashboard/daily?month=${selectedMonth}`)
+      .get<DailyBreakdown>(`/dashboard/daily?month=${selectedMonth}&${scopeParams}`)
       .then(setDaily)
       .catch(console.error)
       .finally(() => setDailyLoading(false));
-  }, [selectedMonth]);
+  }, [selectedMonth, scopeParams]);
 
   const evolutionData = useMemo(
     () =>
@@ -215,10 +277,22 @@ export default function DashboardPage() {
     [data, evolutionMonths],
   );
 
-  const monthOptions = useMemo(
-    () => (data?.monthlyComparison ?? []).map((m) => m.month).reverse(),
-    [data],
-  );
+  // O comparativo mensal termina no mês corrente; depois dele vêm os meses com
+  // lançamentos agendados (recorrências e parcelas), para o usuário vê-los.
+  const monthOptions = useMemo(() => {
+    const past = (data?.monthlyComparison ?? []).map((m) => m.month);
+    const current = past[past.length - 1];
+    const future: string[] = [];
+    if (current && data?.lastEntryMonth && data.lastEntryMonth > current) {
+      for (let i = 1; i <= MAX_FUTURE_MONTHS; i++) {
+        const month = addMonths(current, i);
+        if (month > data.lastEntryMonth) break;
+        future.push(month);
+      }
+    }
+    return { past: past.reverse(), future, current };
+  }, [data]);
+  const isFutureMonth = !!monthOptions.current && selectedMonth > monthOptions.current;
 
   const { incomeChange, expenseChange } = useMemo(() => {
     if (!data) return { incomeChange: null, expenseChange: null };
@@ -274,6 +348,19 @@ export default function DashboardPage() {
     },
   ];
 
+  // Gráficos por contas × cartões: mesmo período da tela e, se houver filtro,
+  // só os recursos dele (um tipo fora do filtro mostra o aviso de vazio).
+  const { start: periodStart, end: periodEnd } = monthRange(selectedMonth);
+  const filterActive = selection.accountIds.length + selection.cardIds.length > 0;
+  const chartAccounts =
+    resources?.accounts
+      .filter((a) => !filterActive || selection.accountIds.includes(a.id))
+      .map((a) => ({ id: a.id, name: a.name })) ?? null;
+  const chartCards =
+    resources?.cards
+      .filter((c) => !filterActive || selection.cardIds.includes(c.id))
+      .map((c) => ({ id: c.id, name: c.name, archived: !c.isActive })) ?? null;
+
   const health = financialHealth(savingsRate, data.totalIncome > 0);
   const healthBarWidth = Math.max(0, Math.min(100, ((savingsRate + 20) / 60) * 100));
 
@@ -286,18 +373,24 @@ export default function DashboardPage() {
             Visão geral das suas finanças neste período.
           </p>
         </div>
-        <Select
-          value={selectedMonth}
-          onChange={(e) => setSelectedMonth(e.target.value)}
-          className="h-9 w-auto text-sm"
-        >
-          {monthOptions.map((m) => (
-            <option key={m} value={m}>
-              {monthLabelFull(m)}
-            </option>
-          ))}
-        </Select>
+        <div className="flex flex-wrap items-center gap-2">
+          <ResourceFilter resources={resources} value={selection} onChange={setSelection} />
+          <Select
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+            className="h-9 w-auto text-sm"
+          >
+            <MonthOptions past={monthOptions.past} future={monthOptions.future} />
+          </Select>
+        </div>
       </div>
+      <DateBasisNote />
+      {isFutureMonth && (
+        <p className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
+          Mês futuro: receitas, despesas e categorias são previstas pelos lançamentos já agendados
+          (recorrências e parcelas). O saldo total é o de hoje.
+        </p>
+      )}
 
       {/* Cards de totais */}
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
@@ -339,13 +432,15 @@ export default function DashboardPage() {
           </div>
           <p className="text-xs text-muted-foreground">
             {data.totalIncome > 0
-              ? `Você está economizando ${savingsRate.toFixed(0)}% da sua receita neste período.`
+              ? isFutureMonth
+                ? `Previsão: economia de ${savingsRate.toFixed(0)}% da receita neste mês.`
+                : `Você está economizando ${savingsRate.toFixed(0)}% da sua receita neste período.`
               : 'Ainda sem receita registrada neste período para calcular.'}
           </p>
         </CardContent>
       </Card>
 
-      {/* Evolução mensal + Despesas por categoria */}
+      {/* Evolução mensal + Lançamentos diários */}
       <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
         <Card className="rounded-2xl">
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
@@ -385,110 +480,6 @@ export default function DashboardPage() {
         </Card>
 
         <Card className="rounded-2xl">
-          <CardHeader>
-            <CardTitle className="text-base">Despesas por Categoria</CardTitle>
-            <p className="text-xs text-muted-foreground">Distribuição do período</p>
-          </CardHeader>
-          <CardContent>
-            {data.expensesByCategory.length === 0 ? (
-              <div className="flex h-[220px] items-center justify-center text-sm text-muted-foreground">
-                Sem despesas no período
-              </div>
-            ) : (
-              <div className="flex flex-col items-center gap-4 sm:flex-row">
-                <ResponsiveContainer width="100%" height={200} className="max-w-[220px]">
-                  <PieChart>
-                    <Pie
-                      data={data.expensesByCategory}
-                      dataKey="total"
-                      nameKey="categoryName"
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={55}
-                      outerRadius={85}
-                      paddingAngle={3}
-                      stroke="none"
-                    >
-                      {data.expensesByCategory.map((_, i) => (
-                        <Cell key={i} fill={CATEGORY_COLORS[i % CATEGORY_COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={tooltipCurrency} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <ul className="w-full space-y-2 text-sm sm:w-auto">
-                  {data.expensesByCategory.slice(0, 6).map((c, i) => (
-                    <li key={c.categoryName} className="flex items-center justify-between gap-4">
-                      <span className="flex items-center gap-2 truncate">
-                        <span
-                          className="h-2.5 w-2.5 shrink-0 rounded-full"
-                          style={{ backgroundColor: CATEGORY_COLORS[i % CATEGORY_COLORS.length] }}
-                        />
-                        <span className="truncate">{c.categoryName}</span>
-                      </span>
-                      <span className="shrink-0 font-medium text-muted-foreground">
-                        {formatCurrency(c.total)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Próximas contas a pagar + Lançamentos diários */}
-      <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
-        <Card className="rounded-2xl">
-          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
-            <CardTitle className="text-base">Próximas Contas a Pagar</CardTitle>
-            {data.upcomingBills.length > 0 && (
-              <Badge variant="secondary">{data.upcomingBills.length} a vencer</Badge>
-            )}
-          </CardHeader>
-          <CardContent>
-            {data.upcomingBills.length === 0 ? (
-              <div className="flex h-[120px] items-center justify-center text-sm text-muted-foreground">
-                Nenhuma conta a vencer 🎉
-              </div>
-            ) : (
-              <ul className="divide-y divide-border">
-                {data.upcomingBills.map((bill) => {
-                  const overdue = isOverdue(bill.transactionDate);
-                  return (
-                    <li
-                      key={bill.id}
-                      className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0"
-                    >
-                      <div className="flex min-w-0 items-center gap-3">
-                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-50 text-amber-600">
-                          <Receipt className="h-4 w-4" />
-                        </span>
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium">{bill.description}</p>
-                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                            <span>Vence em {formatDueDate(bill.transactionDate)}</span>
-                            {overdue && (
-                              <Badge variant="destructive" className="px-1.5 py-0 text-[10px]">
-                                Vencido
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <span className="shrink-0 text-sm font-semibold">
-                        {formatCurrency(bill.amount)}
-                      </span>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl">
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
             <CardTitle className="text-base">Lançamentos Diários</CardTitle>
             <Select
@@ -496,11 +487,7 @@ export default function DashboardPage() {
               onChange={(e) => setSelectedMonth(e.target.value)}
               className="h-8 w-auto text-xs"
             >
-              {monthOptions.map((m) => (
-                <option key={m} value={m}>
-                  {monthLabelFull(m)}
-                </option>
-              ))}
+              <MonthOptions past={monthOptions.past} future={monthOptions.future} />
             </Select>
           </CardHeader>
           <CardContent>
@@ -537,6 +524,106 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Despesas por categoria: consolidado, contas e cartões */}
+      <div className="grid items-start gap-4 sm:gap-6 lg:grid-cols-3">
+        <CategoryBars
+          title="Despesas por Categoria"
+          subtitle={
+            filterActive
+              ? 'Contas e cartões do filtro · distribuição do período'
+              : 'Contas e cartões · distribuição do período'
+          }
+          slices={data.expensesByCategory}
+        />
+        <ResourceCategoryChart
+          kind="accounts"
+          resources={chartAccounts}
+          periodStart={periodStart}
+          periodEnd={periodEnd}
+          emptyText={filterActive ? 'Nenhuma conta no filtro atual' : 'Nenhuma conta cadastrada'}
+        />
+        <ResourceCategoryChart
+          kind="cards"
+          resources={chartCards}
+          periodStart={periodStart}
+          periodEnd={periodEnd}
+          emptyText={filterActive ? 'Nenhum cartão no filtro atual' : 'Nenhum cartão cadastrado'}
+        />
+      </div>
+
+      {/* Próximas contas a pagar */}
+      <Card className="rounded-2xl">
+        <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
+          <CardTitle className="text-base">Próximas Contas a Pagar</CardTitle>
+          {data.upcomingBills.length > 0 && (
+            <Badge variant="secondary">{data.upcomingBills.length} a vencer</Badge>
+          )}
+        </CardHeader>
+        <CardContent>
+          {data.upcomingBills.length === 0 ? (
+            <div className="flex h-[120px] items-center justify-center text-sm text-muted-foreground">
+              Nenhuma conta a vencer 🎉
+            </div>
+          ) : (
+            <ul className="divide-y divide-border">
+              {data.upcomingBills.map((bill) => {
+                const overdue = isOverdue(bill.transactionDate);
+                const isInvoice = bill.kind === 'invoice';
+                const Icon = isInvoice ? CreditCardIcon : Receipt;
+                const content = (
+                  <>
+                    <div className="flex min-w-0 items-center gap-3">
+                      <span
+                        className={cn(
+                          'flex h-9 w-9 shrink-0 items-center justify-center rounded-full',
+                          isInvoice ? 'bg-violet-50 text-violet-600' : 'bg-amber-50 text-amber-600',
+                        )}
+                      >
+                        <Icon className="h-4 w-4" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">{bill.description}</p>
+                        <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                          <span>Vence em {formatDueDate(bill.transactionDate)}</span>
+                          {overdue && (
+                            <Badge variant="destructive" className="px-1.5 py-0 text-[10px]">
+                              Vencido
+                            </Badge>
+                          )}
+                          {isInvoice && bill.invoiceState === 'open' && (
+                            <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
+                              Fatura aberta
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <span className="shrink-0 text-sm font-semibold">
+                      {formatCurrency(bill.amount)}
+                    </span>
+                  </>
+                );
+                return (
+                  <li key={`${bill.kind}-${bill.id}`} className="py-3 first:pt-0 last:pb-0">
+                    {isInvoice && bill.cardId ? (
+                      <Link
+                        href={`/app/pessoal/cartoes/${bill.cardId}`}
+                        className="-mx-2 flex items-center justify-between gap-3 rounded-lg px-2 transition-colors hover:bg-muted/40"
+                        aria-label={`${bill.description}, ${formatCurrency(bill.amount)}, vence em ${formatDueDate(bill.transactionDate)}`}
+                      >
+                        {content}
+                      </Link>
+                    ) : (
+                      <div className="flex items-center justify-between gap-3">{content}</div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

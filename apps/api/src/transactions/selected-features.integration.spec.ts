@@ -7,7 +7,7 @@ import { AgendaEventsService } from '../agenda-events/agenda-events.service';
 import { RemindersService } from '../reminders/reminders.service';
 import { NotesService } from '../notes/notes.service';
 import { TransactionsService } from './transactions.service';
-import { todaySaoPaulo } from '../common/date.util';
+import { dateOnlyString, todaySaoPaulo } from '../common/date.util';
 
 const databaseUrl = process.env.SELECTED_FEATURES_TEST_DATABASE_URL;
 const integration = databaseUrl ? describe : describe.skip;
@@ -164,15 +164,21 @@ integration('selected features with PostgreSQL', () => {
       recurrenceType: 'fixo',
       recurrenceMonths: 2,
     });
-    const cards = new CreditCardsService(prisma, accounts);
-    const card = await cards.create(userId, { name: 'Test card', creditLimit: 1000, dueDay: 10 });
+    const cards = new CreditCardsService(prisma);
+    const card = await cards.create(userId, {
+      name: 'Test card',
+      creditLimit: 1000,
+      closingDay: 3,
+      dueDay: 10,
+    });
+    // Hoje: sempre dentro do ciclo aberto, que é onde o controle do cartão novo começa.
     await transactions.create(userId, {
       accountId: card.accountId,
       categoryId,
       description: 'Card expense',
       type: 'expense',
       amount: 100,
-      transactionDate: date,
+      transactionDate: dateOnlyString(today),
     });
     const summary = await cards.summary(userId);
     expect(summary.monthlyIncome).toBe(5000);

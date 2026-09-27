@@ -1,7 +1,16 @@
 'use client';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useEffect, useState, Suspense } from 'react';
-import { ArrowLeftRight, Eye, Plus, TrendingDown, TrendingUp } from 'lucide-react';
+import {
+  ArrowLeftRight,
+  CreditCard as CreditCardIcon,
+  Eye,
+  Plus,
+  TrendingDown,
+  TrendingUp,
+  Undo2,
+  Wallet,
+} from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -16,6 +25,13 @@ import {
   recurrenceLabels,
 } from '@/components/transactions/TransactionForm';
 import { useTransactions, type Transaction } from '@/hooks/useTransactions';
+import { useTransactionSummary } from '@/hooks/useTransactionSummary';
+import { useFinancialResources } from '@/hooks/useFinancialResources';
+import { resourceQuery, useResourceFilter } from '@/hooks/useResourceFilter';
+import { ResourceFilter } from '@/components/resources/ResourceFilter';
+import { DateBasisNote } from '@/components/resources/DateBasisNote';
+import { RefundForm } from '@/components/transactions/RefundForm';
+import { isEditableEntry, isInflow, signOf, typeLabel } from '@/lib/transaction-display';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
@@ -39,15 +55,16 @@ const sourceLabels: Record<string, string> = {
 };
 
 const typeStyle = {
-  income: { icon: TrendingUp, tone: 'text-emerald-600 bg-emerald-50', sign: '+' },
-  expense: { icon: TrendingDown, tone: 'text-rose-600 bg-rose-50', sign: '-' },
+  income: { icon: TrendingUp, tone: 'text-emerald-600 bg-emerald-50' },
+  expense: { icon: TrendingDown, tone: 'text-rose-600 bg-rose-50' },
+  refund: { icon: Undo2, tone: 'text-emerald-600 bg-emerald-50' },
 } as const;
 
-/** Transferências antigas: o tipo não é mais criado, mas o registro ainda pode aparecer. */
-const legacyStyle = { icon: ArrowLeftRight, tone: 'text-blue-600 bg-blue-50', sign: '' };
+/** Pagamento de fatura (pernas `transfer`) e transferências antigas. */
+const transferStyle = { icon: ArrowLeftRight, tone: 'text-blue-600 bg-blue-50' };
 
 function styleOf(type: string) {
-  return typeStyle[type as keyof typeof typeStyle] ?? legacyStyle;
+  return typeStyle[type as keyof typeof typeStyle] ?? transferStyle;
 }
 
 /**
@@ -99,12 +116,13 @@ function TransacoesContent() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingTx, setEditingTx] = useState<Transaction | undefined>();
   const [viewingTx, setViewingTx] = useState<Transaction | undefined>();
+  const [refundingTx, setRefundingTx] = useState<Transaction | undefined>();
   const selectedMonth = searchParams.get('month') ?? currentMonth();
   const { start: monthStart, end: monthEnd } = monthRange(selectedMonth);
+  const { data: resources } = useFinancialResources();
+  const { selection, setSelection } = useResourceFilter();
 
-  const filters = {
-    page: Number(searchParams.get('page') ?? 1),
-    limit: 10,
+  const baseFilters = {
     type: searchParams.get('type') ?? undefined,
     status: searchParams.get('status') ?? undefined,
     source: searchParams.get('source') ?? undefined,
@@ -112,9 +130,12 @@ function TransacoesContent() {
     search: searchParams.get('search') ?? undefined,
     periodStart: monthStart,
     periodEnd: monthEnd,
+    ...resourceQuery(selection),
   };
+  const filters = { ...baseFilters, page: Number(searchParams.get('page') ?? 1), limit: 10 };
 
   const { data, meta, loading, error, refetch } = useTransactions(filters);
+  const { data: totals, refetch: refetchTotals } = useTransactionSummary(baseFilters);
 
   const setParam = (key: string, value: string) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -135,6 +156,7 @@ function TransacoesContent() {
   const closeModal = () => setModalOpen(false);
   const handleSuccess = () => {
     closeModal();
+    refetchTotals();
     void refetch();
   };
   const handleDelete = async (tx: Transaction) => {
@@ -148,6 +170,7 @@ function TransacoesContent() {
     try {
       await apiClient.delete(`/transactions/${tx.id}?hard_delete=true`);
       toast.success('Lançamento excluído.');
+      refetchTotals();
       void refetch();
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Erro ao excluir lançamento');
@@ -162,6 +185,7 @@ function TransacoesContent() {
           <p className="text-sm text-muted-foreground">Suas receitas e despesas do período.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <ResourceFilter resources={resources} value={selection} onChange={setSelection} />
           <Input
             type="month"
             aria-label="Mês dos lançamentos"
@@ -213,6 +237,32 @@ function TransacoesContent() {
         </CardContent>
       </Card>
 
+      {totals && (
+        <div className="space-y-2">
+          <div className="grid grid-cols-3 gap-2 sm:gap-4">
+            {[
+              { label: 'Receitas', value: totals.income, tone: 'text-emerald-600' },
+              { label: 'Despesas', value: totals.expense, tone: 'text-rose-600' },
+              {
+                label: 'Resultado',
+                value: totals.net,
+                tone: totals.net >= 0 ? 'text-foreground' : 'text-rose-600',
+              },
+            ].map((item) => (
+              <Card key={item.label} className="rounded-2xl">
+                <CardContent className="p-3 sm:p-4">
+                  <p className="text-xs text-muted-foreground">{item.label}</p>
+                  <p className={cn('truncate text-sm font-bold sm:text-lg', item.tone)}>
+                    {formatCurrency(item.value)}
+                  </p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+          <DateBasisNote />
+        </div>
+      )}
+
       {/* List */}
       <Card className="rounded-2xl">
         <CardContent className="overflow-x-auto p-0">
@@ -227,11 +277,12 @@ function TransacoesContent() {
               Nenhum lançamento encontrado.
             </div>
           ) : (
-            <table className="w-full min-w-[620px] text-sm">
+            <table className="w-full min-w-[760px] text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-xs font-medium text-muted-foreground">
                   <th className="p-3">Descrição</th>
                   <th className="p-3">Categoria</th>
+                  <th className="p-3">Conta/Cartão</th>
                   <th className="p-3 text-right">Valor</th>
                   <th className="p-3" />
                 </tr>
@@ -243,7 +294,7 @@ function TransacoesContent() {
                   return (
                     <tr
                       key={tx.id}
-                      onClick={() => openEdit(tx)}
+                      onClick={() => (isEditableEntry(tx) ? openEdit(tx) : setViewingTx(tx))}
                       className="cursor-pointer transition-colors hover:bg-muted/40"
                     >
                       <td className="p-3">
@@ -262,6 +313,11 @@ function TransacoesContent() {
                               <p className="text-xs text-muted-foreground">
                                 {formatDateBR(tx.transactionDate)}
                               </p>
+                              {!isEditableEntry(tx) && (
+                                <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+                                  {typeLabel(tx)}
+                                </Badge>
+                              )}
                               {REGISTRADO_PELA_IA.has(tx.source) && (
                                 <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
                                   IA
@@ -282,17 +338,37 @@ function TransacoesContent() {
                       <td className="whitespace-nowrap p-3 text-muted-foreground">
                         {tx.category?.name ?? '—'}
                       </td>
+                      <td className="p-3 text-muted-foreground">
+                        {tx.account ? (
+                          <span className="flex max-w-[12rem] items-center gap-1.5">
+                            {tx.account.type === 'credit_card' ? (
+                              <CreditCardIcon
+                                className="h-3.5 w-3.5 shrink-0"
+                                aria-label="Cartão"
+                              />
+                            ) : (
+                              <Wallet className="h-3.5 w-3.5 shrink-0" aria-label="Conta" />
+                            )}
+                            <span className="truncate" title={tx.account.name}>
+                              {tx.account.name}
+                            </span>
+                          </span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
                       <td
                         className={cn(
                           'whitespace-nowrap p-3 text-right font-semibold',
-                          tx.type === 'income'
-                            ? 'text-emerald-600'
-                            : tx.type === 'expense'
-                              ? 'text-rose-600'
-                              : 'text-foreground',
+                          tx.type === 'transfer'
+                            ? 'text-foreground'
+                            : isInflow(tx)
+                              ? 'text-emerald-600'
+                              : 'text-rose-600',
+                          tx.status === 'cancelled' && 'text-muted-foreground line-through',
                         )}
                       >
-                        {style.sign}
+                        {signOf(tx)}
                         {formatCurrency(Number(tx.amount))}
                       </td>
                       <td className="whitespace-nowrap p-3 text-right">
@@ -372,13 +448,11 @@ function TransacoesContent() {
           <dl className="space-y-3 text-sm">
             {[
               ['Descrição', viewingTx.description],
-              [
-                'Valor',
-                `${styleOf(viewingTx.type).sign}${formatCurrency(Number(viewingTx.amount))}`,
-              ],
+              ['Tipo', typeLabel(viewingTx)],
+              ['Valor', `${signOf(viewingTx)}${formatCurrency(Number(viewingTx.amount))}`],
               ['Data', formatDateBR(viewingTx.transactionDate)],
               ['Categoria', viewingTx.category?.name ?? '—'],
-              ['Conta', viewingTx.account?.name ?? '—'],
+              ['Conta/cartão', viewingTx.account?.name ?? '—'],
               ['Origem', sourceLabels[viewingTx.source]],
               ['Status', statusLabels[viewingTx.status]],
               [
@@ -399,6 +473,45 @@ function TransacoesContent() {
               </div>
             ))}
           </dl>
+        )}
+        {viewingTx?.type === 'transfer' && viewingTx.cardPaymentId && (
+          <p className="mt-3 text-xs text-muted-foreground">
+            Parte de um pagamento de fatura. Para desfazer, reverta o pagamento na fatura do cartão.
+          </p>
+        )}
+        {viewingTx?.type === 'expense' && viewingTx.status === 'confirmed' && (
+          <div className="mt-4 flex justify-end">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setRefundingTx(viewingTx);
+                setViewingTx(undefined);
+              }}
+            >
+              <Undo2 className="mr-1 h-4 w-4" />
+              Estornar
+            </Button>
+          </div>
+        )}
+      </Dialog>
+
+      <Dialog
+        open={!!refundingTx}
+        onClose={() => setRefundingTx(undefined)}
+        title="Estornar lançamento"
+      >
+        {refundingTx && (
+          <RefundForm
+            transaction={refundingTx}
+            onSuccess={() => {
+              setRefundingTx(undefined);
+              refetchTotals();
+              void refetch();
+            }}
+            onCancel={() => setRefundingTx(undefined)}
+          />
         )}
       </Dialog>
     </div>

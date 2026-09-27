@@ -2,10 +2,12 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { apiClient } from '@/lib/api-client';
+import type { LedgerType } from '@/lib/transaction-display';
 
 export interface Transaction {
   id: string;
-  type: 'income' | 'expense';
+  /** `refund` = estorno; `transfer` = perna de pagamento de fatura. */
+  type: LedgerType;
   amount: number;
   description: string;
   transactionDate: string;
@@ -14,12 +16,17 @@ export interface Transaction {
   categoryId?: string;
   accountId: string;
   category?: { id: string; name: string };
-  account?: { id: string; name: string };
+  /** `type: credit_card` = conta interna de um cartão. */
+  account?: { id: string; name: string; type?: string };
   recurrenceType: 'avulso' | 'fixo' | 'parcelado';
   recurrenceFrequency?: 'monthly' | 'bimonthly' | 'semiannual' | 'annual' | null;
   seriesId?: string | null;
   installmentNumber?: number | null;
   installmentTotal?: number | null;
+  invoiceId?: string | null;
+  refundOfId?: string | null;
+  cardPaymentId?: string | null;
+  transferDirection?: 'in' | 'out' | null;
   createdAt: string;
 }
 
@@ -29,6 +36,9 @@ export interface TransactionFilters {
   type?: string;
   categoryId?: string;
   accountId?: string;
+  /** Ids separados por vírgula (ver `resourceQuery`). */
+  accountIds?: string;
+  cardIds?: string;
   status?: string;
   source?: string;
   search?: string;

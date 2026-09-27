@@ -14,6 +14,11 @@ import { CreateAiTransactionDto } from './dto/create-ai-transaction.dto';
 import { AiEventDto } from './dto/ai-event.dto';
 import { normalizePhone } from '../common/phone.util';
 import { parseDateOnly } from '../common/date.util';
+import {
+  assertAccountAcceptsEntries,
+  assertAccountAcceptsType,
+} from '../transactions/transactions.service';
+import { CardLedgerService } from '../credit-cards/card-ledger.service';
 
 /** Vínculo que identifica o usuário: verificado e não revogado. */
 function isLinked(contact: { userId: string | null; isVerified: boolean; revokedAt: Date | null }) {
@@ -28,6 +33,7 @@ export class InternalService {
     private prisma: PrismaService,
     private accountsService: AccountsService,
     private subscriptionAccess: SubscriptionAccessService,
+    private cardLedger: CardLedgerService = new CardLedgerService(prisma),
   ) {}
 
   /**
@@ -95,13 +101,23 @@ export class InternalService {
     return { canUseProduct: allowed, reason: access.reason, status: access.status };
   }
 
-  /** Lista as contas ativas do usuário. */
+  /**
+   * Contas comuns e cartões ativos do usuário, marcados com `kind`. O `id` é
+   * sempre o da `Account` — no cartão, a conta interna dele —, que é o que o
+   * lançamento grava. Cartão arquivado não aparece: não recebe compra.
+   */
   async listAccounts(userId: string) {
     await this.assertCanUseProduct(userId);
-    return this.prisma.account.findMany({
+    const accounts = await this.prisma.account.findMany({
       where: { userId, isActive: true },
+      include: { creditCard: { select: { id: true } } },
       orderBy: { createdAt: 'asc' },
     });
+    return accounts.map(({ creditCard, ...account }) => ({
+      ...account,
+      kind: creditCard || account.type === 'credit_card' ? ('card' as const) : ('account' as const),
+      cardId: creditCard?.id ?? null,
+    }));
   }
 
   /**
@@ -165,6 +181,8 @@ export class InternalService {
     if (!account || account.userId !== dto.userId) {
       throw new BadRequestException('Conta inválida para o usuário');
     }
+    assertAccountAcceptsEntries(account);
+    assertAccountAcceptsType(account, dto.type);
 
     if (dto.categoryId) {
       const category = await this.prisma.category.findUnique({ where: { id: dto.categoryId } });
@@ -203,12 +221,15 @@ export class InternalService {
    * Recalcular de novo é seguro: `recalculateBalance` recompõe o saldo do zero a
    * partir dos agregados, sem somar em cima do valor anterior.
    */
-  private async comSaldoGarantido<T extends { status: string; accountId: string }>(
+  private async comSaldoGarantido<T extends { id: string; status: string; accountId: string }>(
     transaction: T,
   ): Promise<T> {
     if (transaction.status === 'confirmed') {
       await this.accountsService.recalculateBalance(transaction.accountId);
     }
+    // Mesma lógica do saldo vale para a fatura do cartão: sincronizar de novo
+    // na reentrega é seguro e cobre o processo que morreu antes de sincronizar.
+    await this.cardLedger.syncTransactions([transaction.id]);
     return transaction;
   }
 

@@ -1,10 +1,11 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, RecurrenceFrequency } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountsService } from '../accounts/accounts.service';
 import { dateOnlyString, startOfDayUtc, todaySaoPaulo } from '../common/date.util';
 import { TransactionsService } from './transactions.service';
+import { CardLedgerService } from '../credit-cards/card-ledger.service';
 import { FREQUENCY_STEP_MONTHS } from './recurrence-frequency';
 import { UpdateRecurrenceDto } from './dto/update-recurrence.dto';
 
@@ -141,6 +142,7 @@ export class RecurrencesService {
     private prisma: PrismaService,
     private accountsService: AccountsService,
     private transactionsService: TransactionsService,
+    private cardLedger: CardLedgerService = new CardLedgerService(prisma),
   ) {}
 
   private fromToday() {
@@ -179,8 +181,18 @@ export class RecurrencesService {
 
   async update(userId: string, seriesId: string, dto: UpdateRecurrenceDto) {
     const future = await this.findFuture(userId, seriesId);
-    if (dto.accountId !== undefined || dto.categoryId !== undefined) {
-      await this.transactionsService.validateOwnership(userId, dto.accountId, dto.categoryId);
+    const changesValue =
+      dto.amount !== undefined || dto.accountId !== undefined || dto.dueDay !== undefined;
+    if (changesValue) await this.assertUnlocked(future);
+    const accountChanged =
+      dto.accountId !== undefined && future.some((o) => o.accountId !== dto.accountId);
+    if (accountChanged || dto.categoryId !== undefined) {
+      await this.transactionsService.validateOwnership(
+        userId,
+        accountChanged ? dto.accountId : undefined,
+        dto.categoryId,
+        future[0].type,
+      );
     }
 
     const data: Prisma.TransactionUncheckedUpdateManyInput = {
@@ -211,6 +223,7 @@ export class RecurrencesService {
   /** Pausar cancela as ocorrências de hoje em diante; reativar as confirma de novo. */
   async setActive(userId: string, seriesId: string, active: boolean) {
     const future = await this.findFuture(userId, seriesId);
+    await this.assertUnlocked(future);
     await this.prisma.transaction.updateMany({
       where: {
         userId,
@@ -227,11 +240,27 @@ export class RecurrencesService {
   /** Exclui as ocorrências de hoje em diante. As passadas não são afetadas. */
   async remove(userId: string, seriesId: string) {
     const future = await this.findFuture(userId, seriesId);
+    await this.assertUnlocked(future);
     await this.prisma.transaction.deleteMany({
       where: { userId, seriesId, transactionDate: this.fromToday() },
     });
     await this.recalculate(future);
     return { message: 'Recorrência excluída' };
+  }
+
+  /**
+   * Ocorrência de cartão em fatura fechada ou já paga não muda de valor, data
+   * nem status (mesma regra dos lançamentos avulsos).
+   */
+  private async assertUnlocked(
+    occurrences: { id: string; invoiceId: string | null; cardPaymentId: string | null }[],
+  ) {
+    const [reason] = (await this.cardLedger.lockReasons(occurrences)).values();
+    if (reason) {
+      throw new ConflictException(
+        `${reason} Altere a recorrência depois dessa ocorrência ou edite só a descrição e a categoria.`,
+      );
+    }
   }
 
   private async findFuture(userId: string, seriesId: string) {
@@ -259,12 +288,20 @@ export class RecurrencesService {
     return recurrence;
   }
 
-  /** Recalcula o saldo das contas tocadas (a de hoje entra no saldo). */
-  private async recalculate(occurrences: { accountId: string }[], newAccountId?: string) {
+  /**
+   * Recalcula o saldo das contas tocadas (a de hoje entra no saldo) e a fatura
+   * das ocorrências que continuam existindo, se estiverem num cartão.
+   */
+  private async recalculate(
+    occurrences: { id: string; accountId: string }[],
+    newAccountId?: string,
+  ) {
     const accountIds = new Set(occurrences.map((o) => o.accountId));
     if (newAccountId) accountIds.add(newAccountId);
+    await this.cardLedger.syncTransactions(occurrences.map((o) => o.id));
     for (const accountId of accountIds) {
       await this.accountsService.recalculateBalance(accountId);
+      await this.cardLedger.pruneForAccount(accountId);
     }
   }
 }

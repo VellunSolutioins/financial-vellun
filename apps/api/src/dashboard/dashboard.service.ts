@@ -1,5 +1,19 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { REGULAR_ACCOUNT_WHERE } from '../accounts/account-types';
+import {
+  NET_EXPENSE_TYPES,
+  netExpenseByCategory,
+  netExpenseOf,
+  roundCents,
+} from '../transactions/net-expense';
+import {
+  ResourceFilterDto,
+  ResourceScope,
+  ScopedAccountIds,
+  scopeWhere,
+} from '../common/resource-scope';
 import {
   startOfDayUtc,
   endOfDayUtc,
@@ -7,7 +21,19 @@ import {
   endOfMonthUtc,
   todaySaoPaulo,
   dateOnlyString,
+  compareCalendarDays,
 } from '../common/date.util';
+import { CardLedgerService, toDbDate } from '../credit-cards/card-ledger.service';
+import { cardNeedsSetup } from '../credit-cards/card-setup';
+import { cardPosition, cycleState } from '../credit-cards/invoice-cycle';
+
+/** Itens da lista "Próximas contas a pagar" do dashboard pessoal. */
+const UPCOMING_BILLS_LIMIT = 5;
+/**
+ * Lançamentos lidos para montar a lista: com uma ocorrência por série, é
+ * preciso ler além dos cinco — uma série mensal ocupa várias linhas seguidas.
+ */
+const UPCOMING_BILLS_SCAN = 60;
 
 /**
  * Itens de conta a pagar/receber trazidos junto do dashboard empresarial.
@@ -21,99 +47,208 @@ const PENDING_PREVIEW_LIMIT = 5;
 /** Linha do comparativo mensal, como o Postgres devolve. */
 export type MonthlyTotalRow = {
   month: string;
-  type: 'income' | 'expense';
+  /** `refund` é subtraído da despesa do mês. */
+  type: 'income' | 'expense' | 'refund';
   /** `numeric` vem como texto para não passar por float no caminho. */
   total: string | null;
 };
 
+/**
+ * Período pedido ou, sem ele, o mês corrente **em America/Sao_Paulo** — o
+ * relógio do servidor (UTC) já virou o mês às 21h do último dia.
+ */
+function periodBounds(periodStart?: string, periodEnd?: string) {
+  const today = todaySaoPaulo();
+  return {
+    start: periodStart ? startOfDayUtc(periodStart) : startOfMonthUtc(today.year, today.monthIndex),
+    end: periodEnd ? endOfDayUtc(periodEnd) : endOfMonthUtc(today.year, today.monthIndex),
+  };
+}
+
+/** Contas comuns ativas dentro do recorte: é delas o "saldo total". */
+function balanceAccountsWhere(userId: string, scoped: ScopedAccountIds) {
+  return {
+    userId,
+    isActive: true,
+    ...REGULAR_ACCOUNT_WHERE,
+    ...(scoped ? { id: { in: scoped } } : {}),
+  };
+}
+
 @Injectable()
 export class DashboardService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private resourceScope: ResourceScope = new ResourceScope(prisma),
+    private cardLedger: CardLedgerService = new CardLedgerService(prisma),
+  ) {}
 
-  async getSummary(userId: string, periodStart?: string, periodEnd?: string) {
-    const now = new Date();
-    const start = periodStart
-      ? startOfDayUtc(periodStart)
-      : startOfMonthUtc(now.getFullYear(), now.getMonth());
-    const end = periodEnd
-      ? endOfDayUtc(periodEnd)
-      : endOfMonthUtc(now.getFullYear(), now.getMonth());
+  /**
+   * "Próximas contas a pagar": o que sai do bolso em seguida.
+   *
+   * - Despesas de conta comum a partir de hoje, com **uma ocorrência por série**
+   *   (recorrência ou parcelamento): a próxima. O aluguel de novembro não é uma
+   *   conta "próxima" enquanto o de outubro não venceu.
+   * - Compras no cartão não entram uma a uma: o que se paga é a fatura. Cada
+   *   fatura com saldo a pagar — a aberta hoje e as fechadas, inclusive vencidas
+   *   — vira um item com o restante e o vencimento. Faturas futuras (parcelas
+   *   de meses seguintes) ficam de fora, como as ocorrências seguintes das séries.
+   *   Cartão com configuração pendente não tem fatura e não aparece.
+   */
+  private async upcomingBills(userId: string, scoped: ScopedAccountIds) {
+    const today = todaySaoPaulo();
+    const [transactions, cards] = await Promise.all([
+      this.prisma.transaction.findMany({
+        where: {
+          userId,
+          ...scopeWhere(scoped),
+          type: 'expense',
+          status: 'confirmed',
+          transactionDate: { gte: startOfDayUtc(dateOnlyString(today)) },
+          account: { type: { not: 'credit_card' } },
+        },
+        include: { category: true, account: true },
+        orderBy: [{ transactionDate: 'asc' }, { createdAt: 'asc' }],
+        take: UPCOMING_BILLS_SCAN,
+      }),
+      // Arquivado também: cartão arquivado continua pagável.
+      this.prisma.creditCard.findMany({
+        where: { account: { userId, ...(scoped ? { id: { in: scoped } } : {}) } },
+        include: { account: { select: { name: true } } },
+      }),
+    ]);
+
+    const seenSeries = new Set<string>();
+    const transactionItems = transactions
+      .filter((t) => {
+        if (!t.seriesId) return true;
+        if (seenSeries.has(t.seriesId)) return false;
+        seenSeries.add(t.seriesId);
+        return true;
+      })
+      .map((t) => ({ ...t, kind: 'transaction' as const }));
+
+    const configured = cards.filter((c) => !cardNeedsSetup(c));
+    const amounts = await this.cardLedger.invoicesWithAmounts(configured.map((c) => c.id));
+    const invoiceItems = configured.flatMap((card) => {
+      const invoices = amounts.get(card.id) ?? [];
+      const { current } = cardPosition(
+        invoices,
+        { closingDay: card.closingDay!, dueDay: card.dueDay! },
+        today,
+      );
+      return invoices
+        .filter((i) => compareCalendarDays(i.span.closingDate, current.closingDate) <= 0)
+        .map((i) => ({
+          invoice: i,
+          remainingCents: i.chargesCents - i.refundsCents - i.paymentsCents,
+        }))
+        .filter(({ remainingCents }) => remainingCents > 0)
+        .map(({ invoice, remainingCents }) => ({
+          kind: 'invoice' as const,
+          id: invoice.span.id,
+          cardId: card.id,
+          description: `Fatura ${card.account.name}`,
+          amount: remainingCents / 100,
+          /** Vencimento da fatura (mesmo nome dos lançamentos, para a lista ser uma só). */
+          transactionDate: toDbDate(invoice.span.dueDate),
+          invoiceState: cycleState(invoice.span, today),
+          category: null,
+        }));
+    });
+
+    return [...transactionItems, ...invoiceItems]
+      .sort((a, b) => a.transactionDate.getTime() - b.transactionDate.getTime())
+      .slice(0, UPCOMING_BILLS_LIMIT);
+  }
+
+  /**
+   * Visão pessoal. Receitas, despesas e categorias são por competência (data do
+   * lançamento ou da parcela), inclusive as de cartão; o saldo é só das contas
+   * comuns, porque cartão não tem saldo.
+   */
+  async getSummary(
+    userId: string,
+    periodStart?: string,
+    periodEnd?: string,
+    filter: ResourceFilterDto = {},
+  ) {
+    const { start, end } = periodBounds(periodStart, periodEnd);
+    const scoped = await this.resourceScope.resolve(userId, filter);
+    const inScope = scopeWhere(scoped);
 
     const [accounts, incomeAgg, expenseAgg, expensesByCategory, recentTransactions, upcomingBills] =
       await Promise.all([
         this.prisma.account.findMany({
-          where: { userId, isActive: true, type: { not: 'credit_card' } },
+          where: balanceAccountsWhere(userId, scoped),
           select: { currentBalance: true },
         }),
         this.prisma.transaction.aggregate({
           where: {
             userId,
+            ...inScope,
             type: 'income',
             status: 'confirmed',
             transactionDate: { gte: start, lte: end },
           },
           _sum: { amount: true },
         }),
-        this.prisma.transaction.aggregate({
+        this.prisma.transaction.groupBy({
+          by: ['type'],
           where: {
             userId,
-            type: 'expense',
+            ...inScope,
+            type: { in: [...NET_EXPENSE_TYPES] },
             status: 'confirmed',
             transactionDate: { gte: start, lte: end },
           },
           _sum: { amount: true },
         }),
         this.prisma.transaction.groupBy({
-          by: ['categoryId'],
+          by: ['categoryId', 'type'],
           where: {
             userId,
-            type: 'expense',
+            ...inScope,
+            type: { in: [...NET_EXPENSE_TYPES] },
             status: 'confirmed',
             transactionDate: { gte: start, lte: end },
           },
           _sum: { amount: true },
-          orderBy: { _sum: { amount: 'desc' } },
         }),
         this.prisma.transaction.findMany({
-          where: { userId },
+          where: { userId, ...inScope },
           include: { category: true, account: true },
           orderBy: { createdAt: 'desc' },
           take: 5,
         }),
-        this.prisma.transaction.findMany({
-          where: {
-            userId,
-            type: 'expense',
-            status: 'confirmed',
-            transactionDate: { gte: startOfDayUtc(dateOnlyString(todaySaoPaulo())) },
-          },
-          include: { category: true, account: true },
-          orderBy: { transactionDate: 'asc' },
-          take: 5,
-        }),
+        this.upcomingBills(userId, scoped),
       ]);
 
     const totalBalance = accounts.reduce((sum, a) => sum + Number(a.currentBalance), 0);
     const totalIncome = Number(incomeAgg._sum.amount ?? 0);
-    const totalExpense = Number(expenseAgg._sum.amount ?? 0);
-
-    // Resolve category names
-    const categoryIds = expensesByCategory.map((e) => e.categoryId).filter(Boolean) as string[];
-    const categories = await this.prisma.category.findMany({
-      where: { id: { in: categoryIds } },
-      select: { id: true, name: true },
-    });
-    const categoryMap = Object.fromEntries(categories.map((c) => [c.id, c.name]));
-
-    const expensesByCategoryResult = expensesByCategory.map((e) => ({
-      categoryId: e.categoryId,
-      categoryName: e.categoryId ? (categoryMap[e.categoryId] ?? 'Sem categoria') : 'Sem categoria',
-      total: Number(e._sum.amount ?? 0),
-      percentage: totalExpense > 0 ? (Number(e._sum.amount ?? 0) / totalExpense) * 100 : 0,
-    }));
+    // Despesa líquida de estornos (competência).
+    const totalExpense = roundCents(netExpenseOf(expenseAgg));
+    const expensesByCategoryResult = await this.categoryTotals(
+      netExpenseByCategory(expensesByCategory),
+      totalExpense,
+    );
 
     // Monthly comparison (last 12 months) — usado no gráfico de evolução mensal
-    const monthlyComparison = await this.getMonthlyComparison(userId, 12);
+    const [monthlyComparison, lastEntry] = await Promise.all([
+      this.getMonthlyComparison(userId, 12, scoped),
+      // Até onde vão os lançamentos agendados (recorrências e parcelas): a tela
+      // oferece os meses futuros até aqui no seletor de mês.
+      this.prisma.transaction.aggregate({
+        where: {
+          userId,
+          ...inScope,
+          status: 'confirmed',
+          type: { in: ['income', ...NET_EXPENSE_TYPES] },
+        },
+        _max: { transactionDate: true },
+      }),
+    ]);
+    const lastDate = lastEntry._max.transactionDate;
 
     return {
       totalBalance,
@@ -124,17 +259,24 @@ export class DashboardService {
       recentTransactions,
       upcomingBills,
       monthlyComparison,
+      /** `YYYY-MM` do último lançamento confirmado (pode ser futuro); nulo se não há nenhum. */
+      lastEntryMonth: lastDate ? lastDate.toISOString().slice(0, 7) : null,
     };
   }
 
-  async getBusinessSummary(userId: string, periodStart?: string, periodEnd?: string) {
-    const now = new Date();
-    const start = periodStart
-      ? startOfDayUtc(periodStart)
-      : startOfMonthUtc(now.getFullYear(), now.getMonth());
-    const end = periodEnd
-      ? endOfDayUtc(periodEnd)
-      : endOfMonthUtc(now.getFullYear(), now.getMonth());
+  /**
+   * Visão empresarial. Receita, despesa e categorias por competência; o fluxo de
+   * caixa só considera contas comuns — compra no cartão não é saída de caixa.
+   */
+  async getBusinessSummary(
+    userId: string,
+    periodStart?: string,
+    periodEnd?: string,
+    filter: ResourceFilterDto = {},
+  ) {
+    const { start, end } = periodBounds(periodStart, periodEnd);
+    const scoped = await this.resourceScope.resolve(userId, filter);
+    const inScope = scopeWhere(scoped);
     // A pagar/receber = o que ainda vai acontecer: confirmado com data de hoje
     // em diante. Não existe status pendente.
     const upcoming = {
@@ -151,39 +293,45 @@ export class DashboardService {
       pendingTotals,
     ] = await Promise.all([
       this.prisma.account.findMany({
-        where: { userId, isActive: true },
+        where: balanceAccountsWhere(userId, scoped),
         select: { currentBalance: true },
       }),
       this.prisma.transaction.findMany({
         where: {
           userId,
+          ...inScope,
           status: 'confirmed',
-          type: { in: ['income', 'expense'] },
+          type: { in: ['income', 'expense', 'refund', 'transfer'] },
           transactionDate: { gte: start, lte: end },
         },
-        select: { type: true, amount: true, transactionDate: true },
+        select: {
+          type: true,
+          amount: true,
+          transactionDate: true,
+          transferDirection: true,
+          account: { select: { type: true } },
+        },
         orderBy: { transactionDate: 'asc' },
       }),
       this.prisma.transaction.groupBy({
-        by: ['categoryId'],
+        by: ['categoryId', 'type'],
         where: {
           userId,
-          type: 'expense',
+          ...inScope,
+          type: { in: [...NET_EXPENSE_TYPES] },
           status: 'confirmed',
           transactionDate: { gte: start, lte: end },
         },
         _sum: { amount: true },
-        orderBy: { _sum: { amount: 'desc' } },
-        take: 5,
       }),
       this.prisma.transaction.findMany({
-        where: { userId, type: 'income', ...upcoming },
+        where: { userId, ...inScope, type: 'income', ...upcoming },
         include: { category: true, account: true },
         orderBy: { transactionDate: 'asc' },
         take: PENDING_PREVIEW_LIMIT,
       }),
       this.prisma.transaction.findMany({
-        where: { userId, type: 'expense', ...upcoming },
+        where: { userId, ...inScope, type: 'expense', ...upcoming },
         include: { category: true, account: true },
         orderBy: { transactionDate: 'asc' },
         take: PENDING_PREVIEW_LIMIT,
@@ -193,7 +341,7 @@ export class DashboardService {
       // só cobre receber e pagar, e é ela que conta quantos existem.
       this.prisma.transaction.groupBy({
         by: ['type'],
-        where: { userId, ...upcoming, type: { in: ['income', 'expense'] } },
+        where: { userId, ...inScope, ...upcoming, type: { in: ['income', 'expense'] } },
         _sum: { amount: true },
         _count: { _all: true },
       }),
@@ -206,19 +354,28 @@ export class DashboardService {
     const dailyMap = new Map<string, { income: number; expense: number }>();
     for (const t of confirmedInPeriod) {
       const amount = Number(t.amount);
+      // Competência: receita e despesa líquida de estornos.
+      if (t.type === 'income') totalIncome += amount;
+      else if (t.type === 'expense') totalExpense += amount;
+      else if (t.type === 'refund') totalExpense -= amount;
+
+      // Caixa: só o que passou por conta comum. Estorno é entrada; pagamento de
+      // fatura (perna que sai da conta) é saída; transferência sem direção
+      // (legado) não conta.
+      if (t.account.type === 'credit_card') continue;
+      const cashIn = t.type === 'income' || t.type === 'refund';
+      const cashOut =
+        t.type === 'expense' || (t.type === 'transfer' && t.transferDirection === 'out');
+      if (!cashIn && !cashOut) continue;
       const day = t.transactionDate.toISOString().slice(0, 10);
       const entry = dailyMap.get(day) ?? { income: 0, expense: 0 };
-      if (t.type === 'income') {
-        totalIncome += amount;
-        entry.income += amount;
-      } else {
-        totalExpense += amount;
-        entry.expense += amount;
-      }
+      if (cashIn) entry.income += amount;
+      else entry.expense += amount;
       dailyMap.set(day, entry);
     }
+    totalExpense = roundCents(totalExpense);
 
-    // Daily cash flow with running balance over the period
+    // Fluxo de caixa diário com saldo acumulado no período
     let runningBalance = 0;
     const cashFlow = [...dailyMap.entries()]
       .sort((a, b) => a[0].localeCompare(b[0]))
@@ -227,19 +384,9 @@ export class DashboardService {
         return { date, income, expense, balance: runningBalance };
       });
 
-    const categoryIds = expensesByCategory.map((e) => e.categoryId).filter(Boolean) as string[];
-    const categories = await this.prisma.category.findMany({
-      where: { id: { in: categoryIds } },
-      select: { id: true, name: true },
-    });
-    const categoryMap = Object.fromEntries(categories.map((c) => [c.id, c.name]));
-
-    const topExpenseCategories = expensesByCategory.map((e) => ({
-      categoryId: e.categoryId,
-      categoryName: e.categoryId ? (categoryMap[e.categoryId] ?? 'Sem categoria') : 'Sem categoria',
-      total: Number(e._sum.amount ?? 0),
-      percentage: totalExpense > 0 ? (Number(e._sum.amount ?? 0) / totalExpense) * 100 : 0,
-    }));
+    const topExpenseCategories = (
+      await this.categoryTotals(netExpenseByCategory(expensesByCategory), totalExpense)
+    ).slice(0, 5);
 
     const receivableAgg = pendingTotals.find((p) => p.type === 'income');
     const payableAgg = pendingTotals.find((p) => p.type === 'expense');
@@ -271,8 +418,7 @@ export class DashboardService {
    * mês (income/expense, zero quando não há). ``month`` no formato ``YYYY-MM``;
    * sem ele, usa o mês atual. Cálculo em UTC para casar com a data armazenada.
    */
-  async getDailyBreakdown(userId: string, month?: string) {
-    const now = new Date();
+  async getDailyBreakdown(userId: string, month?: string, filter: ResourceFilterDto = {}) {
     let year: number;
     let monthIndex: number;
     if (month && /^\d{4}-\d{2}$/.test(month)) {
@@ -280,9 +426,9 @@ export class DashboardService {
       year = y;
       monthIndex = m - 1;
     } else {
-      year = now.getUTCFullYear();
-      monthIndex = now.getUTCMonth();
+      ({ year, monthIndex } = todaySaoPaulo());
     }
+    const scoped = await this.resourceScope.resolve(userId, filter);
 
     const start = new Date(Date.UTC(year, monthIndex, 1));
     const end = new Date(Date.UTC(year, monthIndex + 1, 0, 23, 59, 59, 999));
@@ -291,8 +437,9 @@ export class DashboardService {
     const transactions = await this.prisma.transaction.findMany({
       where: {
         userId,
+        ...scopeWhere(scoped),
         status: 'confirmed',
-        type: { in: ['income', 'expense'] },
+        type: { in: ['income', ...NET_EXPENSE_TYPES] },
         transactionDate: { gte: start, lte: end },
       },
       select: { type: true, amount: true, transactionDate: true },
@@ -306,7 +453,8 @@ export class DashboardService {
       const entry = byDay.get(day);
       if (!entry) continue;
       if (t.type === 'income') entry.income += Number(t.amount);
-      else entry.expense += Number(t.amount);
+      else if (t.type === 'expense') entry.expense += Number(t.amount);
+      else entry.expense -= Number(t.amount);
     }
 
     return {
@@ -337,11 +485,40 @@ export class DashboardService {
    * como zero: a grade dos meses é montada aqui, e o resultado do banco só a
    * preenche.
    */
-  private async getMonthlyComparison(userId: string, months: number) {
-    const now = new Date();
+  /** Categorias de despesa líquida, com nome e participação, da maior para a menor. */
+  private async categoryTotals(byCategory: Map<string | null, number>, totalExpense: number) {
+    const categoryIds = [...byCategory.keys()].filter(Boolean) as string[];
+    const categories = await this.prisma.category.findMany({
+      where: { id: { in: categoryIds } },
+      select: { id: true, name: true, color: true },
+    });
+    const byId = new Map(categories.map((c) => [c.id, c]));
+    return [...byCategory]
+      .map(([categoryId, total]) => ({
+        categoryId,
+        categoryName: (categoryId && byId.get(categoryId)?.name) || 'Sem categoria',
+        // A tela colore cada categoria igual em todos os gráficos.
+        color: (categoryId && byId.get(categoryId)?.color) || null,
+        total: roundCents(total),
+        percentage: totalExpense > 0 ? (total / totalExpense) * 100 : 0,
+      }))
+      .filter((c) => c.total !== 0)
+      .sort((a, b) => b.total - a.total);
+  }
+
+  private async getMonthlyComparison(
+    userId: string,
+    months: number,
+    scoped: ScopedAccountIds = null,
+  ) {
+    // O mês corrente é o de São Paulo; `now` só serve para montar a grade.
+    const today = todaySaoPaulo();
+    const now = new Date(today.year, today.monthIndex, today.day);
     // Mesma janela do laço anterior: os `months` meses terminando no corrente.
-    const first = startOfMonthUtc(now.getFullYear(), now.getMonth() - (months - 1));
-    const last = endOfMonthUtc(now.getFullYear(), now.getMonth());
+    const first = startOfMonthUtc(today.year, today.monthIndex - (months - 1));
+    const last = endOfMonthUtc(today.year, today.monthIndex);
+    // Antes das bordas da janela, que o teste lê como os dois últimos parâmetros.
+    const inScope = scoped ? Prisma.sql`AND "account_id" = ANY(${scoped}::text[])` : Prisma.empty;
 
     const rows = await this.prisma.$queryRaw<MonthlyTotalRow[]>`
       SELECT to_char(date_trunc('month', "transaction_date"), 'YYYY-MM') AS month,
@@ -350,7 +527,8 @@ export class DashboardService {
         FROM "transactions"
        WHERE "user_id" = ${userId}
          AND "status" = 'confirmed'
-         AND "type" IN ('income', 'expense')
+         AND "type" IN ('income', 'expense', 'refund')
+         ${inScope}
          AND "transaction_date" >= ${first.toISOString().slice(0, 10)}::date
          AND "transaction_date" <= ${last.toISOString().slice(0, 10)}::date
        GROUP BY 1, 2
@@ -387,7 +565,9 @@ export function buildMonthlySeries(
     // Linha fora da janela (dado de borda) é ignorada, em vez de virar um mês
     // extra no meio do gráfico.
     if (index === undefined) continue;
-    series[index][row.type] = Number(row.total ?? 0);
+    const total = Number(row.total ?? 0);
+    if (row.type === 'refund') series[index].expense = roundCents(series[index].expense - total);
+    else series[index][row.type] = roundCents(series[index][row.type] + total);
   }
 
   return series;

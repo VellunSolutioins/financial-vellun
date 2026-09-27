@@ -13,6 +13,11 @@ import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
 import { CURRENCY_REGEX, currencyToNumber, maskCurrency } from '@/lib/masks';
+import { useAuth } from '@/contexts/auth-context';
+import Link from 'next/link';
+import { Star } from 'lucide-react';
+import { useFinancialResources } from '@/hooks/useFinancialResources';
+import { cn } from '@/lib/utils';
 
 interface Account {
   id: string;
@@ -24,11 +29,11 @@ interface Account {
   isActive: boolean;
 }
 
+/** Cartão de crédito não é conta: fica na tela de Cartões. */
 const accountTypeLabels: Record<string, string> = {
   checking: 'Conta Corrente',
   savings: 'Poupança',
   cash: 'Dinheiro',
-  credit_card: 'Cartão de Crédito',
   digital_wallet: 'Carteira Digital',
   investment: 'Investimento',
   other: 'Outro',
@@ -36,15 +41,7 @@ const accountTypeLabels: Record<string, string> = {
 
 const schema = z.object({
   name: z.string().min(1, 'Nome obrigatório'),
-  type: z.enum([
-    'checking',
-    'savings',
-    'cash',
-    'credit_card',
-    'digital_wallet',
-    'investment',
-    'other',
-  ]),
+  type: z.enum(['checking', 'savings', 'cash', 'digital_wallet', 'investment', 'other']),
   initialBalance: z.string().regex(CURRENCY_REGEX, 'Valor inválido').optional(),
 });
 type FormData = z.infer<typeof schema>;
@@ -60,6 +57,7 @@ export default function ContasPage() {
   const [editing, setEditing] = useState<Account | null>(null);
   const toast = useToast();
   const confirm = useConfirm();
+  const { user } = useAuth();
 
   const {
     register,
@@ -72,12 +70,30 @@ export default function ContasPage() {
     defaultValues: { type: 'checking', initialBalance: '0,00' },
   });
 
+  const { data: resources, refetch: refetchResources, setPreferred } = useFinancialResources();
+  const preferredAccountId = resources?.preferredAccountId ?? null;
+
   const load = () =>
     apiClient
       .get<Account[]>('/accounts')
       .then(setAccounts)
       .catch(console.error)
       .finally(() => setLoading(false));
+
+  /** Liga ou desliga a conta como padrão dos novos lançamentos. */
+  const togglePreferred = async (acc: Account) => {
+    const isPreferred = acc.id === preferredAccountId;
+    try {
+      await setPreferred(isPreferred ? null : { accountId: acc.id });
+      toast.success(
+        isPreferred
+          ? 'Nenhuma conta ou cartão vem selecionado nos novos lançamentos.'
+          : `"${acc.name}" vem selecionada nos novos lançamentos.`,
+      );
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao definir o padrão dos lançamentos');
+    }
+  };
 
   useEffect(() => {
     void load();
@@ -126,6 +142,8 @@ export default function ContasPage() {
       await apiClient.delete(`/accounts/${id}`);
       toast.success('Conta desativada.');
       void load();
+      // Conta desativada deixa de ser a preferencial.
+      void refetchResources();
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Erro ao desativar conta');
     }
@@ -134,7 +152,18 @@ export default function ContasPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold">Contas</h1>
+        <div>
+          <h1 className="text-2xl font-bold">Contas</h1>
+          {user?.profileType === 'individual' && (
+            <p className="text-sm text-muted-foreground">
+              Cartões de crédito ficam em{' '}
+              <Link href="/app/pessoal/cartoes" className="font-medium underline">
+                Cartões
+              </Link>
+              .
+            </p>
+          )}
+        </div>
         <Button onClick={openNew}>+ Nova conta</Button>
       </div>
 
@@ -147,7 +176,15 @@ export default function ContasPage() {
           {accounts.map((acc) => (
             <Card key={acc.id}>
               <CardHeader className="pb-2">
-                <CardTitle className="text-base">{acc.name}</CardTitle>
+                <CardTitle className="flex min-w-0 items-center gap-1.5 text-base">
+                  <span className="truncate">{acc.name}</span>
+                  {acc.id === preferredAccountId && (
+                    <Star
+                      className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400"
+                      aria-label="Padrão nos lançamentos"
+                    />
+                  )}
+                </CardTitle>
                 <p className="text-xs text-muted-foreground">
                   {accountTypeLabels[acc.type] ?? acc.type}
                 </p>
@@ -158,7 +195,10 @@ export default function ContasPage() {
                 >
                   {formatCurrency(Number(acc.currentBalance))}
                 </p>
-                <div className="flex gap-2 mt-4">
+                <div className="flex flex-wrap gap-2 mt-4">
+                  <Button size="sm" variant="outline" asChild>
+                    <Link href={`/app/pessoal/contas/${acc.id}`}>Movimentações</Link>
+                  </Button>
                   <Button size="sm" variant="outline" onClick={() => openEdit(acc)}>
                     Editar
                   </Button>
@@ -171,6 +211,28 @@ export default function ContasPage() {
                     Desativar
                   </Button>
                 </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className={cn(
+                    'mt-2 h-8 px-2 text-xs',
+                    acc.id === preferredAccountId && 'font-medium text-amber-600',
+                  )}
+                  title={
+                    acc.id === preferredAccountId
+                      ? 'Deixar de usar como padrão'
+                      : 'Vir selecionada em novos lançamentos'
+                  }
+                  onClick={() => void togglePreferred(acc)}
+                >
+                  <Star
+                    className={cn(
+                      'mr-1 h-3.5 w-3.5',
+                      acc.id === preferredAccountId && 'fill-amber-400 text-amber-400',
+                    )}
+                  />
+                  {acc.id === preferredAccountId ? 'Padrão nos lançamentos' : 'Usar como padrão'}
+                </Button>
               </CardContent>
             </Card>
           ))}

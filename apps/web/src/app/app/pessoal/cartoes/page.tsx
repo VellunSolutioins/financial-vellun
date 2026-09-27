@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import Link from 'next/link';
 import { Plus, CreditCard as CreditCardIcon, Star } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
@@ -7,15 +8,18 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
 import { CreditCardForm } from '@/components/credit-cards/CreditCardForm';
+import { CardSetupForm } from '@/components/credit-cards/CardSetupForm';
 import { useCreditCards, type CreditCard } from '@/hooks/useCreditCards';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
-import { cn } from '@/lib/utils';
+import { cn, formatDateBR } from '@/lib/utils';
 
 function formatCurrency(v: number) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 }
+
+const shortDate = (iso: string) => formatDateBR(iso, { day: '2-digit', month: '2-digit' });
 
 /** Cores da barra por faixa de comprometimento do limite (ver credit-cards.service.ts). */
 const healthBarStyles: Record<string, string> = {
@@ -28,9 +32,10 @@ const healthBarStyles: Record<string, string> = {
 };
 
 export default function CartoesPage() {
-  const { data, summary, loading, refetch } = useCreditCards();
+  const { data, archived, summary, loading, refetch } = useCreditCards();
   const [formOpen, setFormOpen] = useState(false);
   const [editingCard, setEditingCard] = useState<CreditCard | undefined>();
+  const [settingUp, setSettingUp] = useState<CreditCard | null>(null);
   const toast = useToast();
   const confirm = useConfirm();
 
@@ -48,30 +53,38 @@ export default function CartoesPage() {
     void refetch();
   };
 
-  const handleSetPrimary = async (card: CreditCard) => {
+  /** Liga ou desliga o cartão como padrão dos novos lançamentos. */
+  const togglePreferred = async (card: CreditCard) => {
     try {
-      await apiClient.patch(`/credit-cards/${card.id}/primary`, {});
-      toast.success(`"${card.name}" agora é o cartão principal.`);
+      await apiClient.patch(
+        '/financial-resources/preferred',
+        card.isPreferred ? {} : { cardId: card.id },
+      );
+      toast.success(
+        card.isPreferred
+          ? 'Nenhuma conta ou cartão vem selecionado nos novos lançamentos.'
+          : `"${card.name}" vem selecionado nos novos lançamentos.`,
+      );
       void refetch();
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Erro ao definir cartão principal');
+      toast.error(e instanceof Error ? e.message : 'Erro ao definir o padrão dos lançamentos');
     }
   };
 
-  const handleDelete = async (card: CreditCard) => {
+  const handleArchive = async (card: CreditCard) => {
     const ok = await confirm({
-      title: 'Excluir cartão',
-      description: `Excluir "${card.name}"?`,
-      confirmText: 'Excluir',
+      title: 'Arquivar cartão',
+      description: `"${card.name}" deixa de receber compras. O histórico continua disponível.`,
+      confirmText: 'Arquivar',
       variant: 'destructive',
     });
     if (!ok) return;
     try {
       await apiClient.delete(`/credit-cards/${card.id}`);
-      toast.success('Cartão excluído.');
+      toast.success('Cartão arquivado.');
       void refetch();
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Erro ao excluir cartão');
+      toast.error(e instanceof Error ? e.message : 'Erro ao arquivar cartão');
     }
   };
 
@@ -98,7 +111,7 @@ export default function CartoesPage() {
           <CardContent className="space-y-3 p-4 sm:p-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-sm text-muted-foreground">
-                Comprometido em todos os cartões
+                Limite comprometido em todos os cartões
               </span>
               {summary.incomeHealth && (
                 <Badge className="shrink-0 bg-muted text-foreground">
@@ -122,10 +135,16 @@ export default function CartoesPage() {
                 />
               </div>
             )}
-            {summary.incomePercentage !== null && (
-              <p className="text-xs text-muted-foreground">
-                {summary.incomePercentage.toFixed(0)}% da renda fixa mensal comprometida com
-                faturas.
+            <p className="text-xs text-muted-foreground">
+              Faturas abertas agora: {formatCurrency(summary.totalCurrentInvoices)}
+              {summary.incomePercentage !== null &&
+                ` · ${summary.incomePercentage.toFixed(0)}% da renda fixa do mês`}
+            </p>
+            {summary.pendingSetupCount > 0 && (
+              <p className="text-xs text-amber-700">
+                {summary.pendingSetupCount === 1
+                  ? '1 cartão sem fechamento configurado fica fora destes totais.'
+                  : `${summary.pendingSetupCount} cartões sem fechamento configurado ficam fora destes totais.`}
               </p>
             )}
           </CardContent>
@@ -158,9 +177,17 @@ export default function CartoesPage() {
                       </span>
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
-                          <p className="truncate font-medium">{card.name}</p>
-                          {card.isPrimary && (
-                            <Star className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400" />
+                          <Link
+                            href={`/app/pessoal/cartoes/${card.id}`}
+                            className="truncate font-medium hover:underline"
+                          >
+                            {card.name}
+                          </Link>
+                          {card.isPreferred && (
+                            <Star
+                              className="h-3.5 w-3.5 shrink-0 fill-amber-400 text-amber-400"
+                              aria-label="Padrão nos lançamentos"
+                            />
                           )}
                         </div>
                         {card.brand && (
@@ -175,12 +202,60 @@ export default function CartoesPage() {
                     )}
                   </div>
 
-                  <div>
-                    <p className="text-xs text-muted-foreground">Fatura atual</p>
-                    <span className="text-xl font-bold">{formatCurrency(card.currentInvoice)}</span>
-                  </div>
+                  {card.needsSetup ? (
+                    <div className="space-y-2 rounded-xl bg-amber-50 p-3 text-xs text-amber-900">
+                      <p>
+                        Sem fechamento configurado: os lançamentos aparecem no período, mas ainda
+                        não formam faturas nem contam no limite.
+                      </p>
+                      <Button size="sm" className="h-8" onClick={() => setSettingUp(card)}>
+                        Configurar fechamento
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="min-w-0">
+                        <p className="text-xs text-muted-foreground">
+                          Fatura atual · fecha {shortDate(card.currentClosingDate!)}
+                        </p>
+                        <p className="truncate text-xl font-bold">
+                          {formatCurrency(card.currentInvoice ?? 0)}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          vence {shortDate(card.currentDueDate!)}
+                        </p>
+                      </div>
+                      <div className="min-w-0 space-y-0.5 text-right text-xs text-muted-foreground">
+                        <p>
+                          Parcelas futuras{' '}
+                          <span className="font-semibold text-foreground">
+                            {formatCurrency(card.futureInstallments ?? 0)}
+                          </span>
+                        </p>
+                        {(card.closedUnpaid ?? 0) > 0 && (
+                          <p className="text-rose-600">
+                            Fechadas em aberto{' '}
+                            <span className="font-semibold">
+                              {formatCurrency(card.closedUnpaid ?? 0)}
+                            </span>
+                          </p>
+                        )}
+                        <p>
+                          Dívida total{' '}
+                          <span className="font-semibold text-foreground">
+                            {formatCurrency(card.totalDebt ?? 0)}
+                          </span>
+                        </p>
+                        {(card.credit ?? 0) > 0 && (
+                          <p className="text-emerald-700">
+                            Crédito {formatCurrency(card.credit ?? 0)}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
-                  {card.creditLimit !== null && (
+                  {card.creditLimit !== null && !card.needsSetup && (
                     <>
                       <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
                         <div
@@ -202,30 +277,48 @@ export default function CartoesPage() {
                   <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                     {card.available !== null ? (
                       <span>
-                        Disponível{' '}
+                        Limite disponível{' '}
                         <span className="font-semibold text-foreground">
                           {formatCurrency(card.available)}
                         </span>
                       </span>
                     ) : (
-                      <span>Sem limite definido</span>
+                      <span>
+                        {card.creditLimit === null ? 'Sem limite definido' : 'Limite a calcular'}
+                      </span>
                     )}
-                    <span>Vence dia {card.dueDay}</span>
+                    {!card.needsSetup && (
+                      <span className="shrink-0">
+                        Fecha dia {card.closingDay} · vence dia {card.dueDay}
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex items-center justify-between gap-1">
-                    {!card.isPrimary ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 px-2 text-xs"
-                        onClick={() => void handleSetPrimary(card)}
-                      >
-                        Tornar principal
-                      </Button>
-                    ) : (
-                      <span className="text-xs font-medium text-amber-600">Cartão principal</span>
-                    )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className={cn(
+                        'h-7 min-w-0 px-2 text-xs',
+                        card.isPreferred && 'font-medium text-amber-600',
+                      )}
+                      title={
+                        card.isPreferred
+                          ? 'Deixar de usar como padrão'
+                          : 'Vir selecionado em novos lançamentos'
+                      }
+                      onClick={() => void togglePreferred(card)}
+                    >
+                      <Star
+                        className={cn(
+                          'mr-1 h-3.5 w-3.5 shrink-0',
+                          card.isPreferred && 'fill-amber-400 text-amber-400',
+                        )}
+                      />
+                      <span className="truncate">
+                        {card.isPreferred ? 'Padrão nos lançamentos' : 'Usar como padrão'}
+                      </span>
+                    </Button>
                     <div className="flex gap-1">
                       <Button
                         size="sm"
@@ -239,9 +332,9 @@ export default function CartoesPage() {
                         size="sm"
                         variant="ghost"
                         className="h-7 px-2 text-destructive"
-                        onClick={() => void handleDelete(card)}
+                        onClick={() => void handleArchive(card)}
                       >
-                        Excluir
+                        Arquivar
                       </Button>
                     </div>
                   </div>
@@ -251,6 +344,61 @@ export default function CartoesPage() {
           })}
         </div>
       )}
+
+      {archived.length > 0 && (
+        <details className="group rounded-2xl border bg-card">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 p-4 text-sm font-medium">
+            <span>Arquivados ({archived.length})</span>
+            <span className="text-xs text-muted-foreground group-open:hidden">Mostrar</span>
+            <span className="hidden text-xs text-muted-foreground group-open:inline">Ocultar</span>
+          </summary>
+          <ul className="divide-y border-t">
+            {archived.map((card) => (
+              <li key={card.id} className="flex items-center justify-between gap-3 p-4">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span
+                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-white opacity-60"
+                    style={{ backgroundColor: card.color ?? '#94a3b8' }}
+                  >
+                    <CreditCardIcon className="h-4 w-4" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{card.name}</p>
+                    <p className="text-xs text-muted-foreground">
+                      Não recebe compras; o histórico continua disponível.
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 shrink-0 px-2"
+                  onClick={() => openEdit(card)}
+                >
+                  Editar
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      <Dialog
+        open={settingUp !== null}
+        onClose={() => setSettingUp(null)}
+        title="Configurar fechamento"
+      >
+        {settingUp && (
+          <CardSetupForm
+            card={settingUp}
+            onSuccess={() => {
+              setSettingUp(null);
+              void refetch();
+            }}
+            onCancel={() => setSettingUp(null)}
+          />
+        )}
+      </Dialog>
 
       <Dialog
         open={formOpen}
