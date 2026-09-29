@@ -9,6 +9,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountsService } from '../accounts/accounts.service';
 import { CardLedgerService } from '../credit-cards/card-ledger.service';
+import { healthFromPercentage } from '../credit-cards/card-health';
 import { dateOnlyString, startOfDayUtc, todaySaoPaulo } from '../common/date.util';
 import { TransactionsService } from './transactions.service';
 import { UpdateInstallmentDto } from './dto/update-installment.dto';
@@ -110,6 +111,75 @@ export function sortInstallments(list: Installment[]) {
   });
 }
 
+export interface SummaryInput {
+  /** Cartões ativos. */
+  cards: { accountId: string; name: string; color: string | null; creditLimit: number | null }[];
+  /** Parcelas de cartão ainda não faturadas (fatura aberta ou futura). */
+  unbilled: { accountId: string; amount: number }[];
+  /** Parcelas a pagar: de cartão ainda não faturadas; de conta, de hoje em diante. */
+  remaining: {
+    categoryId: string | null;
+    categoryName: string | null;
+    color: string | null;
+    amount: number;
+  }[];
+}
+
+const cents = (v: number) => Math.round(v * 100);
+
+/**
+ * Por cartão, quanto do limite está comprometido com parcelas ainda não
+ * faturadas (só os cartões com alguma); e o restante a pagar dos
+ * parcelamentos, por categoria. Cartão sem limite cadastrado não tem
+ * percentual nem faixa.
+ */
+export function buildInstallmentsSummary(input: SummaryInput) {
+  const byAccount = new Map<string, number>();
+  for (const p of input.unbilled) {
+    byAccount.set(p.accountId, (byAccount.get(p.accountId) ?? 0) + cents(p.amount));
+  }
+
+  const byCard = input.cards
+    .map((c) => {
+      const committed = (byAccount.get(c.accountId) ?? 0) / 100;
+      const percentage = c.creditLimit ? (committed / c.creditLimit) * 100 : null;
+      return {
+        ...c,
+        committed,
+        percentage,
+        health: percentage !== null ? healthFromPercentage(percentage) : null,
+      };
+    })
+    .filter((c) => c.committed > 0)
+    .sort((a, b) => b.committed - a.committed);
+
+  const categories = new Map<
+    string,
+    { categoryId: string | null; categoryName: string; color: string | null; cents: number }
+  >();
+  for (const p of input.remaining) {
+    const key = p.categoryId ?? 'uncategorized';
+    const entry = categories.get(key) ?? {
+      categoryId: p.categoryId,
+      categoryName: p.categoryName ?? 'Sem categoria',
+      color: p.color,
+      cents: 0,
+    };
+    entry.cents += cents(p.amount);
+    categories.set(key, entry);
+  }
+  const remainingCents = [...categories.values()].reduce((sum, c) => sum + c.cents, 0);
+  const byCategory = [...categories.values()]
+    .map(({ cents: total, ...c }) => ({
+      ...c,
+      total: total / 100,
+      percentage: remainingCents > 0 ? (total / remainingCents) * 100 : 0,
+    }))
+    .sort((a, b) => b.total - a.total);
+
+  return { byCard, remaining: remainingCents / 100, byCategory };
+}
+
 @Injectable()
 export class InstallmentsService {
   constructor(
@@ -131,6 +201,83 @@ export class InstallmentsService {
     });
     const blocked = await this.blockReasons(parcels);
     return sortInstallments(groupInstallments(parcels, this.today(), blocked));
+  }
+
+  /**
+   * Limite comprometido por cartão e restante a pagar por categoria. No
+   * cartão, "a pagar" é o que ainda não foi faturado — inclusive parcela com
+   * data passada que está na fatura aberta; em conta, as de hoje em diante.
+   * Assim a rosca e as barras dos cartões contam as mesmas parcelas.
+   */
+  async summary(userId: string) {
+    const today = this.today();
+    const confirmedParcels = {
+      userId,
+      recurrenceType: 'parcelado' as const,
+      seriesId: { not: null },
+      status: 'confirmed' as const,
+      type: 'expense' as const,
+    };
+    const category = { select: { id: true, name: true, color: true } };
+
+    const [cards, cardParcels, accountParcels] = await Promise.all([
+      this.prisma.creditCard.findMany({
+        where: { account: { userId, isActive: true } },
+        select: {
+          accountId: true,
+          color: true,
+          creditLimit: true,
+          account: { select: { name: true } },
+        },
+      }),
+      this.prisma.transaction.findMany({
+        where: { ...confirmedParcels, account: { type: 'credit_card' } },
+        select: {
+          id: true,
+          accountId: true,
+          amount: true,
+          transactionDate: true,
+          invoiceId: true,
+          cardPaymentId: true,
+          category,
+        },
+      }),
+      this.prisma.transaction.findMany({
+        where: {
+          ...confirmedParcels,
+          account: { type: { not: 'credit_card' } },
+          transactionDate: { gte: today },
+        },
+        select: { amount: true, category },
+      }),
+    ]);
+    // Fatura fechada ou paga = já faturada: vira dívida da fatura. Sem fatura
+    // (cartão ainda não configurado, ou compra anterior ao controle), vale a data.
+    const billed = await this.cardLedger.lockReasons(cardParcels);
+    const unbilled = cardParcels.filter((p) =>
+      p.invoiceId ? !billed.has(p.id) : p.transactionDate >= today,
+    );
+
+    const toRemaining = (p: {
+      amount: Prisma.Decimal;
+      category: { id: string; name: string; color: string | null } | null;
+    }) => ({
+      categoryId: p.category?.id ?? null,
+      categoryName: p.category?.name ?? null,
+      color: p.category?.color ?? null,
+      amount: Number(p.amount),
+    });
+
+    return buildInstallmentsSummary({
+      cards: cards.map((c) => ({
+        accountId: c.accountId,
+        name: c.account.name,
+        color: c.color,
+        creditLimit: c.creditLimit !== null ? Number(c.creditLimit) : null,
+      })),
+      unbilled: unbilled.map((p) => ({ accountId: p.accountId, amount: Number(p.amount) })),
+      remaining: [...unbilled, ...accountParcels].map(toRemaining),
+    });
   }
 
   async findOne(userId: string, seriesId: string) {

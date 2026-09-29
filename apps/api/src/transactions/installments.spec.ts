@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException } from '@nestjs/common';
 
 import {
   InstallmentsService,
+  buildInstallmentsSummary,
   groupInstallments,
   sortInstallments,
   type Parcel,
@@ -162,5 +163,76 @@ describe('InstallmentsService.remove', () => {
     const { service } = createService(fourParcels().slice(0, 2));
 
     await expect(service.remove('u1', 's1', 'future')).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe('buildInstallmentsSummary', () => {
+  const card = (accountId: string, creditLimit: number | null) => ({
+    accountId,
+    name: accountId,
+    color: null,
+    creditLimit,
+  });
+  const remaining = (categoryId: string | null, amount: number) => ({
+    categoryId,
+    categoryName: categoryId,
+    color: null,
+    amount,
+  });
+
+  it('compara as parcelas a faturar de cada cartão com o limite dele', () => {
+    const { byCard } = buildInstallmentsSummary({
+      cards: [card('nubank', 1000), card('inter', 2000)],
+      unbilled: [
+        { accountId: 'nubank', amount: 200 },
+        { accountId: 'nubank', amount: 100 },
+        { accountId: 'inter', amount: 1700 },
+      ],
+      remaining: [],
+    });
+
+    expect(byCard.map((c) => [c.accountId, c.committed, c.percentage, c.health?.key])).toEqual([
+      ['inter', 1700, 85, 'no_limite'],
+      ['nubank', 300, 30, 'saudavel'],
+    ]);
+  });
+
+  it('cartão sem parcelamento fica de fora', () => {
+    const { byCard } = buildInstallmentsSummary({
+      cards: [card('nubank', 1000), card('inter', 2000)],
+      unbilled: [{ accountId: 'nubank', amount: 100 }],
+      remaining: [],
+    });
+
+    expect(byCard.map((c) => c.accountId)).toEqual(['nubank']);
+  });
+
+  it('cartão sem limite cadastrado não tem percentual nem faixa', () => {
+    const { byCard } = buildInstallmentsSummary({
+      cards: [card('sem-limite', null)],
+      unbilled: [{ accountId: 'sem-limite', amount: 500 }],
+      remaining: [],
+    });
+
+    expect(byCard[0]).toMatchObject({ committed: 500, percentage: null, health: null });
+  });
+
+  it('agrupa o restante a pagar por categoria, com "Sem categoria"', () => {
+    const { remaining: total, byCategory } = buildInstallmentsSummary({
+      cards: [],
+      unbilled: [],
+      remaining: [
+        remaining('eletronicos', 33.33),
+        remaining('eletronicos', 33.34),
+        remaining(null, 33.33),
+      ],
+    });
+
+    expect(total).toBe(100);
+    expect(byCategory.map((c) => [c.categoryName, c.total])).toEqual([
+      ['eletronicos', 66.67],
+      ['Sem categoria', 33.33],
+    ]);
+    expect(byCategory[0].percentage).toBeCloseTo(66.67, 2);
   });
 });

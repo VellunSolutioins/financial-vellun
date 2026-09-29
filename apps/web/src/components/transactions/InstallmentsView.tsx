@@ -9,6 +9,7 @@ import { Dialog } from '@/components/ui/dialog';
 import { Pagination } from '@/components/ui/pagination';
 import { DeleteInstallmentDialog } from '@/components/transactions/DeleteInstallmentDialog';
 import { InstallmentForm } from '@/components/transactions/InstallmentForm';
+import { InstallmentsSummary } from '@/components/transactions/InstallmentsSummary';
 import { RefundForm } from '@/components/transactions/RefundForm';
 import { TransactionForm } from '@/components/transactions/TransactionForm';
 import { useInstallments, type Installment } from '@/hooks/useInstallments';
@@ -92,6 +93,8 @@ export function InstallmentsView() {
   const [editing, setEditing] = useState<Installment | undefined>();
   const [deleting, setDeleting] = useState<Installment | undefined>();
   const [refunding, setRefunding] = useState<Installment | undefined>();
+  // Incrementa a cada escrita para o resumo recarregar junto com a lista.
+  const [version, setVersion] = useState(0);
 
   const filtered = data.filter((i) =>
     filter === 'all' ? true : filter === 'active' ? i.status === 'active' : i.status !== 'active',
@@ -106,6 +109,7 @@ export function InstallmentsView() {
     setDeleting(undefined);
     setRefunding(undefined);
     void refetch();
+    setVersion((v) => v + 1);
   };
 
   const statusBadge = (i: Installment) => (
@@ -160,6 +164,8 @@ export function InstallmentsView() {
           Novo parcelamento
         </Button>
       </div>
+
+      <InstallmentsSummary version={version} />
 
       <div
         role="tablist"
@@ -219,10 +225,9 @@ export function InstallmentsView() {
                       <div className="shrink-0 text-right">{amounts(i)}</div>
                     </div>
                     <Progress i={i} />
-                    <div className="flex items-center justify-between gap-2">
-                      {statusBadge(i)}
-                      <div className="-mr-2 flex">{actions(i)}</div>
-                    </div>
+                    <div>{statusBadge(i)}</div>
+                    {/* Ações numa linha própria: ao lado do status não cabem em tela estreita. */}
+                    <div className="-ml-3 flex flex-wrap">{actions(i)}</div>
                   </li>
                 ))}
               </ul>
