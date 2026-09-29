@@ -73,11 +73,14 @@ def _valid_iso_date(value: str) -> bool:
     return True
 
 
-def next_question(intent: FinancialIntent, raw_message: str = "") -> Question | None:
+def next_question(
+    intent: FinancialIntent, raw_message: str = "", *, confirmed_total: float | None = None
+) -> Question | None:
     """A próxima pergunta a fazer, ou ``None`` se nada disto falta.
 
     ``raw_message`` é o texto recebido agora (a mensagem ou a resposta), usado
-    só para detectar datas vagas.
+    só para detectar datas vagas. ``confirmed_total`` é o total que o usuário
+    já confirmou: a pergunta de valor alto não se repete para ele.
     """
     # Zero conta como ausente: sem valor na mensagem, o LLM costuma preencher
     # `amount: 0` em vez de nulo. Antes o zero passava, a API recusava o
@@ -98,11 +101,19 @@ def next_question(intent: FinancialIntent, raw_message: str = "") -> Question | 
     if recurrence is not None:
         return recurrence
 
-    if intent.amount > MAX_REASONABLE_AMOUNT:
-        return Question(
-            FIELD_CONFIRM,
-            f"O valor de {format_brl(intent.amount)} é alto. Confirma que está correto?",
-        )
+    # No parcelado vale o total da compra, que é o que a API grava: "3000 por
+    # parcela, 60 vezes" são R$ 180 mil, e antes passava sem pergunta.
+    total = total_amount(intent)
+    already_confirmed = confirmed_total is not None and abs(confirmed_total - total) < 0.005
+    if total > MAX_REASONABLE_AMOUNT and not already_confirmed:
+        if total != intent.amount:
+            what = (
+                f"O valor total de {format_brl(total)} "
+                f"({intent.installments}x de {format_brl(intent.amount)})"
+            )
+        else:
+            what = f"O valor de {format_brl(total)}"
+        return Question(FIELD_CONFIRM, f"{what} é alto. Confirma que está correto?")
 
     if intent.confidence < settings.confidence_threshold:
         return Question(

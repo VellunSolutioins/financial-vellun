@@ -42,6 +42,7 @@ from .confirmation_rules import (
     Question,
     format_brl,
     next_question,
+    total_amount,
 )
 from .contact_service import contact_service
 from .conversation_manager import ConversationState, conversation_manager
@@ -250,6 +251,7 @@ class MessageProcessor:
             return await self._respond(phone, DAILY_LIMIT_MESSAGE)
 
         original_message: str | None = None
+        confirmed_amount: float | None = None
         if pre_extracted is not None:
             # Comprovante: a visão já extraiu o intent no consumer de entrada.
             intent = FinancialIntent(**pre_extracted)
@@ -293,6 +295,13 @@ class MessageProcessor:
                     intent = result.intent
                     original_message = state.original_message
                     reference = pending_reference
+                    # O "sim" a uma confirmação vale para o total que ela mostrou;
+                    # se uma resposta seguinte mudar o valor, pergunta de novo.
+                    confirmed_amount = (
+                        total_amount(intent)
+                        if state.awaiting_field == FIELD_CONFIRM
+                        else state.confirmed_amount
+                    )
             else:
                 context["today"] = reference.isoformat()
                 intent = await intent_classifier.classify(message, context)
@@ -310,6 +319,7 @@ class MessageProcessor:
             contact=contact,
             original_message=original_message,
             reference_date=reference,
+            confirmed_amount=confirmed_amount,
         )
 
     async def _ask_again(
@@ -334,6 +344,7 @@ class MessageProcessor:
             original_message=state.original_message,
             reference_date=state.reference_date,
             attempts=attempts,
+            confirmed_amount=state.confirmed_amount,
         )
         return await self._respond(phone, response_prefix + (result.retry_question or ""))
 
@@ -361,6 +372,7 @@ class MessageProcessor:
         contact: dict | None = None,
         original_message: str | None = None,
         reference_date: date | None = None,
+        confirmed_amount: float | None = None,
     ) -> str:
         """Trata um ``FinancialIntent`` já extraído (texto, áudio ou imagem).
 
@@ -372,6 +384,7 @@ class MessageProcessor:
         ``raw_message`` é o texto recebido agora; ``original_message``, a
         mensagem que abriu o lançamento, quando ele veio sendo completado por
         respostas. ``reference_date`` é o dia dessa mensagem.
+        ``confirmed_amount`` é o total que o usuário já confirmou com "sim".
         """
         original = original_message or raw_message
         reference = reference_date or today_local()
@@ -409,7 +422,7 @@ class MessageProcessor:
         if force_confirm:
             question = Question(FIELD_CONFIRM, confirm_question or "Confirma o lançamento?")
         else:
-            question = next_question(intent, raw_message)
+            question = next_question(intent, raw_message, confirmed_total=confirmed_amount)
             if question is None:
                 # Conta/cartão e categoria dependem do catálogo do usuário.
                 question = await transaction_creator.pending_question(intent, user_id)
@@ -423,6 +436,7 @@ class MessageProcessor:
                 awaiting_field=question.field,
                 original_message=original,
                 reference_date=reference.isoformat(),
+                confirmed_amount=confirmed_amount,
             )
             await audit_service.log_extraction(
                 user_id=user_id,

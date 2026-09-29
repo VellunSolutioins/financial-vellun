@@ -130,6 +130,39 @@ def test_valor_alto_e_baixa_confianca_pedem_confirmacao():
     assert campo(confidence=0.3) == FIELD_CONFIRM
 
 
+def test_parcelado_alto_pelo_total_pede_confirmacao():
+    # "3000 por parcela, 60 vezes": a parcela está abaixo do limite, o total não.
+    question = next_question(
+        intent(
+            amount=3000,
+            recurrence_type=RecurrenceTypeEnum.parcelado,
+            installments=60,
+            amount_basis=AmountBasisEnum.installment,
+        )
+    )
+    assert question is not None and question.field == FIELD_CONFIRM
+    assert question.text == (
+        "O valor total de R$ 180.000,00 (60x de R$ 3.000,00) é alto. Confirma que está correto?"
+    )
+
+
+def test_parcelado_com_total_abaixo_do_limite_nao_pede_confirmacao():
+    assert (
+        campo(
+            amount=3000,
+            recurrence_type=RecurrenceTypeEnum.parcelado,
+            installments=60,
+            amount_basis=AmountBasisEnum.total,
+        )
+        is None
+    )
+
+
+def test_valor_alto_avulso_mantem_a_mensagem():
+    question = next_question(intent(amount=150_000))
+    assert question.text == "O valor de R$ 150.000,00 é alto. Confirma que está correto?"
+
+
 def test_total_do_parcelado_pela_parcela():
     parcela = intent(
         amount=300,

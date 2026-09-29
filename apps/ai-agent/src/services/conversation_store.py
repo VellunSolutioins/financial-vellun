@@ -61,6 +61,10 @@ class ConversationState:
     reference_date: str | None = None
     # Respostas seguidas que não responderam à pergunta.
     attempts: int = 0
+    # Total que o usuário já confirmou com "sim" (valor alto). Sem isso, o "sim"
+    # voltava a cair na mesma pergunta. Chave opcional: um estado v3 gravado
+    # antes dela é lido sem ela, e no pior caso a pergunta se repete uma vez.
+    confirmed_amount: float | None = None
 
     def belongs_to(self, contact: dict) -> bool:
         """``True`` se o vínculo atual do número é o mesmo da pergunta pendente."""
@@ -88,6 +92,7 @@ class ConversationState:
                 "originalMessage": self.original_message,
                 "referenceDate": self.reference_date,
                 "attempts": self.attempts,
+                "confirmedAmount": self.confirmed_amount,
             },
             ensure_ascii=False,
         )
@@ -118,6 +123,7 @@ class ConversationState:
 
         link_version = data.get("linkVersion")
         attempts = data.get("attempts")
+        confirmed = data.get("confirmedAmount")
         return ConversationState(
             pending_intent=intent,
             awaiting_confirmation=bool(data.get("awaitingConfirmation")),
@@ -129,6 +135,11 @@ class ConversationState:
             original_message=data.get("originalMessage"),
             reference_date=data.get("referenceDate"),
             attempts=attempts if isinstance(attempts, int) else 0,
+            confirmed_amount=(
+                float(confirmed)
+                if isinstance(confirmed, (int, float)) and not isinstance(confirmed, bool)
+                else None
+            ),
         )
 
     def is_expired(self, ttl_seconds: int) -> bool:

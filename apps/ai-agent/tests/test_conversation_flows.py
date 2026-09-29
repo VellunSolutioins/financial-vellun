@@ -191,6 +191,29 @@ async def test_negativa_cancela_o_pendente(mundo):
     assert mundo.enviados == []
 
 
+async def test_sim_a_valor_alto_grava_em_vez_de_perguntar_de_novo(mundo):
+    # Antes o "sim" voltava a cair na mesma pergunta, sem fim: nada acima de
+    # R$ 100 mil entrava pelo WhatsApp.
+    mundo.llm["paguei 150000"] = despesa(amount=150_000)
+
+    assert "alto" in await mundo.enviar("paguei 150000")
+    resposta = await mundo.enviar("sim")
+
+    assert mundo.payload["amount"] == 150_000
+    assert resposta.startswith("Lançamento criado!")
+
+
+async def test_valor_alto_confirmado_nao_volta_a_ser_perguntado_depois_da_categoria(mundo):
+    mundo.llm["paguei 150000"] = despesa(amount=150_000, category_name=None)
+
+    assert "alto" in await mundo.enviar("paguei 150000")
+    assert (await mundo.enviar("sim")).startswith("Em qual categoria")
+    await mundo.enviar("mercado")
+
+    assert mundo.payload["amount"] == 150_000
+    assert mundo.payload["categoryId"] == "cat-mercado"
+
+
 async def test_resposta_que_nao_responde_repete_a_pergunta_e_depois_desiste(mundo):
     mundo.llm["comprei parcelado"] = despesa(recurrence_type=RecurrenceTypeEnum.parcelado)
 
@@ -325,6 +348,25 @@ async def test_llm_trocando_total_por_parcela_e_corrigido_e_outros_vira_pergunta
     assert mundo.payload["installments"] == 2
     assert mundo.payload["categoryId"] == "cat-mercado"
     assert "2x de R$ 18,32 (total R$ 36,65)" in resposta
+
+
+async def test_parcelado_alto_pelo_total_pergunta_e_o_sim_grava_o_total(mundo):
+    mundo.llm["carro 3000 por parcela em 60x"] = despesa(
+        amount=3000,
+        description="carro",
+        recurrence_type=RecurrenceTypeEnum.parcelado,
+        installments=60,
+        amount_basis=AmountBasisEnum.installment,
+    )
+
+    pergunta = await mundo.enviar("carro 3000 por parcela em 60x")
+    assert pergunta.startswith("O valor total de R$ 180.000,00 (60x de R$ 3.000,00) é alto")
+    assert mundo.enviados == []
+
+    await mundo.enviar("sim")
+
+    assert mundo.payload["amount"] == 180_000
+    assert mundo.payload["installments"] == 60
 
 
 async def test_parcelado_sem_parcelas_pergunta_parcelas_e_se_o_valor_e_total(mundo):
