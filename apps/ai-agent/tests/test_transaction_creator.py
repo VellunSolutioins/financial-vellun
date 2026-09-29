@@ -298,12 +298,13 @@ async def test_parcelado_com_valor_da_parcela_envia_o_total(catalogo, api):
     assert api[0]["installments"] == 10
     assert resultado["message"] == (
         "Lançamento criado! Despesa parcelada em 10x de R$ 300,00 (total R$ 3.000,00) "
-        "em Mercado, no cartão Nubank. 1ª parcela em 20/09/2026."
+        # No cartão, a cobrança da 1ª parcela depende da fatura: a data é da compra.
+        "em Mercado, no cartão Nubank. Compra em 20/09/2026."
     )
 
 
 async def test_parcelado_com_valor_total_envia_como_veio(catalogo, api):
-    await TransactionCreator().create_from_intent(
+    resultado = await TransactionCreator().create_from_intent(
         intent(
             amount=3000,
             recurrence_type=RecurrenceTypeEnum.parcelado,
@@ -314,6 +315,9 @@ async def test_parcelado_com_valor_total_envia_como_veio(catalogo, api):
         "tv 3000 em 10x",
     )
     assert api[0]["amount"] == 3000
+    # Em conta comum, a série começa na data do lançamento.
+    assert "na conta" in resultado["message"]
+    assert resultado["message"].endswith("1ª parcela em 20/09/2026.")
 
 
 async def test_fixo_envia_frequencia_e_repeticoes(catalogo, api):
