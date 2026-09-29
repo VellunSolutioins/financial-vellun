@@ -6,10 +6,16 @@ funcionando mesmo sem `OPENAI_API_KEY`.
 """
 
 import logging
+import re
 import time
 from datetime import date
 
-from ..schemas.financial_intent import FinancialIntent, IntentType, TransactionTypeEnum
+from ..schemas.financial_intent import (
+    FinancialIntent,
+    IntentType,
+    RecurrenceTypeEnum,
+    TransactionTypeEnum,
+)
 from .clock import today_local
 from .llm.base import LlmProvider
 from .llm.factory import create_llm_provider
@@ -138,7 +144,7 @@ class IntentClassifier:
                         intent.intent,
                     )
                     return self._classify_with_rules(message, context)
-                return self._finalize(intent)
+                return self._finalize(self._reconcile_with_rules(message, intent))
             except Exception:  # noqa: BLE001 — falha do LLM aciona o fallback
                 metrics.incr("llm_fallback")
                 logger.warning("LLM falhou; usando fallback de regras", exc_info=True)
@@ -283,6 +289,63 @@ class IntentClassifier:
             )
 
         return intent
+
+    def _reconcile_with_rules(self, message: str, intent: FinancialIntent) -> FinancialIntent:
+        """Confere a extração do LLM com o que a mensagem diz literalmente.
+
+        O LLM já trocou "gasto de 36,65 em 2x" (total) por "2x de 36,65"
+        (parcela) e gravou o dobro. Onde a frase tem sinal inequívoco — "em
+        2x", "V em Nx", "Nx de V" —, vale a regra; sem sinal, fica o LLM.
+        """
+        if intent.intent != IntentType.create_transaction:
+            return intent
+
+        hint = detect_recurrence(message)
+        if hint.recurrence_type == RecurrenceTypeEnum.parcelado and hint.installments:
+            if intent.recurrence_type != RecurrenceTypeEnum.parcelado:
+                self._override(intent, "recurrence_type", RecurrenceTypeEnum.parcelado)
+                intent.recurrence_frequency = None
+                intent.occurrences = None
+            if intent.installments != hint.installments:
+                self._override(intent, "installments", hint.installments)
+
+        if intent.recurrence_type == RecurrenceTypeEnum.parcelado:
+            if hint.basis_ambiguous:
+                # Os dois formatos na frase: pergunta em vez de confiar no LLM.
+                if intent.amount_basis is not None:
+                    self._override(intent, "amount_basis", None)
+            elif hint.amount_basis is not None and intent.amount_basis != hint.amount_basis:
+                self._override(intent, "amount_basis", hint.amount_basis)
+
+            # O prompt pede para não multiplicar nem dividir; se o LLM fez a
+            # conta, volta o número que o usuário digitou.
+            typed = parse_amount(message.lower())
+            count = intent.installments
+            if typed and count and intent.amount and intent.amount != typed:
+                if any(
+                    abs(intent.amount - candidate) < 0.011
+                    for candidate in (typed * count, typed / count)
+                ):
+                    self._override(intent, "amount", typed)
+
+        # "Outros" é o curinga do LLM quando nada se encaixa; o combinado é
+        # perguntar, a menos que o próprio usuário tenha dito "outros".
+        if (
+            intent.category_name
+            and normalize(intent.category_name) == "outros"
+            and not re.search(r"\boutros?\b", normalize(message))
+        ):
+            self._override(intent, "category_name", None)
+
+        return intent
+
+    @staticmethod
+    def _override(intent: FinancialIntent, field: str, value: object) -> None:
+        logger.info(
+            "Regras sobrescreveram %s do LLM: %r -> %r", field, getattr(intent, field), value
+        )
+        metrics.incr(f"llm_rules_override_{field}")
+        setattr(intent, field, value)
 
     def _should_prefer_rule_transaction(self, message: str, intent: FinancialIntent) -> bool:
         text = message.lower().strip()

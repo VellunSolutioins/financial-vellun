@@ -161,11 +161,38 @@ def test_nao_confunde_frases_com_negativa(texto):
         ("3000 em 10x de 300", RecurrenceTypeEnum.parcelado, 10, None),
         ("paguei 1x", RecurrenceTypeEnum.avulso, None, None),
         ("gastei 50 no mercado", RecurrenceTypeEnum.avulso, None, None),
+        # Caso de produção: "gasto de" antes do valor não o torna valor da parcela.
+        (
+            "Adicionar gasto de 36,65 em 2x no cartão inter",
+            RecurrenceTypeEnum.parcelado,
+            2,
+            AmountBasisEnum.total,
+        ),
+        (
+            "Adicionar gasto 266,40 em 2x no cartão XP com roupas",
+            RecurrenceTypeEnum.parcelado,
+            2,
+            AmountBasisEnum.total,
+        ),
+        ("gasto em 2x de 36,65", RecurrenceTypeEnum.parcelado, 2, AmountBasisEnum.installment),
+        ("36,65 cada em 2x", RecurrenceTypeEnum.parcelado, 2, AmountBasisEnum.installment),
+        (
+            "tv 300 por parcela em 10x",
+            RecurrenceTypeEnum.parcelado,
+            10,
+            AmountBasisEnum.installment,
+        ),
     ],
 )
 def test_detect_recurrence_parcelado(texto, tipo, parcelas, base):
     hint = p.detect_recurrence(texto)
     assert (hint.recurrence_type, hint.installments, hint.amount_basis) == (tipo, parcelas, base)
+
+
+def test_detect_recurrence_distingue_ambiguo_de_sem_sinal():
+    assert p.detect_recurrence("3000 em 10x de 300").basis_ambiguous is True
+    assert p.detect_recurrence("parcelei a geladeira").basis_ambiguous is False
+    assert p.detect_recurrence("tv 3000 em 10x").basis_ambiguous is False
 
 
 def test_detect_recurrence_fixo():

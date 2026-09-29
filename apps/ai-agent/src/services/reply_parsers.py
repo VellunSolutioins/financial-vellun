@@ -268,10 +268,16 @@ class RecurrenceHint:
     amount_basis: AmountBasisEnum | None = None
     frequency: RecurrenceFrequencyEnum | None = None
     occurrences: int | None = None
+    #: A frase traz os dois formatos ("3000 em 10x de 300"): o valor pode ser
+    #: qualquer um. Diferente de ``amount_basis`` nulo por falta de sinal.
+    basis_ambiguous: bool = False
 
 
 _INSTALLMENTS_RE = re.compile(r"\b(\d+)\s*x\b|\bem\s+(\d+)\s+(?:vezes|parcelas)\b")
-_INSTALLMENT_VALUE_RE = re.compile(r"\b\d+\s*x\s+de\b|\bparcelas?\s+de\b")
+# "10x de 300", "parcelas de 300", "300 cada", "300 por parcela", "300 a parcela".
+_INSTALLMENT_VALUE_RE = re.compile(
+    r"\b\d+\s*x\s+de\b|\bparcelas?\s+de\b|\d\s*(?:reais\s+)?(?:cada|por\s+parcela|a\s+parcela)\b"
+)
 # Um valor seguido de "em Nx" / "parcelado em N": "3000 em 10x", "3000 reais parcelado em 10".
 _TOTAL_VALUE_RE = re.compile(
     r"\d(?:[\d.,]*\d)?\s*(?:reais\s+)?(?:parcelad[oa]\s+)?em\s+\d+\s*(?:x|vezes|parcelas)?\b"
@@ -303,6 +309,7 @@ def detect_recurrence(text: str) -> RecurrenceHint:
             recurrence_type=RecurrenceTypeEnum.parcelado,
             installments=count if count and count > 1 else None,
             amount_basis=basis,
+            basis_ambiguous=per_installment and total,
         )
 
     if any(word in normalized for word in _FIXED_WORDS):
