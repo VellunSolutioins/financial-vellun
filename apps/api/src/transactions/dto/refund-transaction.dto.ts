@@ -18,7 +18,8 @@ export class RefundTransactionDto {
   amount?: number;
 
   @ApiProperty({
-    description: 'YYYY-MM-DD. No cartão, o estorno entra na fatura aberta nesta data.',
+    description:
+      'YYYY-MM-DD; não pode ser futura. No cartão, o estorno entra na fatura aberta nesta data.',
   })
   @IsDateString()
   date!: string;

@@ -16,7 +16,7 @@ import {
   todaySaoPaulo,
   startOfMonthUtc,
   endOfMonthUtc,
-  calendarDayFromUtcDate,
+  isFutureDay,
 } from '../common/date.util';
 
 import { healthFromPercentage, incomeHealthFromPercentage } from './card-health';
@@ -317,7 +317,7 @@ export class CreditCardsService {
       throw new ConflictException('Este cartão já está configurado');
     }
     const trackingStart = parseDateOnly(dto.invoiceTrackingStart.slice(0, 10));
-    if (compareCalendarDays(calendarDayFromUtcDate(trackingStart), todaySaoPaulo()) > 0) {
+    if (isFutureDay(trackingStart)) {
       throw new BadRequestException('O início do controle não pode ser uma data futura');
     }
 

@@ -106,6 +106,14 @@ export function compareCalendarDays(a: CalendarDay, b: CalendarDay): number {
   return Date.UTC(a.year, a.monthIndex, a.day, 12) - Date.UTC(b.year, b.monthIndex, b.day, 12);
 }
 
+/**
+ * `true` se a coluna `@db.Date` cai depois de hoje em São Paulo. Pagamento,
+ * estorno e início do controle do cartão registram algo que já aconteceu.
+ */
+export function isFutureDay(date: Date): boolean {
+  return compareCalendarDays(calendarDayFromUtcDate(date), todaySaoPaulo()) > 0;
+}
+
 /** O mais recente entre dois dias-calendário. */
 export function maxCalendarDay(a: CalendarDay, b: CalendarDay): CalendarDay {
   return compareCalendarDays(a, b) >= 0 ? a : b;
