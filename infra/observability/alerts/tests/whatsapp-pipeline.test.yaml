@@ -230,3 +230,70 @@ tests:
       - eval_time: 15m
         alertname: TaxaDeErroDeProcessamentoAlta
         exp_alerts: []
+
+  # ── Entrega ao usuário ───────────────────────────────────────────────────
+  - interval: 30s
+    name: envio recusado pelo WhatsApp dispara o alerta
+    input_series:
+      - series: 'vellun_agent_whatsapp_send_failed_total{job="ai-agent-worker"}'
+        values: '0x4 1x20'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: EnvioAoWhatsAppFalhando
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: EnvioAoWhatsAppFalhando
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: ai-agent-worker
+              job: ai-agent-worker
+            exp_annotations:
+              summary: 'Respostas não estão chegando ao WhatsApp'
+              description: >-
+                1 tentativa(s) de envio recusada(s) nos últimos 10 minutos. O lançamento pode ter sido criado sem o usuário saber.
+              dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
+              runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#webhook-deu-202-mas-o-usuário-não-recebeu-resposta'
+
+  - interval: 30s
+    name: envio sem falha não alerta
+    input_series:
+      - series: 'vellun_agent_whatsapp_send_failed_total{job="ai-agent-worker"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: EnvioAoWhatsAppFalhando
+        exp_alerts: []
+
+  - interval: 30s
+    name: aviso de falha enviado ao usuário dispara o alerta
+    input_series:
+      - series: 'vellun_agent_dlq_user_notified_total{job="ai-agent-worker"}'
+        values: '0x4 1x40'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: UsuarioAvisadoDeFalha
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: UsuarioAvisadoDeFalha
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: ai-agent-worker
+              job: ai-agent-worker
+            exp_annotations:
+              summary: 'Usuário recebeu aviso de falha no processamento'
+              description: >-
+                1 aviso(s) de falha enviado(s) a usuários nos últimos 15 minutos. Confira a mensagem original em /ops/falhas antes de reprocessar.
+              dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
+              runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#mensagens-na-dlq'
+
+  - interval: 30s
+    name: nenhum aviso de falha não alerta
+    input_series:
+      - series: 'vellun_agent_dlq_user_notified_total{job="ai-agent-worker"}'
+        values: '0x40'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: UsuarioAvisadoDeFalha
+        exp_alerts: []

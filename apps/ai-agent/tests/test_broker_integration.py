@@ -13,20 +13,18 @@ o comportamento real do Redis (agrupamento, locks e estado de conversa).
 from __future__ import annotations
 
 import asyncio
-import os
 
 import pytest
 
 from src.messaging.contracts import InboundMessageV1
 from src.messaging.names import EXCHANGE_MAIN, dlq_queue, retry_queue
 
+from tests.integration_env import RABBITMQ_URL, REDIS_URL, unavailable
+
 pytestmark = pytest.mark.integration
 
 QUEUE = "test.whatsapp.inbound.v1"
 ROUTING_KEY = "test.inbound"
-
-RABBITMQ_URL = os.getenv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
-REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 
 @pytest.fixture
@@ -37,7 +35,7 @@ async def connection():
     try:
         await conn.connect(max_attempts=1, base_delay=0.1)
     except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"RabbitMQ indisponível em {RABBITMQ_URL}: {exc}")
+        unavailable("RabbitMQ", exc)
 
     yield conn
 
@@ -77,7 +75,7 @@ async def redis_client():
     try:
         await client.ping()
     except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"Redis indisponível em {REDIS_URL}: {exc}")
+        unavailable("Redis", exc)
     yield client
     await client.aclose()
 
@@ -348,6 +346,31 @@ async def test_lock_de_processamento_e_marcador_de_job_no_redis(redis_client):
     assert await store.exists(marker) is True
     await store.forget(marker)
     assert await store.exists(marker) is False
+
+
+async def test_resposta_guardada_do_job_no_redis(redis_client):
+    """`put`/`get` guardam a resposta calculada (`job:reply:{jobId}`).
+
+    É o que permite o retry de uma entrega reenviar o texto em vez de refazer
+    o job — e só tinha sido exercitado pelo dublê em memória.
+    """
+    from src.consumers.processing_consumer import reply_key
+    from src.services.distributed_state import RedisStateStore
+    from src.services.redis_client import RedisProvider
+
+    store = RedisStateStore(RedisProvider(REDIS_URL))
+    chave = reply_key("test-job-reply")
+    await store.forget(chave)
+
+    assert await store.get(chave) is None
+    texto = "Lançamento criado! Despesa de R$ 47,50 em Mercado."
+    await store.put(chave, texto, 2)
+
+    assert await store.get(chave) == texto  # acento e sinais chegam intactos
+    assert 0 < await redis_client.ttl(chave) <= 2
+
+    await asyncio.sleep(2.2)
+    assert await store.get(chave) is None
 
 
 async def test_lock_so_e_liberado_ou_renovado_pelo_dono_no_redis(redis_client):

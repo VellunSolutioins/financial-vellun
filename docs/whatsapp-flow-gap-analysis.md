@@ -217,11 +217,24 @@ criado. Reaproveitar os fixtures de `tests/conftest.py`.
 
 ### Pendências
 
+> **Status (29/09/2026):** as duas pendências abaixo foram fechadas. Fica em aberto
+> o G5 (Alloy no Railway), que não é verificável pelo código: conferir no painel se
+> o serviço `alloy` existe e se `LOKI_PUSH_URL` está preenchida na API e no agente.
+
 - **Integração:** `pytest -m integration` não rodou nesta implementação (RabbitMQ e Redis
   fora do ar). Os métodos novos `put`/`get` do `RedisStateStore` só foram exercitados via
   dublê em memória.
+  - _Resolvido:_ a suíte rodava pulando: desde que o compose exige credenciais, as
+    fixtures usavam `guest:guest` e Redis sem senha, e "11 skipped" parecia verde. As URLs
+    agora vêm do `.env` (`tests/integration_env.py`), `put`/`get` ganharam teste, e
+    `test_pipeline_integration.py` percorre webhook → RabbitMQ → Redis → resposta e
+    entrega recusada → DLQ com a infraestrutura real. O job `agent-integration` do CI
+    roda a suíte com `INTEGRATION_REQUIRED=1`, que transforma pulo em falha.
 - **Alertas:** `whatsapp_send_failed` e `dlq_user_notified` ainda não têm regra em
   `infra/observability/alerts/`.
+  - _Resolvido:_ `EnvioAoWhatsAppFalhando` e `UsuarioAvisadoDeFalha`, com testes em
+    `alerts/tests/whatsapp-pipeline.test.yaml`. Carregar no Grafana Cloud com
+    `mimirtool rules load` (ver o cabeçalho de `whatsapp-pipeline.yaml`).
 
 ### Fora de escopo aqui
 

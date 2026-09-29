@@ -248,3 +248,44 @@ groups:
             Normalmente dominado pela latência do LLM.
           dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
           runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#backlog-crescendo'
+
+  # ── Entrega ao usuário ───────────────────────────────────────────────────
+  - name: whatsapp-entrega
+    interval: 30s
+    rules:
+      - alert: EnvioAoWhatsAppFalhando
+        # O sintoma do incidente original: o lançamento é criado e a resposta não
+        # chega. Até a correção, o envio falhava em silêncio e este contador era
+        # estruturalmente zero; agora cada tentativa recusada pela Graph API (token
+        # expirado, número fora da janela de 24h, rede) conta. Sem `for`: cada
+        # incremento é um usuário esperando resposta agora.
+        expr: increase(vellun_agent_whatsapp_send_failed_total[10m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          service: ai-agent-worker
+        annotations:
+          summary: 'Respostas não estão chegando ao WhatsApp'
+          description: >-
+            {{ $value }} tentativa(s) de envio recusada(s) nos últimos 10 minutos.
+            O lançamento pode ter sido criado sem o usuário saber.
+          dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
+          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#webhook-deu-202-mas-o-usuário-não-recebeu-resposta'
+
+      - alert: UsuarioAvisadoDeFalha
+        # O aviso de "tive um problema para processar" sai quando um job esgota as
+        # tentativas. É a rede de segurança contra o silêncio — e cada disparo é
+        # uma mensagem de cliente que não virou lançamento. `NovaEntradaEmDLQ`
+        # conta falhas; este conta clientes que ficaram sabendo de uma.
+        expr: increase(vellun_agent_dlq_user_notified_total[15m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          service: ai-agent-worker
+        annotations:
+          summary: 'Usuário recebeu aviso de falha no processamento'
+          description: >-
+            {{ $value }} aviso(s) de falha enviado(s) a usuários nos últimos 15
+            minutos. Confira a mensagem original em /ops/falhas antes de reprocessar.
+          dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
+          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#mensagens-na-dlq'
