@@ -27,6 +27,7 @@ from src.schemas.financial_intent import (
 )
 from src.services import transaction_creator as creator_module
 from src.services.conversation_manager import conversation_manager
+from src.services.intent_classifier import IntentClassifier
 from src.services.transaction_creator import display_name
 
 PHONE = "+5541999990000"
@@ -292,6 +293,38 @@ async def test_parcelado_completo_na_mensagem_cria_direto_com_o_total(mundo):
     assert mundo.payload["amount"] == 3000
     assert mundo.payload["accountId"] == "card-acc"
     assert "10x de R$ 300,00 (total R$ 3.000,00)" in resposta
+
+
+async def test_llm_trocando_total_por_parcela_e_corrigido_e_outros_vira_pergunta(
+    mundo, monkeypatch
+):
+    # Caso de produção: "gasto de 36,65 em 2x" gravou 2x de 36,65 (total 73,30),
+    # em "Outros" sem perguntar. Aqui o classificador é o real, só o LLM é falso.
+    class Provider:
+        supports_vision = False
+
+        async def extract_intent(self, message, context):
+            return mundo.llm[message].model_copy(deep=True)
+
+    monkeypatch.setattr(mp, "intent_classifier", IntentClassifier(provider=Provider()))
+    mensagem = "Adicionar gasto de 36,65 em 2x no cartão nubank"
+    mundo.llm[mensagem] = despesa(
+        amount=36.65,
+        description="gasto",
+        category_name="Outros",
+        account_name="Nubank (cartão de crédito)",
+        recurrence_type=RecurrenceTypeEnum.parcelado,
+        installments=2,
+        amount_basis=AmountBasisEnum.installment,
+    )
+
+    assert (await mundo.enviar(mensagem)).startswith("Em qual categoria")
+    resposta = await mundo.enviar("mercado")
+
+    assert mundo.payload["amount"] == 36.65
+    assert mundo.payload["installments"] == 2
+    assert mundo.payload["categoryId"] == "cat-mercado"
+    assert "2x de R$ 18,32 (total R$ 36,65)" in resposta
 
 
 async def test_parcelado_sem_parcelas_pergunta_parcelas_e_se_o_valor_e_total(mundo):

@@ -84,6 +84,9 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o-mini"
     openai_vision_model: str = ""  # vazio → usa openai_model (gpt-4o-mini é multimodal)
     openai_transcription_model: str = "whisper-1"
+    # Extração é leitura, não criação: com o default da API (1.0), duas frases
+    # iguais já saíram com interpretações diferentes do parcelamento.
+    openai_temperature: float = 0.0
     # Timeout e tentativas **explícitos**: o SDK da OpenAI usa 600s e 2 retries
     # por padrão. Dez minutos preso numa chamada segura um slot de concorrência
     # do processamento por dez minutos — e o lock do telefone junto. O usuário

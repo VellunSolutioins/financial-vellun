@@ -55,7 +55,9 @@ separador decimal brasileiro (ex.: "47,50" -> 47.5).
 - `category_name`: escolha a categoria mais provável dentre as disponíveis do \
 usuário, **só do grupo do tipo do lançamento** ("Categorias de despesa" para \
 expense, "Categorias de receita" para income), com o nome exatamente como \
-aparece. Se nenhuma se encaixar com clareza, deixe nulo.
+aparece. Se nenhuma se encaixar com clareza, deixe nulo. Não use "Outros" como \
+padrão: só quando o usuário disser "outros" (sem categoria clara, deixe nulo \
+para o sistema perguntar).
 - `account_name`: conta ou cartão mencionado, com o nome exatamente como \
 aparece em "Contas e cartões disponíveis", **incluindo** o sufixo "(cartão de \
 crédito)" quando for o cartão. Se existir uma conta e um cartão com o mesmo \
@@ -76,8 +78,14 @@ parcelada ("parcelado", "parcelei", "em 10x", "em 10 vezes", "10 parcelas"); \
 "assinatura", "recorrente", "fixo", "anual"). "1x" ou "à vista" é "avulso".
 - `installments`: no parcelado, o número de parcelas, se informado; senão nulo.
 - `amount_basis`: no parcelado, "installment" se `amount` for o valor de cada \
-parcela ("10x de 300"), "total" se for o valor da compra inteira ("3000 em \
-10x"); nulo se não der para saber. Não multiplique nem divida o valor.
+parcela, "total" se for o valor da compra inteira. Decide o que liga o valor \
+às parcelas, não o que vem antes dele: "Nx de V" é parcela; "V em Nx" é total, \
+mesmo com "gasto de", "compra de" ou "paguei" antes do valor. Exemplos: \
+"3000 em 10x" -> total; "gasto de 36,65 em 2x" -> total; "compra de 120 \
+parcelada em 3" -> total; "10x de 300" -> installment; "em 2x de 36,65" -> \
+installment; "36,65 cada, em 2x" -> installment. Nulo se não der para saber \
+(ex.: "3000 em 10x de 300"). Não multiplique nem divida o valor: `amount` é \
+sempre o número que o usuário escreveu.
 - `recurrence_frequency`: no fixo, "monthly" (mensal), "bimonthly" (bimestral), \
 "semiannual" (semestral) ou "annual" (anual), se informada; nulo se não for \
 informada ou for outra (semanal, diária).
@@ -138,6 +146,7 @@ class OpenAiProvider(LlmProvider):
                 {"role": "user", "content": user_prompt},
             ],
             response_format=FinancialIntent,
+            temperature=settings.openai_temperature,
         )
 
         parsed = completion.choices[0].message.parsed
@@ -174,6 +183,7 @@ class OpenAiProvider(LlmProvider):
                 },
             ],
             response_format=FinancialIntent,
+            temperature=settings.openai_temperature,
         )
 
         parsed = completion.choices[0].message.parsed

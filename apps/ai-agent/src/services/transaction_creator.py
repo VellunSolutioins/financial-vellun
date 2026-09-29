@@ -205,10 +205,12 @@ class TransactionCreator:
         if payload.get("recurrenceType") == "parcelado":
             count = payload["installments"]
             each = int(round(total * 100) // count) / 100
+            # No cartão, a data é a da compra: quando a 1ª parcela é cobrada
+            # depende do fechamento da fatura, que o agente não conhece.
+            start = f"Compra em {when}." if is_card(account) else f"1ª parcela em {when}."
             return (
                 f"Lançamento criado! {type_label} parcelada em {count}x de {format_brl(each)} "
-                f"(total {format_brl(total)}) em {category_label}, {destination}. "
-                f"1ª parcela em {when}."
+                f"(total {format_brl(total)}) em {category_label}, {destination}. {start}"
             )
         if payload.get("recurrenceType") == "fixo":
             frequency = FREQUENCY_LABELS[RecurrenceFrequencyEnum(payload["recurrenceFrequency"])]
