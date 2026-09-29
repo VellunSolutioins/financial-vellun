@@ -23,6 +23,13 @@ export class InstallmentsController {
     return this.installmentsService.findAll(user.id);
   }
 
+  /** Declarada antes de `:seriesId` para "summary" não virar um id. */
+  @Get('summary')
+  summary(@Req() req: Request) {
+    const user = req.user as any;
+    return this.installmentsService.summary(user.id);
+  }
+
   @Get(':seriesId')
   findOne(@Req() req: Request, @Param('seriesId') seriesId: string) {
     const user = req.user as any;
