@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/toast';
-import type { Installment } from '@/hooks/useInstallments';
+import { useInstallment, type Installment } from '@/hooks/useInstallments';
 import { apiClient } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 
@@ -42,29 +42,18 @@ export function DeleteInstallmentDialog({
   onDeleted,
 }: Props) {
   const toast = useToast();
-  const [fetched, setFetched] = useState<Installment | null>(null);
+  const { installment, failed } = useInstallment({ installment: given, seriesId, open });
   const [scope, setScope] = useState<Scope>(parcel ? 'single' : 'all');
   const [submitting, setSubmitting] = useState(false);
-  const installment = given ?? fetched;
 
   // Padrão: a parcela de origem; senão a compra inteira, ou as futuras se ela estiver travada.
   const defaultScope = (i: Installment | null | undefined): Scope =>
     parcel ? 'single' : i?.canDeleteAll === false ? 'future' : 'all';
 
   useEffect(() => {
-    if (!open) return;
-    setScope(defaultScope(given));
-    if (given || !seriesId) return;
-    setFetched(null);
-    apiClient
-      .get<Installment>(`/installments/${seriesId}`)
-      .then((i) => {
-        setFetched(i);
-        setScope(defaultScope(i));
-      })
-      .catch(() => toast.error('Erro ao carregar o parcelamento'));
+    if (open) setScope(defaultScope(installment));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, given, seriesId, parcel, toast]);
+  }, [open, installment, parcel]);
 
   const options: { value: Scope; label: string; hint: string; disabledReason: string | null }[] =
     installment
@@ -125,7 +114,9 @@ export function DeleteInstallmentDialog({
   return (
     <Dialog open={open} onClose={onClose} title="Excluir compra parcelada">
       {!installment ? (
-        <p className="py-6 text-center text-sm text-muted-foreground">Carregando...</p>
+        <p className="py-6 text-center text-sm text-muted-foreground">
+          {failed ? 'Erro ao carregar o parcelamento.' : 'Carregando...'}
+        </p>
       ) : (
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">

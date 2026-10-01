@@ -1,10 +1,25 @@
-import { Body, Controller, Delete, Get, Param, Patch, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiCookieAuth, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ActiveSubscriptionGuard } from '../billing/guards/active-subscription.guard';
 import { InstallmentsService } from './installments.service';
-import { DeleteInstallmentQueryDto, UpdateInstallmentDto } from './dto/update-installment.dto';
+import {
+  AdvanceInstallmentDto,
+  DeleteInstallmentQueryDto,
+  UpdateInstallmentDto,
+} from './dto/update-installment.dto';
 
 /**
  * Visão por compra dos lançamentos parcelados. Criar um parcelamento é criar
@@ -44,6 +59,17 @@ export class InstallmentsController {
   ) {
     const user = req.user as any;
     return this.installmentsService.update(user.id, seriesId, dto);
+  }
+
+  /** Traz as últimas parcelas para hoje (no cartão, para a fatura aberta). */
+  @Post(':seriesId/advance')
+  advance(
+    @Req() req: Request,
+    @Param('seriesId') seriesId: string,
+    @Body() dto: AdvanceInstallmentDto,
+  ) {
+    const user = req.user as any;
+    return this.installmentsService.advance(user.id, seriesId, dto);
   }
 
   @Delete(':seriesId')

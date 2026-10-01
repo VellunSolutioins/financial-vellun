@@ -44,6 +44,7 @@ type LedgerTransaction = {
   recurrenceType: string;
   installmentNumber: number | null;
   invoiceId: string | null;
+  advancedAt: Date | null;
 };
 
 type ConfiguredCard = CreditCard & {
@@ -77,6 +78,7 @@ export class CardLedgerService {
         recurrenceType: true,
         installmentNumber: true,
         invoiceId: true,
+        advancedAt: true,
         account: { select: { userId: true, creditCard: true } },
       },
     });
@@ -323,11 +325,13 @@ export class CardLedgerService {
 
       // Parcela i vai para o ciclo da compra + (i − 1), sem depender do clamp
       // da data da parcela. Série comprada antes do início do controle segue a
-      // data de cada parcela.
+      // data de cada parcela. Parcela adiantada também: foi trazida para a
+      // fatura aberta na data do adiantamento.
       const purchase = tx.seriesId ? purchaseDate.get(tx.seriesId) : undefined;
       const n = tx.installmentNumber ?? 1;
       if (
         tx.recurrenceType === 'parcelado' &&
+        !tx.advancedAt &&
         tx.seriesId &&
         n > 1 &&
         purchase &&

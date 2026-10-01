@@ -32,6 +32,7 @@ import { ResourceFilter } from '@/components/resources/ResourceFilter';
 import { DateBasisNote } from '@/components/resources/DateBasisNote';
 import { RefundForm } from '@/components/transactions/RefundForm';
 import { DeleteInstallmentDialog } from '@/components/transactions/DeleteInstallmentDialog';
+import { AdvanceInstallmentDialog } from '@/components/transactions/AdvanceInstallmentDialog';
 import { isEditableEntry, isInflow, signOf, typeLabel } from '@/lib/transaction-display';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ui/toast';
@@ -105,6 +106,11 @@ function EntryBadges({ tx }: { tx: Transaction }) {
           {tx.recurrenceType === 'parcelado' && tx.installmentTotal
             ? `${tx.installmentNumber}/${tx.installmentTotal}`
             : 'Fixo'}
+        </Badge>
+      )}
+      {tx.advancedAt && (
+        <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+          Adiantada
         </Badge>
       )}
     </>
@@ -184,6 +190,7 @@ function TransacoesContent() {
   const [refundingTx, setRefundingTx] = useState<Transaction | undefined>();
   // Parcela de compra parcelada: a exclusão pergunta o escopo (parcela, futuras, compra).
   const [deletingParcel, setDeletingParcel] = useState<Transaction | undefined>();
+  const [advancingSeriesId, setAdvancingSeriesId] = useState<string | undefined>();
   const selectedMonth = searchParams.get('month') ?? currentMonth();
   const { start: monthStart, end: monthEnd } = monthRange(selectedMonth);
   const { data: resources } = useFinancialResources();
@@ -543,6 +550,21 @@ function TransacoesContent() {
                     ? `Fixo · ${frequencyLabels[viewingTx.recurrenceFrequency ?? 'monthly']}`
                     : recurrenceLabels[viewingTx.recurrenceType],
               ],
+              ...(viewingTx.advancedAt
+                ? [
+                    [
+                      'Adiantada em',
+                      `${formatDateBR(viewingTx.advancedAt)}${
+                        viewingTx.advancedFromDate
+                          ? ` (prevista para ${formatDateBR(viewingTx.advancedFromDate)})`
+                          : ''
+                      }`,
+                    ],
+                  ]
+                : []),
+              ...(viewingTx.amountBeforeAdvance != null
+                ? [['Valor sem desconto', formatCurrency(Number(viewingTx.amountBeforeAdvance))]]
+                : []),
             ].map(([label, value]) => (
               <div
                 key={label}
@@ -560,7 +582,20 @@ function TransacoesContent() {
           </p>
         )}
         {viewingTx?.type === 'expense' && viewingTx.status === 'confirmed' && (
-          <div className="mt-4 flex justify-end">
+          <div className="mt-4 flex flex-wrap justify-end gap-2">
+            {viewingTx.recurrenceType === 'parcelado' && viewingTx.seriesId && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setAdvancingSeriesId(viewingTx.seriesId ?? undefined);
+                  setViewingTx(undefined);
+                }}
+              >
+                Adiantar parcelas
+              </Button>
+            )}
             <Button
               type="button"
               size="sm"
@@ -594,6 +629,17 @@ function TransacoesContent() {
           />
         )}
       </Dialog>
+
+      <AdvanceInstallmentDialog
+        seriesId={advancingSeriesId}
+        open={!!advancingSeriesId}
+        onClose={() => setAdvancingSeriesId(undefined)}
+        onAdvanced={() => {
+          setAdvancingSeriesId(undefined);
+          refetchTotals();
+          void refetch();
+        }}
+      />
 
       <DeleteInstallmentDialog
         seriesId={deletingParcel?.seriesId ?? undefined}

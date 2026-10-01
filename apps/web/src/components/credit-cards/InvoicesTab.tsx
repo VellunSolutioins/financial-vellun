@@ -298,6 +298,11 @@ export function InvoicesTab({ card, onChanged }: Props) {
                               Estorno
                             </Badge>
                           )}
+                          {item.advancedAt && (
+                            <Badge variant="outline" className="mr-1 px-1.5 py-0 text-[10px]">
+                              Adiantada
+                            </Badge>
+                          )}
                           {item.description}
                           {item.installmentTotal
                             ? ` (${item.installmentNumber}/${item.installmentTotal})`

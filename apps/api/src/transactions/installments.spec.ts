@@ -28,6 +28,8 @@ const parcel = (n: number, overrides: Partial<Parcel> = {}): Parcel =>
     categoryId: 'c1',
     invoiceId: null,
     cardPaymentId: null,
+    advancedAt: null,
+    invoice: null,
     account: { id: 'a1', name: 'Conta', type: 'checking' },
     category: { id: 'c1', name: 'Eletrônicos', color: null },
     ...overrides,
@@ -83,6 +85,38 @@ describe('groupInstallments', () => {
 
     expect(i.status).toBe('cancelled');
     expect(i.refundAnchorId).toBeNull();
+  });
+
+  it('expõe a parcela do mês, as que podem ser adiantadas e as já adiantadas', () => {
+    // 5ª parcela (dez) adiantada para hoje; a 3ª (15/out) é a do mês atual.
+    const parcels = [...fourParcels(), parcel(5, { advancedAt: TODAY, transactionDate: TODAY })];
+    const [i] = groupInstallments(parcels, TODAY, new Map());
+
+    expect(i).toMatchObject({ currentNumber: 3, upcomingNumber: 4, upcomingDate: day(10) });
+    expect(i.advanceable.map((p) => p.installmentNumber)).toEqual([4]);
+    expect(i.advancedCount).toBe(1);
+    expect(i.advanceBlockedReason).toBeNull();
+  });
+
+  it('parcela adiantada para antes da parcela 1 não vira a "primeira" nem a "próxima"', () => {
+    // Conta: parcela 1 em 25/out (hoje é 10/out); a 4ª, com desconto, adiantada para hoje.
+    const parcels = [
+      parcel(4, {
+        advancedAt: TODAY,
+        transactionDate: TODAY,
+        amount: 200,
+        amountBeforeAdvance: 250,
+      } as Partial<Parcel>),
+      ...[1, 2, 3].map((n) => parcel(n, { transactionDate: day(8 + n, 25) })),
+    ];
+    const [i] = groupInstallments(parcels, TODAY, new Map());
+
+    expect(i).toMatchObject({
+      installmentAmount: 250,
+      firstDate: day(9, 25),
+      nextNumber: 1,
+      refundAnchorId: 'p1',
+    });
   });
 
   it('ordena em andamento antes de encerradas', () => {
@@ -163,6 +197,97 @@ describe('InstallmentsService.remove', () => {
     const { service } = createService(fourParcels().slice(0, 2));
 
     await expect(service.remove('u1', 's1', 'future')).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe('InstallmentsService.advance', () => {
+  function createService(parcels: Parcel[]) {
+    const prisma = {
+      transaction: {
+        findMany: jest.fn().mockResolvedValue(parcels),
+        groupBy: jest.fn().mockResolvedValue([]),
+        update: jest.fn((args) => args),
+      },
+      $transaction: jest.fn((ops: unknown[]) => Promise.resolve(ops)),
+    };
+    const accounts = { recalculateBalance: jest.fn() };
+    const cardLedger = {
+      lockReasons: jest.fn().mockResolvedValue(new Map()),
+      syncTransactions: jest.fn(),
+      pruneForAccount: jest.fn(),
+    };
+    const service = new InstallmentsService(
+      prisma as any,
+      accounts as any,
+      {} as any,
+      cardLedger as any,
+    );
+    jest.spyOn(service as any, 'today').mockReturnValue(TODAY);
+    return { prisma, accounts, cardLedger, service };
+  }
+
+  it('traz a última parcela para hoje e sincroniza saldo e fatura', async () => {
+    const { prisma, accounts, cardLedger, service } = createService(fourParcels());
+
+    await service.advance('u1', 's1', { count: 1 });
+    expect(prisma.transaction.update).toHaveBeenCalledTimes(1);
+    expect(prisma.transaction.update).toHaveBeenCalledWith({
+      where: { id: 'p4' },
+      data: { transactionDate: TODAY, advancedAt: TODAY, advancedFromDate: day(10) },
+    });
+    expect(cardLedger.syncTransactions).toHaveBeenCalledWith(['p4']);
+    expect(accounts.recalculateBalance).toHaveBeenCalledWith('a1');
+  });
+
+  it('com desconto, rateia o total entre as parcelas adiantadas', async () => {
+    const { prisma, service } = createService([...fourParcels(), parcel(5)]);
+
+    await service.advance('u1', 's1', { count: 2, amount: 400 });
+    const data = prisma.transaction.update.mock.calls.map(([args]) => args.data);
+    expect(data.map((d) => [d.amount, d.amountBeforeAdvance])).toEqual([
+      [200, 250],
+      [200, 250],
+    ]);
+  });
+
+  it('recusa mais parcelas do que as disponíveis e desconto acima da soma', async () => {
+    const { prisma, service } = createService([...fourParcels(), parcel(5)]);
+
+    await expect(service.advance('u1', 's1', { count: 3 })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    await expect(service.advance('u1', 's1', { count: 2, amount: 501 })).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('recusa desconto que zeraria alguma parcela', async () => {
+    const { prisma, service } = createService([...fourParcels(), parcel(5)]);
+
+    await expect(service.advance('u1', 's1', { count: 2, amount: 0.01 })).rejects.toThrow(
+      'baixo demais',
+    );
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('reenvio do mesmo pedido (a cauda já mudou) não adianta nada', async () => {
+    const { prisma, service } = createService([...fourParcels(), parcel(5)]);
+
+    await expect(
+      service.advance('u1', 's1', { count: 1, expectedLastNumber: 4 }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    await service.advance('u1', 's1', { count: 1, expectedLastNumber: 5 });
+    expect(prisma.$transaction).toHaveBeenCalled();
+  });
+
+  it('sem parcelas futuras, explica o motivo', async () => {
+    const { service } = createService(fourParcels().slice(0, 2));
+
+    await expect(service.advance('u1', 's1', { count: 1 })).rejects.toThrow(
+      'Não há parcelas futuras para adiantar.',
+    );
   });
 });
 

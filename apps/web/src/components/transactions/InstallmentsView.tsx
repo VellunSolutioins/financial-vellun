@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
 import { Pagination } from '@/components/ui/pagination';
+import { AdvanceInstallmentDialog } from '@/components/transactions/AdvanceInstallmentDialog';
 import { DeleteInstallmentDialog } from '@/components/transactions/DeleteInstallmentDialog';
 import { InstallmentForm } from '@/components/transactions/InstallmentForm';
 import { InstallmentsSummary } from '@/components/transactions/InstallmentsSummary';
@@ -51,9 +52,31 @@ function AccountLabel({ i }: { i: Installment }) {
   );
 }
 
-/** Barra de parcelas já passadas sobre o total da compra. */
+/** Em que parcela a compra está, no mesmo critério da tela de Lançamentos e do adiantamento. */
+function progressText(i: Installment) {
+  if (i.status === 'cancelled') return `${i.installmentTotal} parcelas`;
+  const advanced =
+    i.advancedCount > 0 ? ` · ${i.advancedCount} adiantada${i.advancedCount === 1 ? '' : 's'}` : '';
+  if (i.currentNumber === 0) {
+    return i.upcomingDate ? `1ª parcela em ${formatDateBR(i.upcomingDate)}` : '';
+  }
+  const current = `Parcela ${i.currentNumber}/${i.installmentTotal}`;
+  const next = i.upcomingDate
+    ? ` · próxima ${formatDateBR(i.upcomingDate)}`
+    : i.status === 'active'
+      ? ' · última'
+      : '';
+  return current + next + advanced;
+}
+
+/**
+ * Barra até a parcela do mês atual (no cartão, a da fatura aberta), somando as
+ * adiantadas — que também já estão no mês atual.
+ */
 function Progress({ i }: { i: Installment }) {
-  const pct = Math.round((i.pastCount / i.installmentTotal) * 100);
+  const done =
+    i.status === 'cancelled' ? 0 : Math.min(i.installmentTotal, i.currentNumber + i.advancedCount);
+  const pct = Math.round((done / i.installmentTotal) * 100);
   return (
     <div className="space-y-1">
       <div
@@ -61,8 +84,8 @@ function Progress({ i }: { i: Installment }) {
         role="progressbar"
         aria-valuemin={0}
         aria-valuemax={i.installmentTotal}
-        aria-valuenow={i.pastCount}
-        aria-label={`${i.pastCount} de ${i.installmentTotal} parcelas`}
+        aria-valuenow={done}
+        aria-label={`${done} de ${i.installmentTotal} parcelas`}
       >
         <div
           className={cn(
@@ -72,10 +95,7 @@ function Progress({ i }: { i: Installment }) {
           style={{ width: `${pct}%` }}
         />
       </div>
-      <p className="text-xs text-muted-foreground">
-        {i.pastCount}/{i.installmentTotal} parcelas
-        {i.nextDate && ` · próxima ${formatDateBR(i.nextDate)}`}
-      </p>
+      <p className="text-xs text-muted-foreground">{progressText(i)}</p>
     </div>
   );
 }
@@ -93,6 +113,7 @@ export function InstallmentsView() {
   const [editing, setEditing] = useState<Installment | undefined>();
   const [deleting, setDeleting] = useState<Installment | undefined>();
   const [refunding, setRefunding] = useState<Installment | undefined>();
+  const [advancing, setAdvancing] = useState<Installment | undefined>();
   // Incrementa a cada escrita para o resumo recarregar junto com a lista.
   const [version, setVersion] = useState(0);
 
@@ -108,6 +129,7 @@ export function InstallmentsView() {
     setEditing(undefined);
     setDeleting(undefined);
     setRefunding(undefined);
+    setAdvancing(undefined);
     void refetch();
     setVersion((v) => v + 1);
   };
@@ -132,6 +154,11 @@ export function InstallmentsView() {
       <Button size="sm" variant="ghost" onClick={() => setEditing(i)}>
         Editar
       </Button>
+      {i.advanceable.length > 0 && (
+        <Button size="sm" variant="ghost" onClick={() => setAdvancing(i)}>
+          Adiantar
+        </Button>
+      )}
       {i.refundAnchorId && (
         <Button size="sm" variant="ghost" onClick={() => setRefunding(i)}>
           Estornar
@@ -319,6 +346,13 @@ export function InstallmentsView() {
           />
         )}
       </Dialog>
+
+      <AdvanceInstallmentDialog
+        installment={advancing}
+        open={!!advancing}
+        onClose={() => setAdvancing(undefined)}
+        onAdvanced={afterWrite}
+      />
 
       <DeleteInstallmentDialog
         installment={deleting}

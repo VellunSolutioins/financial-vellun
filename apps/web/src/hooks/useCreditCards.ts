@@ -70,6 +70,8 @@ export interface InvoiceItem {
   transactionDate: string;
   installmentNumber: number | null;
   installmentTotal: number | null;
+  /** Parcela adiantada para esta fatura. */
+  advancedAt?: string | null;
   category: { id: string; name: string; color: string | null } | null;
 }
 

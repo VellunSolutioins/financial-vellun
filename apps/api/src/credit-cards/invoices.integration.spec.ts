@@ -2,6 +2,8 @@ import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountsService } from '../accounts/accounts.service';
 import { TransactionsService } from '../transactions/transactions.service';
+import { InstallmentsService } from '../transactions/installments.service';
+import { CardLedgerService } from './card-ledger.service';
 import { dateOnlyString, parseDateOnly, todaySaoPaulo } from '../common/date.util';
 import { CreditCardsService } from './credit-cards.service';
 
@@ -12,6 +14,7 @@ integration('faturas, ciclos e limite (PostgreSQL)', () => {
   let prisma: PrismaService;
   let transactions: TransactionsService;
   let cards: CreditCardsService;
+  let installments: InstallmentsService;
   let userId: string;
   let otherId: string;
   const today = dateOnlyString(todaySaoPaulo());
@@ -61,6 +64,7 @@ integration('faturas, ciclos e limite (PostgreSQL)', () => {
     await prisma.$connect();
     transactions = new TransactionsService(prisma, new AccountsService(prisma));
     cards = new CreditCardsService(prisma);
+    installments = new InstallmentsService(prisma, new AccountsService(prisma), transactions);
     [userId, otherId] = (
       await Promise.all(
         [0, 1].map(() =>
@@ -136,6 +140,51 @@ integration('faturas, ciclos e limite (PostgreSQL)', () => {
     expect(view.available).toBe(900);
     expect(view.percentage).toBe(10);
     expect(view.currentInvoiceId).toBe(series[0].invoiceId);
+  });
+
+  it('adiantar parcelas traz as últimas para a fatura aberta e sobrevive à ressincronização', async () => {
+    const card = await cards.create(userId, { name: 'Adiantamento', closingDay: 5, dueDay: 12 });
+    const first = await purchase(card.accountId, 1000, today, {
+      recurrenceType: 'parcelado',
+      installments: 10,
+    });
+    const seriesId = first.seriesId!;
+    const openInvoiceId = first.invoiceId;
+
+    const before = await installments.findOne(userId, seriesId);
+    expect(before.advanceable.map((p) => p.installmentNumber)).toEqual([
+      10, 9, 8, 7, 6, 5, 4, 3, 2,
+    ]);
+
+    const after = await installments.advance(userId, seriesId, { count: 4, amount: 380 });
+    expect(after.advancedCount).toBe(4);
+    expect(after.advanceable.map((p) => p.installmentNumber)).toEqual([6, 5, 4, 3, 2]);
+    expect(after.totalAmount).toBe(980);
+
+    const parcelsOf = () =>
+      prisma.transaction.findMany({
+        where: { seriesId },
+        orderBy: { installmentNumber: 'asc' },
+      });
+    let parcels = await parcelsOf();
+    const advanced = parcels.filter((p) => p.installmentNumber! >= 7);
+    expect(advanced.map((p) => p.invoiceId)).toEqual(Array(4).fill(openInvoiceId));
+    expect(advanced.map((p) => Number(p.amount))).toEqual([95, 95, 95, 95]);
+    expect(advanced.every((p) => p.transactionDate.toISOString().slice(0, 10) === today)).toBe(
+      true,
+    );
+
+    const view = await cards.findOne(userId, card.id);
+    expect(view.currentInvoice).toBe(480);
+    expect(view.futureInstallments).toBe(500);
+    // As faturas das parcelas 7–10 ficaram vazias e foram removidas.
+    expect((await cards.invoices(userId, card.id)).length).toBe(6);
+
+    await new CardLedgerService(prisma).syncCardAccount(card.accountId);
+    parcels = await parcelsOf();
+    expect(
+      parcels.filter((p) => p.invoiceId === openInvoiceId).map((p) => p.installmentNumber),
+    ).toEqual([1, 7, 8, 9, 10]);
   });
 
   it('trocar o fechamento refaz só as faturas futuras', async () => {
