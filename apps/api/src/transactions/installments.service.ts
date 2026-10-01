@@ -12,7 +12,8 @@ import { CardLedgerService } from '../credit-cards/card-ledger.service';
 import { healthFromPercentage } from '../credit-cards/card-health';
 import { dateOnlyString, startOfDayUtc, todaySaoPaulo } from '../common/date.util';
 import { TransactionsService } from './transactions.service';
-import { UpdateInstallmentDto } from './dto/update-installment.dto';
+import { AdvanceInstallmentDto, UpdateInstallmentDto } from './dto/update-installment.dto';
+import { advanceState, distributeAdvance } from './installment-advance';
 
 /**
  * Compra parcelada não é uma entidade própria: é a série de lançamentos
@@ -27,6 +28,8 @@ import { UpdateInstallmentDto } from './dto/update-installment.dto';
 const parcelInclude = {
   category: { select: { id: true, name: true, color: true } },
   account: { select: { id: true, name: true, type: true } },
+  // Fatura futura ou aberta: decide o que pode ser adiantado.
+  invoice: { select: { periodStart: true } },
 } satisfies Prisma.TransactionInclude;
 
 export type Parcel = Prisma.TransactionGetPayload<{ include: typeof parcelInclude }>;
@@ -54,13 +57,21 @@ export function groupInstallments(parcels: Parcel[], today: Date, blocked: Block
   }
 
   return [...bySeries.entries()].map(([seriesId, list]) => {
-    const first = list[0];
+    // A parcela 1, não a de data mais antiga: uma parcela adiantada para hoje
+    // pode vir antes dela na ordem por data.
+    const first = list.reduce((a, b) =>
+      (b.installmentNumber ?? Infinity) < (a.installmentNumber ?? Infinity) ? b : a,
+    );
     const confirmed = list.filter((p) => p.status === 'confirmed');
     const future = list.filter((p) => p.transactionDate >= today);
-    const next = confirmed.find((p) => p.transactionDate >= today);
+    // Adiantadas ficam com a data de hoje, mas não são a "próxima" parcela.
+    const next =
+      confirmed.find((p) => p.transactionDate >= today && !p.advancedAt) ??
+      confirmed.find((p) => p.transactionDate >= today);
     const installmentTotal = first.installmentTotal ?? list.length;
     const allBlock = list.map((p) => blocked.get(p.id)).find(Boolean) ?? null;
     const futureBlock = future.map((p) => blocked.get(p.id)).find(Boolean) ?? null;
+    const advance = advanceState(list, today, blocked);
 
     // Cancelada: todas as parcelas canceladas (ex.: estorno da compra inteira).
     const status: 'active' | 'finished' | 'cancelled' =
@@ -71,7 +82,7 @@ export function groupInstallments(parcels: Parcel[], today: Date, blocked: Block
       description: first.description,
       type: first.type,
       totalAmount: list.reduce((sum, p) => sum + Math.round(Number(p.amount) * 100), 0) / 100,
-      installmentAmount: Number(first.amount),
+      installmentAmount: Number(first.amountBeforeAdvance ?? first.amount),
       installmentTotal,
       /** Parcelas que ainda existem (menos que o total se as futuras foram excluídas). */
       parcelCount: list.length,
@@ -84,6 +95,14 @@ export function groupInstallments(parcels: Parcel[], today: Date, blocked: Block
       lastDate: list[list.length - 1].transactionDate,
       nextDate: next?.transactionDate ?? null,
       nextNumber: next?.installmentNumber ?? null,
+      /**
+       * Parcela do mês atual (no cartão, a da fatura aberta), 0 se a compra
+       * ainda não começou; e a primeira de um mês seguinte. Mesmo critério do
+       * adiantamento e da tela de Lançamentos.
+       */
+      currentNumber: advance.currentNumber,
+      upcomingNumber: advance.upcomingNumber,
+      upcomingDate: advance.upcomingDate,
       accountId: first.accountId,
       categoryId: first.categoryId,
       account: first.account,
@@ -94,7 +113,20 @@ export function groupInstallments(parcels: Parcel[], today: Date, blocked: Block
       deleteFutureBlockedReason:
         future.length === 0 ? 'Não há parcelas de hoje em diante.' : futureBlock,
       /** Parcela usada para o estorno da compra inteira; null se não há o que estornar. */
-      refundAnchorId: first.type === 'expense' ? (confirmed[0]?.id ?? null) : null,
+      refundAnchorId:
+        first.type === 'expense'
+          ? ((confirmed.find((p) => p.id === first.id) ?? confirmed[0])?.id ?? null)
+          : null,
+      /** Parcelas que podem ser adiantadas, da última para a primeira. */
+      advanceable: advance.advanceable.map((p) => ({
+        id: p.id,
+        installmentNumber: p.installmentNumber,
+        amount: Number(p.amount),
+        transactionDate: p.transactionDate,
+      })),
+      advanceBlockedReason: advance.blockedReason,
+      /** Parcelas já adiantadas (confirmadas). */
+      advancedCount: confirmed.filter((p) => p.advancedAt).length,
     };
   });
 }
@@ -342,6 +374,76 @@ export class InstallmentsService {
       await this.cardLedger.pruneForAccount(accountId);
     }
     return { deleted: count };
+  }
+
+  /**
+   * Adianta as `count` últimas parcelas ainda futuras para hoje: no cartão,
+   * caem na fatura aberta (docs/adrs/0017). Com `amount`, o total delas passa
+   * a ser esse (desconto do adiantamento), rateado entre as parcelas.
+   * `expectedLastNumber` protege contra reenvio: se a cauda mudou desde que o
+   * cliente a leu (o mesmo pedido já foi aplicado), nada é adiantado.
+   */
+  async advance(userId: string, seriesId: string, dto: AdvanceInstallmentDto) {
+    const parcels = await this.findSeries(userId, seriesId);
+    const today = this.today();
+    const blocked = await this.blockReasons(parcels);
+    const { advanceable: available, blockedReason } = advanceState(parcels, today, blocked);
+    if (
+      dto.expectedLastNumber !== undefined &&
+      available[0]?.installmentNumber !== dto.expectedLastNumber
+    ) {
+      throw new ConflictException(
+        'O parcelamento mudou desde que você abriu esta tela (talvez já tenha sido adiantado). Recarregue e confira.',
+      );
+    }
+    if (available.length === 0) throw new BadRequestException(blockedReason);
+    if (dto.count > available.length) {
+      throw new BadRequestException(
+        `Só é possível adiantar até ${available.length} parcela${available.length === 1 ? '' : 's'}.`,
+      );
+    }
+
+    // Da menor para a maior: o rateio deixa a sobra na última parcela.
+    const targets = available.slice(0, dto.count).reverse();
+    const currentCents = targets.map((p) => cents(Number(p.amount)));
+    let newCents = currentCents;
+    if (dto.amount !== undefined) {
+      const sumCents = currentCents.reduce((acc, c) => acc + c, 0);
+      const targetCents = cents(dto.amount);
+      if (targetCents > sumCents) {
+        throw new BadRequestException(
+          `O valor com desconto passa da soma das parcelas (R$ ${(sumCents / 100).toFixed(2)}).`,
+        );
+      }
+      newCents = distributeAdvance(currentCents, targetCents);
+      if (newCents.some((c) => c <= 0)) {
+        throw new BadRequestException(
+          'O valor com desconto é baixo demais: alguma parcela ficaria sem valor.',
+        );
+      }
+    }
+    const discounted = dto.amount !== undefined && newCents.some((c, i) => c !== currentCents[i]);
+
+    await this.prisma.$transaction(
+      targets.map((p, i) =>
+        this.prisma.transaction.update({
+          where: { id: p.id },
+          data: {
+            transactionDate: today,
+            advancedAt: today,
+            advancedFromDate: p.transactionDate,
+            ...(discounted && { amount: newCents[i] / 100, amountBeforeAdvance: p.amount }),
+          },
+        }),
+      ),
+    );
+
+    await this.cardLedger.syncTransactions(targets.map((p) => p.id));
+    for (const accountId of new Set(targets.map((p) => p.accountId))) {
+      await this.accountsService.recalculateBalance(accountId);
+      await this.cardLedger.pruneForAccount(accountId);
+    }
+    return this.findOne(userId, seriesId);
   }
 
   private async findSeries(userId: string, seriesId: string) {

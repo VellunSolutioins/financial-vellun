@@ -27,6 +27,12 @@ export interface Transaction {
   refundOfId?: string | null;
   cardPaymentId?: string | null;
   transferDirection?: 'in' | 'out' | null;
+  /** Parcela adiantada: data do adiantamento (ver AdvanceInstallmentDialog). */
+  advancedAt?: string | null;
+  /** Data prevista da parcela antes do adiantamento. */
+  advancedFromDate?: string | null;
+  /** Valor antes do desconto do adiantamento; nulo sem desconto. */
+  amountBeforeAdvance?: number | null;
   createdAt: string;
 }
 

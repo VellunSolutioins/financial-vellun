@@ -1,4 +1,14 @@
-import { IsIn, IsOptional, IsString, MinLength } from 'class-validator';
+import {
+  IsIn,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsPositive,
+  IsString,
+  Min,
+  MinLength,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
 /** Alterações aplicadas a todas as parcelas da compra. */
@@ -25,4 +35,39 @@ export class DeleteInstallmentQueryDto {
   @IsOptional()
   @IsIn(['all', 'future'])
   scope?: 'all' | 'future' = 'all';
+}
+
+/** Adiantamento das últimas parcelas da compra para hoje (fatura aberta, no cartão). */
+export class AdvanceInstallmentDto {
+  @ApiProperty({
+    description: 'Quantas parcelas adiantar, a partir da última. Máximo: `advanceable.length`.',
+    minimum: 1,
+  })
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  count!: number;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Total a pagar pelas parcelas adiantadas, com desconto. Não passa da soma delas; ' +
+      'é rateado entre as parcelas proporcionalmente. Sem ele, o valor não muda.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsPositive()
+  amount?: number;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Número da última parcela ainda não adiantada, como o cliente a viu (`advanceable[0]`). ' +
+      'Se mudou — o mesmo pedido já foi aplicado —, responde 409 e não adianta nada.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  expectedLastNumber?: number;
 }

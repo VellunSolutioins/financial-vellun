@@ -409,12 +409,19 @@ model Transaction {
 
   // Fatura do cartão em que o lançamento é cobrado. Nula fora de cartão, em
   // cartão com configuração pendente e antes do início do controle.
-  invoiceId         String?            @map("invoice_id")
+  invoiceId           String?            @map("invoice_id")
   // Pernas de pagamento de fatura (type = transfer).
-  transferDirection TransferDirection? @map("transfer_direction")
-  cardPaymentId     String?            @map("card_payment_id")
+  transferDirection   TransferDirection? @map("transfer_direction")
+  cardPaymentId       String?            @map("card_payment_id")
   // Estorno (type = refund): a despesa estornada.
-  refundOfId        String?            @map("refund_of_id")
+  refundOfId          String?            @map("refund_of_id")
+  // Adiantamento de parcela: a parcela foi trazida para a data do adiantamento.
+  // Na fatura vale essa data, não o ciclo da compra + (n − 1) (docs/adrs/0017).
+  advancedAt          DateTime?          @map("advanced_at") @db.Date
+  // Data prevista antes do adiantamento.
+  advancedFromDate    DateTime?          @map("advanced_from_date") @db.Date
+  // Valor antes do desconto do adiantamento; nulo quando não houve desconto.
+  amountBeforeAdvance Decimal?           @map("amount_before_advance") @db.Decimal(15, 2)
 
   user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   account     Account            @relation(fields: [accountId], references: [id], onDelete: Cascade)

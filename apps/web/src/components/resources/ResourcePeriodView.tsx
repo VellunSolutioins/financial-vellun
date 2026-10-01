@@ -138,7 +138,7 @@ export function ResourcePeriodView({ selection, basis = 'competence' }: Props) {
                           : ''}
                       </p>
                       <p className="truncate text-xs text-muted-foreground">
-                        {formatDateBR(tx.transactionDate)} ·{' '}
+                        {formatDateBR(tx.transactionDate)} · {tx.advancedAt && 'Adiantada · '}
                         {tx.type === 'income' || tx.type === 'expense'
                           ? (tx.category?.name ?? 'Sem categoria')
                           : typeLabel(tx)}
