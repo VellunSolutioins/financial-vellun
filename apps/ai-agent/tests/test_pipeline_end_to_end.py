@@ -10,125 +10,20 @@ principal, LLM e WhatsApp.
 
 from __future__ import annotations
 
-import asyncio
 import json
 
-import httpx
 import pytest
 
 from src.bootstrap import pipeline
-from src.config import settings
 from src.consumers import DlqCatalogMessageConsumer
-from src.main import app
 from src.messaging.base import BrokerMessage, PermanentError
-from src.schemas.financial_intent import FinancialIntent, IntentType, TransactionTypeEnum
 from src.services.distributed_state import get_state_store
-
-PHONE = "+5541999999999"
-
-WEBHOOK = {
-    "object": "whatsapp_business_account",
-    "entry": [
-        {
-            "changes": [
-                {
-                    "value": {
-                        "messages": [
-                            {
-                                "from": "5541999999999",
-                                "id": "wamid.e2e",
-                                "type": "text",
-                                "timestamp": "1757000000",
-                                "text": {"body": "gastei 47,50 no mercado"},
-                            }
-                        ]
-                    }
-                }
-            ]
-        }
-    ],
-}
-
-
-class Mundo:
-    """Tudo que está fora do agente, observável pelo teste."""
-
-    def __init__(self) -> None:
-        self.persistidas: list[str] = []
-        self.criados: dict[str, dict] = {}
-        self.entregues: list[tuple[str, str]] = []
-        self.recusa: BaseException | None = None
+from tests.pipeline_support import PHONE, Mundo, esperar, instalar_mundo, postar_webhook
 
 
 @pytest.fixture
 def mundo(monkeypatch) -> Mundo:
-    import src.consumers.inbound_consumer as inbound
-    import src.services.message_processor as mp
-
-    mundo = Mundo()
-
-    class Audit:
-        async def log_message_detailed(self, phone, direction, content, metadata=None):
-            mundo.persistidas.append(content)
-            return {"id": f"ai-{len(mundo.persistidas)}", "duplicate": False}
-
-        async def log_message(self, *args, **kwargs):
-            return "outbound"
-
-        async def log_extraction(self, **kwargs):
-            return "ext-1"
-
-    class Contato:
-        async def find_by_phone(self, phone):
-            return {"userId": "u1", "profileType": "personal"}
-
-    class Assinatura:
-        async def evaluate(self, user_id):
-            return True, None
-
-    class Classificador:
-        async def classify(self, message, context):
-            return FinancialIntent(
-                intent=IntentType.create_transaction,
-                transaction_type=TransactionTypeEnum.expense,
-                amount=47.5,
-                description="mercado",
-                category_name="Mercado",
-                confidence=0.95,
-            )
-
-    class Lancamentos:
-        async def pending_question(self, intent, user_id):
-            return None
-
-        async def create_from_intent(self, intent, user_id, raw, **kwargs):
-            chave = kwargs["idempotency_key"]
-            mundo.criados.setdefault(chave, {"amount": intent.amount})
-            return {"ok": True, "message": "Lançamento criado!"}
-
-    class WhatsApp:
-        async def send(self, phone, text):
-            if mundo.recusa is not None:
-                raise mundo.recusa
-            mundo.entregues.append((phone, text))
-
-    async def contexto(self, user_id, contact, phone):
-        return {"categories": ["Mercado"], "accounts": ["Carteira"], "recent_messages": []}
-
-    monkeypatch.setattr(inbound, "audit_service", Audit())
-    monkeypatch.setattr(mp, "audit_service", Audit())
-    monkeypatch.setattr(mp, "contact_service", Contato())
-    monkeypatch.setattr(mp, "subscription_gate", Assinatura())
-    monkeypatch.setattr(mp, "intent_classifier", Classificador())
-    monkeypatch.setattr(mp, "transaction_creator", Lancamentos())
-    monkeypatch.setattr(mp, "messenger", WhatsApp())
-    monkeypatch.setattr(mp.MessageProcessor, "_build_context", contexto)
-
-    # Sem esperar os 5s do debounce nem o tick de 1s do flusher.
-    monkeypatch.setattr(settings, "message_buffer_debounce_seconds", 0)
-    monkeypatch.setattr(settings, "worker_poll_interval_seconds", 0.01)
-    monkeypatch.setattr(settings, "run_dlq_catalog_consumer", False)
-    return mundo
+    return instalar_mundo(monkeypatch)
 
 
 @pytest.fixture
@@ -138,20 +33,6 @@ async def pipeline_no_ar(mundo):
         yield pipeline
     finally:
         await pipeline.stop()
-
-
-async def postar_webhook() -> httpx.Response:
-    transport = httpx.ASGITransport(app=app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://agente") as client:
-        return await client.post("/webhook/whatsapp", json=WEBHOOK)
-
-
-async def esperar(condicao, timeout: float = 3.0) -> None:
-    prazo = asyncio.get_running_loop().time() + timeout
-    while not condicao():
-        if asyncio.get_running_loop().time() > prazo:
-            raise AssertionError("o pipeline não chegou ao estado esperado a tempo")
-        await asyncio.sleep(0.02)
 
 
 async def test_mensagem_do_webhook_vira_lancamento_e_resposta(pipeline_no_ar, mundo):

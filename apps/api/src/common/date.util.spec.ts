@@ -5,6 +5,7 @@ import {
   competenceString,
   dateOnlyString,
   daysBetweenCalendarDays,
+  isFutureDay,
   maxCalendarDay,
   subtractDaysSaoPaulo,
 } from './date.util';
@@ -40,5 +41,25 @@ describe('helpers de dia-calendário', () => {
   it('atravessa o horário de verão sem perder ou ganhar um dia', () => {
     // Opera em meio-dia UTC justamente para não depender de offset.
     expect(daysBetweenCalendarDays(day(2026, 9, 15), day(2026, 10, 15))).toBe(31);
+  });
+});
+
+describe('isFutureDay', () => {
+  const column = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
+
+  afterEach(() => jest.useRealTimers());
+
+  it('hoje e ontem não são futuros; amanhã é', () => {
+    jest.useFakeTimers({ now: new Date('2026-09-29T15:00:00.000Z') }); // 12h em SP
+    expect(isFutureDay(column('2026-09-28'))).toBe(false);
+    expect(isFutureDay(column('2026-09-29'))).toBe(false);
+    expect(isFutureDay(column('2026-09-30'))).toBe(true);
+  });
+
+  it('usa o dia de São Paulo, não o UTC', () => {
+    // 23h30 de 29/09 em SP já é 30/09 em UTC: o dia 30 ainda é futuro.
+    jest.useFakeTimers({ now: new Date('2026-09-30T02:30:00.000Z') });
+    expect(isFutureDay(column('2026-09-29'))).toBe(false);
+    expect(isFutureDay(column('2026-09-30'))).toBe(true);
   });
 });

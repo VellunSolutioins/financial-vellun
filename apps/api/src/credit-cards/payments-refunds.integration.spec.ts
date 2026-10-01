@@ -251,6 +251,25 @@ integration('pagamentos de fatura e estornos (PostgreSQL)', () => {
     await expect(transactions.remove(userId, purchase.id)).rejects.toMatchObject({ status: 409 });
   });
 
+  it('estorno com data futura é recusado e não cria lançamento', async () => {
+    const card = await newCard();
+    const purchase = await buy(card.accountId, 90, today, {
+      recurrenceType: 'parcelado',
+      installments: 3,
+    });
+
+    await expect(
+      transactions.refund(userId, purchase.id, { amount: 10, date: '2099-01-01' }),
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      transactions.refund(userId, purchase.id, { date: '2099-01-01', scope: 'series' }),
+    ).rejects.toMatchObject({ status: 400 });
+
+    expect(await prisma.transaction.count({ where: { refundOfId: purchase.id } })).toBe(0);
+    const series = await prisma.transaction.findMany({ where: { seriesId: purchase.seriesId } });
+    expect(series.every((t) => t.status === 'confirmed')).toBe(true);
+  });
+
   it('em conta comum, estorno é entrada de saldo, não receita', async () => {
     const checking = await newAccount(1000);
     const purchase = await buy(checking, 80, '2026-05-10');

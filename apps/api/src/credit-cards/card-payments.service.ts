@@ -9,12 +9,7 @@ import { CardPayment, Prisma } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountsService } from '../accounts/accounts.service';
-import {
-  calendarDayFromUtcDate,
-  compareCalendarDays,
-  parseDateOnly,
-  todaySaoPaulo,
-} from '../common/date.util';
+import { isFutureDay, parseDateOnly } from '../common/date.util';
 import { CreateCardPaymentDto } from './dto/create-card-payment.dto';
 
 type PaymentWithSource = CardPayment & { sourceAccount: { id: string; name: string } };
@@ -88,7 +83,7 @@ export class CardPaymentsService {
     }
 
     const paymentDate = parseDateOnly(dto.paymentDate.slice(0, 10));
-    if (compareCalendarDays(calendarDayFromUtcDate(paymentDate), todaySaoPaulo()) > 0) {
+    if (isFutureDay(paymentDate)) {
       throw new BadRequestException('A data do pagamento não pode ser futura');
     }
 

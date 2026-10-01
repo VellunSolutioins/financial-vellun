@@ -36,29 +36,47 @@ linhas, de madrugada, para não competir com o tráfego do dia.
 ## Backups
 
 O Postgres é gerenciado pelo Railway, que faz os backups da instância. O que
-precisa estar decidido e verificado:
+precisa estar decidido e verificado (preencher; enquanto houver "a definir", o
+backup não está sob controle de ninguém):
 
-1. **Frequência e janela de retenção** dos backups, no painel do Railway.
-2. **Onde ficam as credenciais** para restaurar (cofre da equipe, não no repositório).
-3. **Quem pode restaurar** e por qual procedimento.
+| Item                             | Valor                                                    |
+| -------------------------------- | -------------------------------------------------------- |
+| Backup habilitado no Railway     | a definir (conferir no painel)                           |
+| Frequência                       | a definir                                                |
+| Retenção (quantos dias/cópias)   | a definir                                                |
+| Onde ficam as credenciais        | a definir (cofre da equipe, nunca o repositório)         |
+| Quem pode restaurar              | a definir                                                |
+| Tempo máximo aceitável sem dados | a definir (quanto de lançamento a empresa aceita perder) |
 
 ### Restauração — procedimento
 
 ```bash
-# 1. Criar uma instância nova a partir do backup (nunca restaurar por cima da
-#    instância em uso: a restauração é destrutiva).
-# 2. Apontar uma cópia da API para ela e conferir, sem tráfego real:
-pnpm --filter @financial-vellun/api exec prisma migrate status   # migrations aplicadas
-# 3. Conferências mínimas na instância restaurada:
-#    - contagem de linhas em users, transactions, ai_messages
-#    - a última transação criada bate com a data do backup
-#    - login de um usuário de teste funciona
-# 4. Só então redirecionar a aplicação.
+# 1. Criar uma instância NOVA a partir do backup. Nunca restaurar por cima da
+#    instância em uso: a restauração é destrutiva.
+# 2. Conferir a instância restaurada, sem tráfego real. O script é somente
+#    leitura e mostra o host e o banco antes de tudo: confira que NÃO é produção.
+DATABASE_URL="<url da instância restaurada>" \
+  pnpm --filter @financial-vellun/api db:verify:restore
+#    Ele sai com código 1 se as migrations divergirem do repositório, e imprime
+#    a contagem de users, accounts, transactions, credit_card_invoices e
+#    ai_messages, além do lançamento e da mensagem mais recentes.
+# 3. Conferências manuais:
+#    - as contagens estão próximas das de produção no horário do backup;
+#    - o lançamento mais recente bate com o horário do backup;
+#    - login de um usuário de teste funciona (API local apontada para a cópia).
+# 4. Só então redirecionar a aplicação, se a restauração for para valer.
 ```
 
-**Pendente:** executar um teste de restauração de ponta a ponta e anotar aqui a
-data, o tempo que levou e o que foi conferido. Sem esse ensaio, o backup é uma
-suposição.
+### Registro de ensaios
+
+Sem ensaio, o backup é uma suposição. Repetir a cada trimestre e depois de
+qualquer mudança de plano ou de instância no Railway.
+
+| Data | Backup usado (horário) | Tempo até consultável | `db:verify:restore` | Login de teste | Quem |
+| ---- | ---------------------- | --------------------- | ------------------- | -------------- | ---- |
+| —    | —                      | —                     | —                   | —              | —    |
+
+**Pendente:** o primeiro ensaio.
 
 ## Exclusão de conta (LGPD)
 

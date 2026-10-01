@@ -30,7 +30,12 @@ const schema = z
     (d) =>
       d.scope === 'series' || (CURRENCY_REGEX.test(d.amount) && currencyToNumber(d.amount) > 0),
     { message: 'Valor inválido', path: ['amount'] },
-  );
+  )
+  // `YYYY-MM-DD` ordena como texto. A API recusa do mesmo jeito.
+  .refine((d) => d.date <= todayLocal(), {
+    message: 'A data do estorno não pode ser futura',
+    path: ['date'],
+  });
 type FormData = z.infer<typeof schema>;
 
 interface Props {
@@ -145,7 +150,7 @@ export function RefundForm({ transaction, defaultScope = 'single', onSuccess, on
       )}
       <div className="space-y-1">
         <Label htmlFor="refund-date">Data do estorno</Label>
-        <Input id="refund-date" type="date" {...register('date')} />
+        <Input id="refund-date" type="date" max={todayLocal()} {...register('date')} />
         {errors.date && <p className="text-xs text-destructive">{errors.date.message}</p>}
       </div>
       <div className="flex gap-2 pt-2">

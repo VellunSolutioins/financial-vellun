@@ -157,7 +157,7 @@ def test_happy_path_calls_services_in_order():
             rec.sent.append(text)
 
     # Sem confirmação necessária.
-    def fake_next_question(intent, message):
+    def fake_next_question(intent, message, *, confirmed_total=None):
         return None
 
     originals = _patch(

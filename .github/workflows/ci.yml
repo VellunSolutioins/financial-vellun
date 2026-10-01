@@ -55,8 +55,47 @@ jobs:
       - run: pip install --require-hashes -r requirements.lock
       - run: pip install pytest pytest-asyncio
       # Os testes de integração exigem RabbitMQ e Redis e ficam de fora (o
-      # `addopts` do pyproject já os desmarca).
+      # `addopts` do pyproject já os desmarca); rodam no job abaixo.
       - run: python -m pytest -q
+
+  agent-integration:
+    name: Integração do agente (RabbitMQ e Redis reais)
+    runs-on: ubuntu-latest
+    # O incidente do WhatsApp morou na fronteira com o broker, onde os dublês
+    # não chegam. Localmente, sem a infraestrutura, esses testes são pulados;
+    # aqui `INTEGRATION_REQUIRED=1` transforma o pulo em falha, para "passou"
+    # nunca significar "não rodou".
+    services:
+      rabbitmq:
+        image: rabbitmq:3.13-management-alpine
+        env:
+          RABBITMQ_DEFAULT_USER: vellun
+          RABBITMQ_DEFAULT_PASS: ci-only-password
+        ports: ['5672:5672']
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 5s --health-timeout 10s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      RABBITMQ_URL: amqp://vellun:ci-only-password@localhost:5672/
+      REDIS_URL: redis://localhost:6379/0
+      INTEGRATION_REQUIRED: '1'
+    defaults:
+      run:
+        working-directory: apps/ai-agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r requirements.lock
+      - run: pip install pytest pytest-asyncio
+      - run: python -m pytest -m integration -q -rs
 
   audit:
     name: Auditoria de dependências

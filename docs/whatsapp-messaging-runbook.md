@@ -347,6 +347,12 @@ nada anda sozinho a partir daqui.
 > Os passos abaixo continuam válidos para inspeção direta da fila, que é o que
 > resta quando o próprio catálogo está fora.
 
+Dois alertas trazem você até aqui: **`NovaEntradaEmDLQ`** (uma falha foi
+catalogada) e **`UsuarioAvisadoDeFalha`** (um cliente recebeu o aviso "tive um
+problema para processar"). O segundo significa que a mensagem dele não virou
+lançamento: depois de corrigir a causa, reprocesse a partir do catálogo, porque o
+cliente não vai reenviar.
+
 > **Leia [O painel do RabbitMQ não é um banco de dados](#o-painel-do-rabbitmq-não-é-um-banco-de-dados)
 > antes de clicar em qualquer coisa no Management.** Duas operações que parecem
 > leitura — "Get messages" e "Purge" — descartam mensagem sem registro.
@@ -583,7 +589,10 @@ Sinais que só existem desde essa análise:
   `WHATSAPP_PHONE_NUMBER_ID`. É intencional — antes ele subia e respondia só no log.
 - **`whatsapp_send_failed` subindo**: a Graph API recusou ou ficou inalcançável.
   `429`/`5xx`/rede retentam; outros `4xx` (token expirado é o clássico) vão direto
-  para a DLQ, com o código da Meta no `errorMessage`.
+  para a DLQ, com o código da Meta no `errorMessage`. É o que dispara o alerta
+  **`EnvioAoWhatsAppFalhando`**: confira primeiro o `errorMessage` em `/ops/falhas`
+  (fonte `whatsapp_outbound`). Token expirado derruba todas as respostas; número
+  fora da janela de 24h afeta só aquele usuário.
 - **`jobs_reply_resumed`**: um retry que só reenviou a resposta já calculada.
   Normal em instabilidade do WhatsApp; o job não é reprocessado.
 - **`dlq_user_notified`**: o usuário recebeu o aviso de que a mensagem falhou.

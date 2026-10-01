@@ -19,6 +19,7 @@ import {
   calendarDayFromUtcDate,
   compareCalendarDays,
   endOfDayUtc,
+  isFutureDay,
   parseDateOnly,
   startOfDayUtc,
   todaySaoPaulo,
@@ -317,6 +318,11 @@ export class TransactionsService {
       throw new BadRequestException('Só uma despesa confirmada pode ser estornada');
     }
     const date = parseDateOnly(dto.date.slice(0, 10));
+    // Estorno é algo que já aconteceu, como o pagamento da fatura. Datado no
+    // futuro, entrava numa fatura que ainda nem abriu.
+    if (isFutureDay(date)) {
+      throw new BadRequestException('A data do estorno não pode ser futura');
+    }
 
     if (dto.scope === 'series') return this.refundSeries(userId, original, date);
 

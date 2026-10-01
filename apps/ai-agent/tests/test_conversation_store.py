@@ -131,6 +131,25 @@ def test_estado_v3_guarda_o_campo_esperado_e_a_mensagem_original():
     assert restaurado.original_message == "geladeira 3000 parcelado"
     assert restaurado.reference_date == "2026-09-27"
     assert restaurado.attempts == 1
+    assert restaurado.confirmed_amount is None
+
+
+def test_total_confirmado_sobrevive_e_estado_sem_ele_continua_valendo():
+    original = ConversationState(
+        pending_intent=pending_intent(),
+        awaiting_confirmation=True,
+        awaiting_field="category",
+        confirmed_amount=180_000.0,
+    )
+    assert ConversationState.from_json(original.to_json()).confirmed_amount == 180_000.0
+
+    # Estado v3 gravado antes da chave existir.
+    antigo = (
+        '{"v": 3, "pendingIntent": {"intent": "create_transaction", "amount": 50}, '
+        '"awaitingConfirmation": true, "lastMessageAt": "2026-09-05T12:00:00+00:00", '
+        '"userId": "u1", "contactId": "c1", "linkVersion": 1, "awaitingField": "confirm"}'
+    )
+    assert ConversationState.from_json(antigo).confirmed_amount is None
 
 
 def test_estado_v2_gravado_antes_do_deploy_continua_valendo():
