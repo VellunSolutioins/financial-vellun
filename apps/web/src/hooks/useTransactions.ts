@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { apiClient } from '@/lib/api-client';
 import type { LedgerType, SettlementState } from '@/lib/transaction-display';
@@ -75,6 +75,8 @@ export interface TransactionFilters {
   dateBasis?: 'due' | 'event' | 'spending';
   /** Só gastos realizados (mesmo critério do dashboard). */
   realizedOnly?: boolean;
+  /** Abas da listagem: vencimento até hoje (`past`) ou de amanhã em diante (`upcoming`). */
+  timing?: 'past' | 'upcoming';
   sortBy?: string;
   order?: 'asc' | 'desc';
 }
@@ -90,42 +92,111 @@ interface TransactionsResponse {
   };
 }
 
+type Meta = { total: number; page: number; limit: number; total_pages: number };
+type Page = { data: Transaction[]; meta: Meta; at: number };
+
+/**
+ * Páginas já carregadas, por filtro (inclusive página, ordem e aba). Voltar a
+ * uma aba ou página mostra o que já se tinha na hora e revalida em segundo
+ * plano; uma escrita (`refetch`) descarta tudo. Fica na memória da aba do
+ * navegador: dado financeiro não é guardado em disco nem no servidor.
+ */
+const pageCache = new Map<string, Page>();
+/** Até aqui, reaproveita sem nem revalidar (trocar de aba e voltar logo). */
+const FRESH_MS = 30_000;
+const MAX_ENTRIES = 50;
+
+const keyOf = (filters: TransactionFilters) => JSON.stringify(filters);
+
+async function loadPage(key: string): Promise<Page> {
+  const params = new URLSearchParams();
+  Object.entries(JSON.parse(key) as TransactionFilters).forEach(([k, v]) => {
+    if (v !== undefined && v !== '') params.set(k, String(v));
+  });
+  const res = await apiClient.get<TransactionsResponse>(`/transactions?${params}`);
+  const page: Page = {
+    data: res.data,
+    meta: {
+      total: res.meta.total,
+      page: res.meta.page,
+      limit: res.meta.limit,
+      total_pages: res.meta.total_pages ?? res.meta.totalPages ?? 1,
+    },
+    at: Date.now(),
+  };
+  pageCache.delete(key);
+  pageCache.set(key, page);
+  // Descarta as mais antigas: a ordem de inserção do Map é a de uso.
+  while (pageCache.size > MAX_ENTRIES) pageCache.delete(pageCache.keys().next().value!);
+  return page;
+}
+
+/** Esquece tudo o que estava guardado (logout, troca de usuário). */
+export function clearTransactionsCache() {
+  pageCache.clear();
+}
+
+/** Carrega uma página em segundo plano (ex.: a outra aba), se ainda não houver. */
+export function prefetchTransactions(filters: TransactionFilters) {
+  const key = keyOf(filters);
+  if (pageCache.has(key)) return;
+  void loadPage(key).catch(() => undefined);
+}
+
+/**
+ * Lançamentos com os filtros dados. `loading` só quando não há nada para
+ * mostrar; ao trocar de filtro sem a página guardada, a lista anterior continua
+ * na tela (`refreshing`) até a nova chegar — a tela não pisca nem muda de
+ * altura. Revalidar a mesma lista acontece em segundo plano, sem aviso.
+ */
 export function useTransactions(filters: TransactionFilters) {
-  const [data, setData] = useState<Transaction[]>([]);
-  const [meta, setMeta] = useState({ total: 0, page: 1, limit: 20, total_pages: 1 });
-  const [loading, setLoading] = useState(true);
+  const key = keyOf(filters);
+  const [page, setPage] = useState<(Page & { key: string }) | null>(() => {
+    const hit = pageCache.get(key);
+    return hit ? { ...hit, key } : null;
+  });
   const [error, setError] = useState<string | null>(null);
+  // Filtro atual: respostas de um filtro anterior (troca rápida de aba) são ignoradas.
+  const keyRef = useRef(key);
+  keyRef.current = key;
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const filtersKey = JSON.stringify(filters);
+  const load = useCallback(
+    async (force: boolean) => {
+      const hit = pageCache.get(key);
+      if (hit) setPage({ ...hit, key });
+      if (!force && hit && Date.now() - hit.at < FRESH_MS) return;
+      setError(null);
+      try {
+        const fresh = await loadPage(key);
+        if (keyRef.current === key) setPage({ ...fresh, key });
+      } catch {
+        if (keyRef.current === key) setError('Erro ao carregar lançamentos');
+      }
+    },
+    [key],
+  );
 
-  const fetchTransactions = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams();
-      Object.entries(JSON.parse(filtersKey) as TransactionFilters).forEach(([k, v]) => {
-        if (v !== undefined && v !== '') params.set(k, String(v));
-      });
-      const res = await apiClient.get<TransactionsResponse>(`/transactions?${params}`);
-      setData(res.data);
-      setMeta({
-        total: res.meta.total,
-        page: res.meta.page,
-        limit: res.meta.limit,
-        total_pages: res.meta.total_pages ?? res.meta.totalPages ?? 1,
-      });
-    } catch {
-      setError('Erro ao carregar lançamentos');
-    } finally {
-      setLoading(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtersKey]);
-
+  // Ao abrir a tela, revalida mesmo o que está guardado: outra tela pode ter
+  // mudado os lançamentos (pagar fatura, receber). Depois, só o que envelheceu.
+  const mounted = useRef(false);
   useEffect(() => {
-    void fetchTransactions();
-  }, [fetchTransactions]);
+    void load(!mounted.current);
+    mounted.current = true;
+  }, [load]);
 
-  return { data, meta, loading, error, refetch: fetchTransactions };
+  /** Depois de uma escrita: tudo o que estava guardado pode ter mudado. */
+  const refetch = useCallback(async () => {
+    pageCache.clear();
+    await load(true);
+  }, [load]);
+
+  return {
+    data: page?.data ?? [],
+    meta: page?.meta ?? { total: 0, page: 1, limit: 20, total_pages: 1 },
+    loading: page === null && !error,
+    /** Mostrando a lista do filtro anterior enquanto a nova carrega. */
+    refreshing: page !== null && page.key !== key && !error,
+    error,
+    refetch,
+  };
 }

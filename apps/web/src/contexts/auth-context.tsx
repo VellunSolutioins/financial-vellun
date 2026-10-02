@@ -2,6 +2,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { type User, getMe, logout as logoutApi } from '@/lib/auth';
 import { type SubscriptionAccess, getSubscription } from '@/lib/billing';
+import { clearTransactionsCache } from '@/hooks/useTransactions';
 
 interface AuthContextValue {
   user: User | null;
@@ -45,8 +46,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       .finally(() => setLoading(false));
   }, [refreshSubscriptionAccess]);
 
+  // Lançamentos guardados em memória são de um usuário só: troca ou saída esquece tudo.
+  const userId = user?.id ?? null;
+  useEffect(() => {
+    clearTransactionsCache();
+  }, [userId]);
+
   const logout = async () => {
     await logoutApi();
+    clearTransactionsCache();
     setUser(null);
     setSubscriptionAccess(null);
   };

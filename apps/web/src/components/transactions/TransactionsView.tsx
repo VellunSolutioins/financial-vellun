@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { useSearchParams, useRouter } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { useEffect, useState, Suspense } from 'react';
 import {
   AlertTriangle,
@@ -26,7 +26,7 @@ import {
   frequencyLabels,
   recurrenceLabels,
 } from '@/components/transactions/TransactionForm';
-import { useTransactions, type Transaction } from '@/hooks/useTransactions';
+import { prefetchTransactions, useTransactions, type Transaction } from '@/hooks/useTransactions';
 import { useTransactionSummary } from '@/hooks/useTransactionSummary';
 import { useFinancialResources } from '@/hooks/useFinancialResources';
 import { resourceQuery, useResourceFilter } from '@/hooks/useResourceFilter';
@@ -179,6 +179,19 @@ function monthLabel(month: string) {
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
+/** Quanto falta para vencer, só para datas futuras: "amanhã", "em 5 dias". */
+function dueHint(transactionDate: string) {
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
+    now.getDate(),
+  ).padStart(2, '0')}`;
+  const days = Math.round(
+    (Date.parse(transactionDate.slice(0, 10)) - Date.parse(today)) / 86_400_000,
+  );
+  if (days === 1) return 'amanhã';
+  return days > 1 ? `em ${days} dias` : null;
+}
+
 function currentMonth() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -196,7 +209,6 @@ function monthRange(month: string) {
 
 function TransacoesContent() {
   const searchParams = useSearchParams();
-  const router = useRouter();
   const toast = useToast();
   const confirm = useConfirm();
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
@@ -242,25 +254,71 @@ function TransacoesContent() {
     periodEnd: monthEnd,
     ...resourceQuery(selection),
   };
-  const order: 'asc' | 'desc' = searchParams.get('order') === 'asc' ? 'asc' : 'desc';
+  // Abas (docs/adrs/0020): no mês atual, "Até hoje" e "Próximos"; mês passado
+  // só tem o que já aconteceu, mês futuro só o que vem por aí.
+  const thisMonth = currentMonth();
+  const tabs = selectedMonth === thisMonth;
+  const timing: 'past' | 'upcoming' =
+    selectedMonth < thisMonth
+      ? 'past'
+      : selectedMonth > thisMonth
+        ? 'upcoming'
+        : searchParams.get('aba') === 'proximos'
+          ? 'upcoming'
+          : 'past';
+  // "Até hoje": do mais recente para trás; "Próximos": do que vence primeiro.
+  const defaultOrder = timing === 'past' ? 'desc' : 'asc';
+  const orderParam = searchParams.get('order');
+  const order: 'asc' | 'desc' =
+    orderParam === 'asc' || orderParam === 'desc' ? orderParam : defaultOrder;
   const filters = {
     ...baseFilters,
+    timing,
     page: Number(searchParams.get('page') ?? 1),
     limit: 10,
     sortBy: 'transactionDate',
     order,
   };
 
-  const { data, meta, loading, error, refetch } = useTransactions(filters);
+  const { data, meta, loading, refreshing, error, refetch } = useTransactions(filters);
   const { data: totals, refetch: refetchTotals } = useTransactionSummary(baseFilters);
 
-  const setParam = (key: string, value: string) => {
+  // A primeira página da outra aba fica pronta antes do toque: trocar é instantâneo.
+  const otherTab = timing === 'past' ? 'upcoming' : 'past';
+  const prefetchKey = tabs && !loading ? JSON.stringify(baseFilters) : null;
+  useEffect(() => {
+    if (!prefetchKey) return;
+    prefetchTransactions({
+      ...(JSON.parse(prefetchKey) as typeof baseFilters),
+      timing: otherTab,
+      page: 1,
+      limit: 10,
+      sortBy: 'transactionDate',
+      order: otherTab === 'past' ? 'desc' : 'asc',
+    });
+  }, [prefetchKey, otherTab]);
+
+  /**
+   * Filtros, aba, ordem e página vivem na URL, mas mudam pelo `history` do
+   * navegador (que o Next sincroniza com `useSearchParams`): sem navegação,
+   * sem ida ao servidor do Next e sem voltar ao topo — só a lista recarrega.
+   * A busca, digitada letra a letra, substitui a entrada em vez de empilhar.
+   */
+  const setParams = (changes: Record<string, string>, mode: 'push' | 'replace' = 'push') => {
     const params = new URLSearchParams(searchParams.toString());
-    if (value) params.set(key, value);
-    else params.delete(key);
-    if (key !== 'page') params.delete('page');
-    router.push(`?${params.toString()}`);
+    for (const [key, value] of Object.entries(changes)) {
+      if (value) params.set(key, value);
+      else params.delete(key);
+    }
+    if (!('page' in changes)) params.delete('page');
+    const url = `?${params.toString()}`;
+    if (mode === 'replace') window.history.replaceState(null, '', url);
+    else window.history.pushState(null, '', url);
   };
+  const setParam = (key: string, value: string) => setParams({ [key]: value });
+  // Trocar de aba volta para a ordem natural dela.
+  const setTab = (tab: 'past' | 'upcoming') =>
+    setParams({ aba: tab === 'upcoming' ? 'proximos' : '', order: '' });
 
   const openNew = () => {
     setEditingTx(undefined);
@@ -297,6 +355,24 @@ function TransacoesContent() {
       setViewingTx(await apiClient.get<Transaction>(`/transactions/${viewingTx.id}`));
     } catch {
       // A lista recarregada já mostra o estado novo.
+    }
+  };
+  /** Cancela (fica no histórico como cancelado), diferente de excluir. */
+  const handleCancelTx = async (tx: Transaction) => {
+    const ok = await confirm({
+      title: 'Cancelar lançamento',
+      description: 'O lançamento ficará com status cancelado. Deseja continuar?',
+      confirmText: 'Cancelar lançamento',
+      cancelText: 'Voltar',
+      variant: 'destructive',
+    });
+    if (!ok) return;
+    try {
+      await apiClient.delete(`/transactions/${tx.id}`);
+      toast.success('Lançamento cancelado.');
+      handleSuccess();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao cancelar lançamento');
     }
   };
   const handleDelete = async (tx: Transaction) => {
@@ -433,7 +509,7 @@ function TransacoesContent() {
           <Input
             placeholder="Buscar descrição..."
             defaultValue={filters.search}
-            onChange={(e) => setParam('search', e.target.value)}
+            onChange={(e) => setParams({ search: e.target.value }, 'replace')}
             className="col-span-2 md:col-span-2"
           />
           <Select defaultValue={filters.type} onChange={(e) => setParam('type', e.target.value)}>
@@ -463,7 +539,7 @@ function TransacoesContent() {
           </Select>
           <Select
             aria-label="Situação do pagamento"
-            defaultValue={filters.settlement}
+            value={filters.settlement ?? ''}
             onChange={(e) => setParam('settlement', e.target.value)}
           >
             <option value="">Qualquer situação</option>
@@ -475,11 +551,22 @@ function TransacoesContent() {
           </Select>
           <Select
             aria-label="Ordenação por data"
-            defaultValue={order}
-            onChange={(e) => setParam('order', e.target.value === 'asc' ? 'asc' : '')}
+            value={order}
+            onChange={(e) =>
+              setParam('order', e.target.value === defaultOrder ? '' : e.target.value)
+            }
           >
-            <option value="desc">Data: mais recentes</option>
-            <option value="asc">Data: mais antigas</option>
+            {timing === 'past' ? (
+              <>
+                <option value="desc">Mais recentes primeiro</option>
+                <option value="asc">Mais antigos primeiro</option>
+              </>
+            ) : (
+              <>
+                <option value="asc">Vence primeiro</option>
+                <option value="desc">Vence por último</option>
+              </>
+            )}
           </Select>
         </CardContent>
       </Card>
@@ -487,7 +574,8 @@ function TransacoesContent() {
       {totals && (
         <div className="space-y-2">
           {/* Dinheiro que de fato entrou e saiu (docs/adrs/0020). */}
-          <div className="grid grid-cols-3 gap-2 sm:gap-4">
+          {/* Celular: um bloco por linha, rótulo à esquerda e valor à direita; a partir do tablet, três colunas. */}
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-4">
             {[
               { label: 'Recebido', value: totals.received, tone: 'text-emerald-600' },
               { label: 'Pago', value: totals.paid, tone: 'text-rose-600' },
@@ -496,9 +584,9 @@ function TransacoesContent() {
                 : { label: 'Faltou', value: -totals.leftover, tone: 'text-rose-600' },
             ].map((item) => (
               <Card key={item.label} className="rounded-2xl">
-                <CardContent className="p-3 sm:p-4">
-                  <p className="text-xs text-muted-foreground">{item.label}</p>
-                  <p className={cn('truncate text-sm font-bold sm:text-lg', item.tone)}>
+                <CardContent className="flex items-center justify-between gap-3 px-4 py-3 sm:block sm:p-4">
+                  <p className="text-sm text-muted-foreground sm:text-xs">{item.label}</p>
+                  <p className={cn('truncate text-base font-bold sm:text-lg', item.tone)}>
                     {formatCurrency(item.value)}
                   </p>
                 </CardContent>
@@ -534,8 +622,70 @@ function TransacoesContent() {
         </div>
       )}
 
-      {/* List */}
-      <Card className="rounded-2xl">
+      {totals && totals.overdueCount > 0 && filters.settlement !== 'overdue' && (
+        <button
+          type="button"
+          onClick={() => setParams({ settlement: 'overdue', aba: '', order: '' })}
+          className="flex w-full items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-left text-sm text-rose-900"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            {totals.overdueCount === 1
+              ? '1 conta vencida'
+              : `${totals.overdueCount} contas vencidas`}{' '}
+            e ainda não paga{totals.overdueCount === 1 ? '' : 's'}:{' '}
+            {formatCurrency(totals.overdueAmount)}.{' '}
+            <span className="font-medium underline">Ver</span>
+          </span>
+        </button>
+      )}
+      {filters.settlement === 'overdue' && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border bg-muted/40 p-3 text-sm">
+          <span>Mostrando só as contas vencidas e não pagas.</span>
+          <Button size="sm" variant="outline" onClick={() => setParam('settlement', '')}>
+            Ver todos
+          </Button>
+        </div>
+      )}
+
+      {/* Abas: o que já aconteceu × o que vem até o fim do mês. */}
+      {tabs && (
+        <div
+          role="tablist"
+          aria-label="Lançamentos até hoje ou próximos"
+          className="grid grid-cols-2 gap-1 rounded-lg border border-border bg-muted/40 p-1 sm:inline-grid"
+        >
+          {(
+            [
+              { key: 'past', label: 'Até hoje', count: totals?.pastCount },
+              { key: 'upcoming', label: 'Próximos', count: totals?.upcomingCount },
+            ] as const
+          ).map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={timing === tab.key}
+              onClick={() => timing !== tab.key && setTab(tab.key)}
+              className={cn(
+                'rounded-md px-4 py-1.5 text-sm transition-colors',
+                timing === tab.key
+                  ? 'bg-background font-medium text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {tab.label}
+              {tab.count !== undefined && ` (${tab.count})`}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* List: na troca de aba/página, a lista anterior fica esmaecida até a nova chegar. */}
+      <Card
+        className={cn('rounded-2xl transition-opacity', refreshing && 'opacity-60')}
+        aria-busy={refreshing}
+      >
         <CardContent className="p-0">
           {error ? (
             <div role="alert" className="p-6 text-sm text-destructive">
@@ -545,7 +695,9 @@ function TransacoesContent() {
             <div className="p-10 text-center text-sm text-muted-foreground">Carregando...</div>
           ) : data.length === 0 ? (
             <div className="p-10 text-center text-sm text-muted-foreground">
-              Nenhum lançamento encontrado.
+              {tabs && timing === 'upcoming'
+                ? 'Nada vence até o fim do mês.'
+                : 'Nenhum lançamento encontrado.'}
             </div>
           ) : (
             <>
@@ -557,16 +709,22 @@ function TransacoesContent() {
                     onClick={() => openTx(tx)}
                     className="cursor-pointer space-y-2 p-4 transition-colors active:bg-muted/40"
                   >
+                    {/* Conta na linha da data; selos e ações abaixo, com quebra quando não cabem. */}
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex min-w-0 items-start gap-2">
                         <TypeIcon tx={tx} />
-                        <div className="min-w-0">
+                        <div className="min-w-0 space-y-0.5">
                           <p className="truncate font-medium">{tx.description}</p>
                           <p className="truncate text-xs text-muted-foreground">
-                            {[formatDateBR(tx.transactionDate), tx.category?.name]
+                            {[
+                              formatDateBR(tx.transactionDate),
+                              dueHint(tx.transactionDate),
+                              tx.category?.name,
+                            ]
                               .filter(Boolean)
                               .join(' · ')}
                           </p>
+                          <AccountLabel tx={tx} className="text-xs text-muted-foreground" />
                         </div>
                       </div>
                       <span className={cn('shrink-0', amountClass(tx))}>
@@ -574,12 +732,11 @@ function TransacoesContent() {
                         {formatCurrency(Number(tx.amount))}
                       </span>
                     </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-                        <AccountLabel tx={tx} className="max-w-[9rem]" />
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-9">
+                      <div className="flex flex-wrap items-center gap-1.5 empty:hidden">
                         <EntryBadges tx={tx} />
                       </div>
-                      <div className="-mr-2 flex shrink-0">{actions(tx)}</div>
+                      <div className="-mr-2 ml-auto flex shrink-0 items-center">{actions(tx)}</div>
                     </div>
                   </li>
                 ))}
@@ -610,8 +767,10 @@ function TransacoesContent() {
                             <div className="min-w-0">
                               <p className="truncate font-medium">{tx.description}</p>
                               <div className="flex items-center gap-1.5">
-                                <p className="text-xs text-muted-foreground">
+                                <p className="whitespace-nowrap text-xs text-muted-foreground">
                                   {formatDateBR(tx.transactionDate)}
+                                  {dueHint(tx.transactionDate) &&
+                                    ` · ${dueHint(tx.transactionDate)}`}
                                 </p>
                                 <EntryBadges tx={tx} />
                               </div>
@@ -644,7 +803,13 @@ function TransacoesContent() {
           page={meta.page}
           totalPages={meta.total_pages}
           onPageChange={(nova) => setParam('page', String(nova))}
-          summary={`${meta.total} lançamento${meta.total === 1 ? '' : 's'} em ${monthLabel(selectedMonth)}`}
+          summary={`${meta.total} lançamento${meta.total === 1 ? '' : 's'} ${
+            !tabs
+              ? `em ${monthLabel(selectedMonth)}`
+              : timing === 'past'
+                ? 'até hoje'
+                : `até o fim de ${monthLabel(selectedMonth).split(' ')[0].toLowerCase()}`
+          }`}
         />
       )}
 
@@ -672,7 +837,18 @@ function TransacoesContent() {
             />
           )}
         {editingTx && (
-          <div className="mt-2 flex justify-end">
+          <div className="mt-3 flex flex-wrap justify-end gap-1 border-t pt-3">
+            {editingTx.status === 'confirmed' && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="text-destructive"
+                onClick={() => void handleCancelTx(editingTx)}
+              >
+                Cancelar lançamento
+              </Button>
+            )}
             <Button
               type="button"
               size="sm"

@@ -9,7 +9,6 @@ import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ui/toast';
-import { useConfirm } from '@/components/ui/confirm';
 import type { Transaction } from '@/hooks/useTransactions';
 import { useFinancialResources } from '@/hooks/useFinancialResources';
 import { ResourceSelect } from '@/components/resources/ResourceSelect';
@@ -105,7 +104,6 @@ export function TransactionForm({
   const [settleTouched, setSettleTouched] = useState(false);
   const [showEventDate, setShowEventDate] = useState(false);
   const toast = useToast();
-  const confirm = useConfirm();
 
   const {
     register,
@@ -258,25 +256,6 @@ export function TransactionForm({
     }
   };
 
-  const handleCancel = async () => {
-    if (!transaction) return onCancel();
-    const ok = await confirm({
-      title: 'Cancelar lançamento',
-      description: 'O lançamento ficará com status cancelado. Deseja continuar?',
-      confirmText: 'Cancelar lançamento',
-      cancelText: 'Voltar',
-      variant: 'destructive',
-    });
-    if (!ok) return;
-    try {
-      await apiClient.delete(`/transactions/${transaction.id}`);
-      toast.success('Lançamento cancelado.');
-      onSuccess();
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Erro ao cancelar lançamento');
-    }
-  };
-
   const filteredCategories = categories.filter((c) => c.type === selectedType);
   // Parcelamento só existe para despesa: parcela já gravada não vira receita.
   const lockedToExpense = installmentOnly || transaction?.recurrenceType === 'parcelado';
@@ -351,7 +330,7 @@ export function TransactionForm({
           <p className="text-xs text-destructive">{errors.description.message}</p>
         )}
       </div>
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="space-y-1">
           <Label htmlFor="transaction-resource">Conta ou cartão</Label>
           <ResourceSelect
@@ -530,11 +509,7 @@ export function TransactionForm({
                   ? 'Criar parcelamento'
                   : 'Criar lançamento'}
         </Button>
-        {transaction && (
-          <Button type="button" variant="destructive" onClick={handleCancel}>
-            Cancelar
-          </Button>
-        )}
+        {/* Cancelar e excluir ficam no rodapé do diálogo (TransactionsView): no celular, três botões não cabem numa linha. */}
         <Button type="button" variant="outline" onClick={onCancel}>
           Fechar
         </Button>

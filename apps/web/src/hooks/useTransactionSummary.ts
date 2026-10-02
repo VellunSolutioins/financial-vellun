@@ -32,6 +32,12 @@ export interface TransactionSummary {
   onCard: number;
   /** Recebido − pago. */
   leftover: number;
+  /** Lançamentos das abas "Até hoje" e "Próximos". */
+  pastCount: number;
+  upcomingCount: number;
+  /** Contas vencidas e não pagas: quantidade e quanto falta. */
+  overdueCount: number;
+  overdueAmount: number;
   count: number;
   byCategory: CategoryTotal[];
 }
