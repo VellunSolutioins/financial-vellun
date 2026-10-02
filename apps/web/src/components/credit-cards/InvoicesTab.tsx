@@ -32,7 +32,15 @@ export function invoiceMonthLabel(referenceMonth: string) {
 
 /** Rótulo e tom do estado: ciclo (aberta/futura) antes da situação de pagamento. */
 export function invoiceBadge(invoice: CardInvoice): { label: string; className: string } {
-  if (invoice.isFuture) return { label: 'Futura', className: 'bg-muted text-muted-foreground' };
+  if (invoice.isOpening && invoice.remaining > 0) {
+    return { label: 'Anterior ao controle', className: 'bg-amber-100 text-amber-800' };
+  }
+  if (invoice.isFuture) {
+    return invoice.remaining === 0 && invoice.total > 0
+      ? { label: 'Futura · paga', className: 'bg-emerald-100 text-emerald-800' }
+      : { label: 'Futura', className: 'bg-muted text-muted-foreground' };
+  }
+  if (invoice.isOverdue) return { label: 'Vencida', className: 'bg-rose-100 text-rose-800' };
   if (invoice.state === 'open') return { label: 'Aberta', className: 'bg-blue-100 text-blue-800' };
   switch (invoice.paymentStatus) {
     case 'paid':
@@ -164,9 +172,14 @@ export function InvoicesTab({ card, onChanged }: Props) {
                     </div>
                     <div className="shrink-0 text-right">
                       <p className="text-sm font-semibold">{formatCurrency(invoice.total)}</p>
-                      {invoice.payments > 0 && (
+                      {invoice.remaining !== invoice.total && (
                         <p className="text-xs text-muted-foreground">
-                          resta {formatCurrency(Math.max(0, invoice.remaining))}
+                          a pagar {formatCurrency(invoice.remaining)}
+                        </p>
+                      )}
+                      {invoice.forecast > 0 && (
+                        <p className="text-xs text-muted-foreground">
+                          + {formatCurrency(invoice.forecast)} previsto
                         </p>
                       )}
                     </div>
@@ -208,6 +221,12 @@ export function InvoicesTab({ card, onChanged }: Props) {
               <dd className="text-right">{formatDateBR(detail.closingDate)}</dd>
               <dt className="text-muted-foreground">Vencimento</dt>
               <dd className="text-right">{formatDateBR(detail.dueDate)}</dd>
+              {detail.openingDebt > 0 && (
+                <>
+                  <dt className="text-muted-foreground">Fatura anterior ao controle</dt>
+                  <dd className="text-right">{formatCurrency(detail.openingDebt)}</dd>
+                </>
+              )}
               <dt className="text-muted-foreground">Compras</dt>
               <dd className="text-right">{formatCurrency(detail.charges)}</dd>
               {detail.refunds > 0 && (
@@ -216,17 +235,64 @@ export function InvoicesTab({ card, onChanged }: Props) {
                   <dd className="text-right">−{formatCurrency(detail.refunds)}</dd>
                 </>
               )}
+              {detail.openingCredit > 0 && (
+                <>
+                  <dt className="text-muted-foreground">Crédito anterior ao controle</dt>
+                  <dd className="text-right">−{formatCurrency(detail.openingCredit)}</dd>
+                </>
+              )}
               {detail.payments > 0 && (
                 <>
                   <dt className="text-muted-foreground">Pagamentos</dt>
                   <dd className="text-right">−{formatCurrency(detail.payments)}</dd>
                 </>
               )}
-              <dt className="font-medium">{detail.remaining < 0 ? 'Crédito' : 'Restante'}</dt>
-              <dd className="text-right font-semibold">
-                {formatCurrency(Math.abs(detail.remaining))}
-              </dd>
+              {detail.creditsApplied.map((credit) => (
+                <div key={credit.invoiceId} className="contents">
+                  <dt className="text-muted-foreground">
+                    Crédito da fatura de {invoiceMonthLabel(credit.referenceMonth).toLowerCase()}
+                  </dt>
+                  <dd className="text-right">−{formatCurrency(credit.amount)}</dd>
+                </div>
+              ))}
+              <dt className="font-medium">A pagar</dt>
+              <dd className="text-right font-semibold">{formatCurrency(detail.remaining)}</dd>
+              {detail.surplus > 0 && (
+                <>
+                  <dt className="text-muted-foreground">Pago acima do cobrado</dt>
+                  <dd className="text-right">{formatCurrency(detail.surplus)}</dd>
+                </>
+              )}
+              {detail.surplusAppliedTo.map((credit) => (
+                <div key={credit.invoiceId} className="contents">
+                  <dt className="text-xs text-muted-foreground">
+                    → aplicado na fatura de {invoiceMonthLabel(credit.referenceMonth).toLowerCase()}
+                  </dt>
+                  <dd className="text-right text-xs">{formatCurrency(credit.amount)}</dd>
+                </div>
+              ))}
+              {detail.unappliedSurplus > 0 && (
+                <>
+                  <dt className="text-muted-foreground">Saldo credor (ainda sem uso)</dt>
+                  <dd className="text-right text-emerald-700">
+                    {formatCurrency(detail.unappliedSurplus)}
+                  </dd>
+                </>
+              )}
+              {detail.forecast > 0 && (
+                <>
+                  <dt className="text-muted-foreground">Previsto (fora do total)</dt>
+                  <dd className="text-right">{formatCurrency(detail.forecast)}</dd>
+                </>
+              )}
             </dl>
+            {(detail.creditsApplied.length > 0 || detail.surplusAppliedTo.length > 0) && (
+              <p className="text-xs text-muted-foreground">
+                Crédito de uma fatura é usado nas faturas com valor a pagar, da que vence primeiro
+                para a última, só dentro deste cartão. A operadora pode aplicar em outra ordem: o
+                total é o mesmo.
+              </p>
+            )}
 
             {paying ? (
               <PayInvoiceForm
@@ -298,6 +364,11 @@ export function InvoicesTab({ card, onChanged }: Props) {
                               Estorno
                             </Badge>
                           )}
+                          {item.isForecast && (
+                            <Badge variant="outline" className="mr-1 px-1.5 py-0 text-[10px]">
+                              Prevista
+                            </Badge>
+                          )}
                           {item.advancedAt && (
                             <Badge variant="outline" className="mr-1 px-1.5 py-0 text-[10px]">
                               Adiantada
@@ -316,10 +387,12 @@ export function InvoicesTab({ card, onChanged }: Props) {
                       <span
                         className={cn(
                           'shrink-0 font-medium',
-                          item.type === 'refund' && 'text-emerald-600',
+                          (item.type === 'refund' || item.type === 'opening_credit') &&
+                            'text-emerald-600',
+                          item.isForecast && 'text-muted-foreground',
                         )}
                       >
-                        {item.type === 'refund' ? '−' : ''}
+                        {item.type === 'refund' || item.type === 'opening_credit' ? '−' : ''}
                         {formatCurrency(Number(item.amount))}
                       </span>
                     </li>

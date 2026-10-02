@@ -29,6 +29,8 @@ const schema = z.object({
     .refine((v) => Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= 31, {
       message: 'Informe um dia entre 1 e 31',
     }),
+  /** Contrato firmado em vez de previsão cancelável. */
+  committed: z.boolean(),
 });
 type FormData = z.infer<typeof schema>;
 
@@ -60,6 +62,7 @@ export function RecurrenceForm({ recurrence, onSuccess, onCancel }: Props) {
       accountId: recurrence.accountId,
       categoryId: recurrence.categoryId ?? '',
       dueDay: String(recurrence.dueDay),
+      committed: recurrence.forecast === false,
     },
   });
 
@@ -78,10 +81,12 @@ export function RecurrenceForm({ recurrence, onSuccess, onCancel }: Props) {
 
   const onSubmit = async (data: FormData) => {
     try {
+      const { committed, ...rest } = data;
       await apiClient.patch(`/recurrences/${recurrence.seriesId}`, {
-        ...data,
+        ...rest,
         amount: currencyToNumber(data.amount),
         dueDay: Number(data.dueDay),
+        forecast: !committed,
       });
       toast.success('Recorrência atualizada.');
       onSuccess();
@@ -156,6 +161,16 @@ export function RecurrenceForm({ recurrence, onSuccess, onCancel }: Props) {
           </Select>
         </div>
       </div>
+      <label className="flex items-start gap-2 text-sm">
+        <input type="checkbox" className="mt-0.5 h-4 w-4" {...register('committed')} />
+        <span>
+          Compromisso firmado (contrato)
+          <span className="block text-xs text-muted-foreground">
+            Sem marcar, as próximas ocorrências são previsão: cancelável, fora da dívida. Ocorrência
+            já paga não muda.
+          </span>
+        </span>
+      </label>
       <div className="flex gap-2 pt-2">
         <Button type="submit" disabled={isSubmitting} className="flex-1">
           {isSubmitting ? 'Salvando...' : 'Salvar alterações'}

@@ -84,6 +84,9 @@ export function ResourceCategoryChart({
       query={{
         periodStart,
         periodEnd,
+        // Mesma base dos gastos do dashboard: a compra parcelada conta no mês
+        // da compra, não parcela a parcela (docs/adrs/0018).
+        dateBasis: 'event',
         ...(kind === 'accounts' ? { accountIds: ids.join(',') } : { cardIds: ids.join(',') }),
       }}
     />
@@ -103,7 +106,13 @@ function ResourceCategoryData({
   title: string;
   subtitle: string;
   action: React.ReactNode;
-  query: { periodStart: string; periodEnd: string; accountIds?: string; cardIds?: string };
+  query: {
+    periodStart: string;
+    periodEnd: string;
+    dateBasis: 'event';
+    accountIds?: string;
+    cardIds?: string;
+  };
 }) {
   const { data, loading } = useTransactionSummary(query);
   const slices = loading

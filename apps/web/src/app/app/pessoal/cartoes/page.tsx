@@ -111,7 +111,7 @@ export default function CartoesPage() {
           <CardContent className="space-y-3 p-4 sm:p-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-sm text-muted-foreground">
-                Limite comprometido em todos os cartões
+                Limite comprometido nos cartões ativos
               </span>
               {summary.incomeHealth && (
                 <Badge className="shrink-0 bg-muted text-foreground">
@@ -140,13 +140,37 @@ export default function CartoesPage() {
               {summary.incomePercentage !== null &&
                 ` · ${summary.incomePercentage.toFixed(0)}% da renda fixa do mês`}
             </p>
-            {summary.pendingSetupCount > 0 && (
-              <p className="text-xs text-amber-700">
-                {summary.pendingSetupCount === 1
-                  ? '1 cartão sem fechamento configurado fica fora destes totais.'
-                  : `${summary.pendingSetupCount} cartões sem fechamento configurado ficam fora destes totais.`}
+            <p className="text-xs text-muted-foreground">
+              Dívida efetiva em todos os cartões
+              {summary.archivedWithDebtCount > 0 && ', inclusive arquivados'}:{' '}
+              <span className="font-semibold text-foreground">
+                {formatCurrency(summary.totalDebt)}
+              </span>
+              {summary.totalOverdue > 0 && (
+                <span className="text-rose-600">
+                  {' '}
+                  · vencido {formatCurrency(summary.totalOverdue)}
+                </span>
+              )}
+              {summary.totalCredit > 0 && ` · saldo credor ${formatCurrency(summary.totalCredit)}`}
+            </p>
+            {summary.totalForecast > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Assinaturas e compras previstas: {formatCurrency(summary.totalForecast)} — fora da
+                dívida e do limite até a data da cobrança.
               </p>
             )}
+            {summary.incompleteCards > 0 && (
+              <p className="text-xs text-amber-700">
+                {summary.incompleteCards === 1
+                  ? '1 cartão sem fechamento configurado: a dívida dele é desconhecida e fica fora destes totais.'
+                  : `${summary.incompleteCards} cartões sem fechamento configurado: a dívida deles é desconhecida e fica fora destes totais.`}
+              </p>
+            )}
+            <p className="text-[11px] text-muted-foreground">
+              Limite disponível é uma estimativa: a operadora pode liberar limite, aplicar crédito
+              ou processar estorno em outro momento.
+            </p>
           </CardContent>
         </Card>
       )}
@@ -227,7 +251,7 @@ export default function CartoesPage() {
                       </div>
                       <div className="min-w-0 space-y-0.5 text-right text-xs text-muted-foreground">
                         <p>
-                          Parcelas futuras{' '}
+                          Parcelas futuras a pagar{' '}
                           <span className="font-semibold text-foreground">
                             {formatCurrency(card.futureInstallments ?? 0)}
                           </span>
@@ -241,15 +265,18 @@ export default function CartoesPage() {
                           </p>
                         )}
                         <p>
-                          Dívida total{' '}
+                          Dívida efetiva{' '}
                           <span className="font-semibold text-foreground">
                             {formatCurrency(card.totalDebt ?? 0)}
                           </span>
                         </p>
                         {(card.credit ?? 0) > 0 && (
                           <p className="text-emerald-700">
-                            Crédito {formatCurrency(card.credit ?? 0)}
+                            Saldo credor {formatCurrency(card.credit ?? 0)}
                           </p>
+                        )}
+                        {(card.forecast ?? 0) > 0 && (
+                          <p>Previsto {formatCurrency(card.forecast ?? 0)}</p>
                         )}
                       </div>
                     </div>
@@ -363,9 +390,16 @@ export default function CartoesPage() {
                     <CreditCardIcon className="h-4 w-4" />
                   </span>
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{card.name}</p>
+                    <Link
+                      href={`/app/pessoal/cartoes/${card.id}`}
+                      className="block truncate text-sm font-medium hover:underline"
+                    >
+                      {card.name}
+                    </Link>
                     <p className="text-xs text-muted-foreground">
-                      Não recebe compras; o histórico continua disponível.
+                      {(card.totalDebt ?? 0) > 0
+                        ? `Ainda deve ${formatCurrency(card.totalDebt ?? 0)}: continua pagável e entra nos totais.`
+                        : 'Não recebe compras; o histórico continua disponível.'}
                     </p>
                   </div>
                 </div>

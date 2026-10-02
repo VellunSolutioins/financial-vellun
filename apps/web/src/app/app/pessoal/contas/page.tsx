@@ -36,12 +36,13 @@ const accountTypeLabels: Record<string, string> = {
   cash: 'Dinheiro',
   digital_wallet: 'Carteira Digital',
   investment: 'Investimento',
+  loan: 'Empréstimo/Financiamento',
   other: 'Outro',
 };
 
 const schema = z.object({
   name: z.string().min(1, 'Nome obrigatório'),
-  type: z.enum(['checking', 'savings', 'cash', 'digital_wallet', 'investment', 'other']),
+  type: z.enum(['checking', 'savings', 'cash', 'digital_wallet', 'investment', 'loan', 'other']),
   initialBalance: z.string().regex(CURRENCY_REGEX, 'Valor inválido').optional(),
 });
 type FormData = z.infer<typeof schema>;
@@ -64,6 +65,7 @@ export default function ContasPage() {
     handleSubmit,
     reset,
     setValue,
+    watch,
     formState: { errors, isSubmitting },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -116,11 +118,21 @@ export default function ContasPage() {
         await apiClient.patch(`/accounts/${editing.id}`, { name: data.name, type: data.type });
         toast.success('Conta atualizada com sucesso.');
       } else {
-        await apiClient.post('/accounts', {
-          name: data.name,
-          type: data.type,
-          initialBalance: currencyToNumber(data.initialBalance ?? '0'),
-        });
+        // Empréstimo: o valor informado é a dívida que já existia (saldo negativo).
+        await apiClient.post(
+          '/accounts',
+          data.type === 'loan'
+            ? {
+                name: data.name,
+                type: data.type,
+                initialDebt: currencyToNumber(data.initialBalance ?? '0'),
+              }
+            : {
+                name: data.name,
+                type: data.type,
+                initialBalance: currencyToNumber(data.initialBalance ?? '0'),
+              },
+        );
         toast.success('Conta criada com sucesso.');
       }
       setModalOpen(false);
@@ -195,6 +207,18 @@ export default function ContasPage() {
                 >
                   {formatCurrency(Number(acc.currentBalance))}
                 </p>
+                {acc.type === 'loan' && (
+                  <p className="text-xs text-muted-foreground">
+                    Saldo negativo = dívida. Receba o empréstimo e amortize com
+                    &quot;Transferir&quot; em Lançamentos.
+                  </p>
+                )}
+                {acc.type === 'investment' && (
+                  <p className="text-xs text-muted-foreground">
+                    Fora do saldo em contas do dashboard. Aporte e resgate são transferências;
+                    rendimento é receita.
+                  </p>
+                )}
                 <div className="flex flex-wrap gap-2 mt-4">
                   <Button size="sm" variant="outline" asChild>
                     <Link href={`/app/pessoal/contas/${acc.id}`}>Movimentações</Link>
@@ -262,7 +286,7 @@ export default function ContasPage() {
           </div>
           {!editing && (
             <div className="space-y-1">
-              <Label>Saldo inicial (R$)</Label>
+              <Label>{watch('type') === 'loan' ? 'Dívida atual (R$)' : 'Saldo inicial (R$)'}</Label>
               <Input
                 inputMode="decimal"
                 placeholder="0,00"

@@ -1,7 +1,9 @@
 'use client';
+import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useEffect, useState, Suspense } from 'react';
 import {
+  AlertTriangle,
   ArrowLeftRight,
   CreditCard as CreditCardIcon,
   Eye,
@@ -33,7 +35,15 @@ import { DateBasisNote } from '@/components/resources/DateBasisNote';
 import { RefundForm } from '@/components/transactions/RefundForm';
 import { DeleteInstallmentDialog } from '@/components/transactions/DeleteInstallmentDialog';
 import { AdvanceInstallmentDialog } from '@/components/transactions/AdvanceInstallmentDialog';
-import { isEditableEntry, isInflow, signOf, typeLabel } from '@/lib/transaction-display';
+import { SettlementPanel } from '@/components/transactions/SettlementPanel';
+import { TransferForm } from '@/components/transactions/TransferForm';
+import {
+  isEditableEntry,
+  isInflow,
+  settlementLabel,
+  signOf,
+  typeLabel,
+} from '@/lib/transaction-display';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
@@ -88,9 +98,22 @@ function TypeIcon({ tx }: { tx: Transaction }) {
   );
 }
 
+/** Situação do pagamento: pago, a pagar, vencido, parcial, previsto. */
+function SettlementBadge({ tx }: { tx: Transaction }) {
+  if (tx.status === 'cancelled') return null;
+  const info = settlementLabel(tx);
+  if (!info) return null;
+  return (
+    <Badge variant={info.tone} className="px-1.5 py-0 text-[10px]">
+      {info.label}
+    </Badge>
+  );
+}
+
 function EntryBadges({ tx }: { tx: Transaction }) {
   return (
     <>
+      <SettlementBadge tx={tx} />
       {!isEditableEntry(tx) && (
         <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
           {typeLabel(tx)}
@@ -191,6 +214,15 @@ function TransacoesContent() {
   // Parcela de compra parcelada: a exclusão pergunta o escopo (parcela, futuras, compra).
   const [deletingParcel, setDeletingParcel] = useState<Transaction | undefined>();
   const [advancingSeriesId, setAdvancingSeriesId] = useState<string | undefined>();
+  const [transferOpen, setTransferOpen] = useState(false);
+  // Pagamentos inferidos na migração (entraram no saldo só porque a data chegou).
+  const [toReview, setToReview] = useState(0);
+  useEffect(() => {
+    apiClient
+      .get<{ meta: { total: number } }>('/reconciliation/legacy-settlements')
+      .then((res) => setToReview(res.meta.total))
+      .catch(() => setToReview(0));
+  }, []);
   const selectedMonth = searchParams.get('month') ?? currentMonth();
   const { start: monthStart, end: monthEnd } = monthRange(selectedMonth);
   const { data: resources } = useFinancialResources();
@@ -201,6 +233,7 @@ function TransacoesContent() {
     status: searchParams.get('status') ?? undefined,
     source: searchParams.get('source') ?? undefined,
     categoryId: searchParams.get('categoryId') ?? undefined,
+    settlement: searchParams.get('settlement') ?? undefined,
     search: searchParams.get('search') ?? undefined,
     periodStart: monthStart,
     periodEnd: monthEnd,
@@ -240,6 +273,17 @@ function TransacoesContent() {
     closeModal();
     refetchTotals();
     void refetch();
+  };
+  /** Depois de pagar ou reverter: recarrega a lista e o lançamento aberto nos detalhes. */
+  const refreshViewing = async () => {
+    refetchTotals();
+    void refetch();
+    if (!viewingTx) return;
+    try {
+      setViewingTx(await apiClient.get<Transaction>(`/transactions/${viewingTx.id}`));
+    } catch {
+      // A lista recarregada já mostra o estado novo.
+    }
   };
   const handleDelete = async (tx: Transaction) => {
     if (tx.recurrenceType === 'parcelado' && tx.seriesId) {
@@ -297,7 +341,9 @@ function TransacoesContent() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold sm:text-2xl">Lançamentos</h1>
-          <p className="text-sm text-muted-foreground">Suas receitas e despesas do período.</p>
+          <p className="text-sm text-muted-foreground">
+            Receitas e despesas pela data de vencimento, com a situação de cada pagamento.
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ResourceFilter resources={resources} value={selection} onChange={setSelection} />
@@ -308,6 +354,10 @@ function TransacoesContent() {
             onChange={(e) => e.target.value && setParam('month', e.target.value)}
             className="h-9 w-auto text-sm"
           />
+          <Button size="sm" variant="outline" onClick={() => setTransferOpen(true)}>
+            <ArrowLeftRight className="mr-1 h-4 w-4" />
+            Transferir
+          </Button>
           <Button size="sm" onClick={openNew}>
             <Plus className="mr-1 h-4 w-4" />
             Lançamento
@@ -315,9 +365,22 @@ function TransacoesContent() {
         </div>
       </div>
 
+      {toReview > 0 && (
+        <Link
+          href="/app/conta/conciliacao"
+          className="flex items-start gap-2 rounded-2xl border border-yellow-300 bg-yellow-50 p-3 text-sm text-yellow-900"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            {toReview} pagamento{toReview === 1 ? '' : 's'} entr{toReview === 1 ? 'ou' : 'aram'} no
+            saldo só porque a data chegou, sem confirmação. Confira se foram pagos de fato.
+          </span>
+        </Link>
+      )}
+
       {/* Filters */}
       <Card className="rounded-2xl">
-        <CardContent className="grid grid-cols-2 gap-3 p-4 md:grid-cols-6">
+        <CardContent className="grid grid-cols-2 gap-3 p-4 md:grid-cols-7">
           <Input
             placeholder="Buscar descrição..."
             defaultValue={filters.search}
@@ -348,6 +411,18 @@ function TransacoesContent() {
                 {category.name}
               </option>
             ))}
+          </Select>
+          <Select
+            aria-label="Situação do pagamento"
+            defaultValue={filters.settlement}
+            onChange={(e) => setParam('settlement', e.target.value)}
+          >
+            <option value="">Qualquer situação</option>
+            <option value="open">Em aberto</option>
+            <option value="overdue">Vencidos</option>
+            <option value="partial">Pagos em parte</option>
+            <option value="settled">Pagos</option>
+            <option value="forecast">Previsões</option>
           </Select>
           <Select
             aria-label="Ordenação por data"
@@ -382,7 +457,13 @@ function TransacoesContent() {
               </Card>
             ))}
           </div>
-          <DateBasisNote />
+          {(totals.openExpense > 0 || totals.openIncome > 0) && (
+            <p className="text-xs text-muted-foreground">
+              Ainda em aberto entre estes lançamentos: {formatCurrency(totals.openExpense)} a pagar
+              {totals.openIncome > 0 && ` · ${formatCurrency(totals.openIncome)} a receber`}.
+            </p>
+          )}
+          <DateBasisNote variant="due" />
         </div>
       )}
 
@@ -537,7 +618,22 @@ function TransacoesContent() {
               ['Descrição', viewingTx.description],
               ['Tipo', typeLabel(viewingTx)],
               ['Valor', `${signOf(viewingTx)}${formatCurrency(Number(viewingTx.amount))}`],
-              ['Data', formatDateBR(viewingTx.transactionDate)],
+              [
+                viewingTx.account?.type === 'credit_card' ? 'Data' : 'Vencimento',
+                formatDateBR(viewingTx.transactionDate),
+              ],
+              ...(viewingTx.eventDate &&
+              viewingTx.eventDate.slice(0, 10) !== viewingTx.transactionDate.slice(0, 10)
+                ? [
+                    [
+                      viewingTx.recurrenceType === 'parcelado' ? 'Data da compra' : 'Data do fato',
+                      formatDateBR(viewingTx.eventDate),
+                    ],
+                  ]
+                : []),
+              ...(settlementLabel(viewingTx) && viewingTx.status !== 'cancelled'
+                ? [['Situação', settlementLabel(viewingTx)!.label]]
+                : []),
               ['Categoria', viewingTx.category?.name ?? '—'],
               ['Conta/cartão', viewingTx.account?.name ?? '—'],
               ['Origem', sourceLabels[viewingTx.source]],
@@ -581,6 +677,27 @@ function TransacoesContent() {
             Parte de um pagamento de fatura. Para desfazer, reverta o pagamento na fatura do cartão.
           </p>
         )}
+        {viewingTx?.type === 'transfer' && viewingTx.accountTransferId && (
+          <p className="mt-3 text-xs text-muted-foreground">
+            Parte de uma transferência entre suas contas: não é receita nem despesa.
+          </p>
+        )}
+        {viewingTx?.account?.type === 'credit_card' && viewingTx.type === 'expense' && (
+          <p className="mt-3 text-xs text-muted-foreground">
+            Compra no cartão não sai do saldo agora: é paga com a fatura.
+          </p>
+        )}
+        {viewingTx &&
+          viewingTx.status === 'confirmed' &&
+          viewingTx.state &&
+          ['open', 'partial', 'forecast', 'settled'].includes(viewingTx.state) && (
+            <SettlementPanel
+              key={viewingTx.id}
+              transaction={viewingTx}
+              accounts={resources?.accounts ?? []}
+              onChanged={() => void refreshViewing()}
+            />
+          )}
         {viewingTx?.type === 'expense' && viewingTx.status === 'confirmed' && (
           <div className="mt-4 flex flex-wrap justify-end gap-2">
             {viewingTx.recurrenceType === 'parcelado' && viewingTx.seriesId && (
@@ -626,6 +743,20 @@ function TransacoesContent() {
               void refetch();
             }}
             onCancel={() => setRefundingTx(undefined)}
+          />
+        )}
+      </Dialog>
+
+      <Dialog open={transferOpen} onClose={() => setTransferOpen(false)} title="Transferir">
+        {transferOpen && (
+          <TransferForm
+            accounts={resources?.accounts ?? []}
+            onSuccess={() => {
+              setTransferOpen(false);
+              refetchTotals();
+              void refetch();
+            }}
+            onCancel={() => setTransferOpen(false)}
           />
         )}
       </Dialog>

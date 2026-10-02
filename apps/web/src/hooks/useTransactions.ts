@@ -2,15 +2,30 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { apiClient } from '@/lib/api-client';
-import type { LedgerType } from '@/lib/transaction-display';
+import type { LedgerType, SettlementState } from '@/lib/transaction-display';
 
 export interface Transaction {
   id: string;
-  /** `refund` = estorno; `transfer` = perna de pagamento de fatura. */
+  /** `refund` = estorno; `transfer` = perna de pagamento de fatura ou de transferência. */
   type: LedgerType;
   amount: number;
   description: string;
+  /** Data da ocorrência: vencimento ou previsão (na parcela, a data dela). */
   transactionDate: string;
+  /** Data do fato (na parcela, a da compra). */
+  eventDate?: string;
+  /** Previsão (ex.: assinatura): não é obrigação constituída. */
+  forecast?: boolean;
+  /** Estado de liquidação calculado pela API. */
+  state?: SettlementState;
+  /** Quanto já foi pago/recebido. */
+  settledAmount?: number;
+  /** Quanto ainda falta (0 se liquidado, de cartão ou movimentação). */
+  remaining?: number;
+  /** Em aberto com vencimento passado: continua visível até ser pago. */
+  isOverdue?: boolean;
+  purchaseId?: string | null;
+  accountTransferId?: string | null;
   status: 'confirmed' | 'cancelled';
   source: 'manual' | 'whatsapp' | 'ai' | 'import' | 'recurring';
   categoryId?: string;
@@ -51,6 +66,10 @@ export interface TransactionFilters {
   recurrenceType?: string;
   periodStart?: string;
   periodEnd?: string;
+  /** Estado de liquidação: open, partial, settled, overdue ou forecast. */
+  settlement?: string;
+  /** A que data o período se aplica: vencimento (`due`, padrão) ou fato (`event`). */
+  dateBasis?: 'due' | 'event';
   sortBy?: string;
   order?: 'asc' | 'desc';
 }

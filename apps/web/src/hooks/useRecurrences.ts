@@ -17,6 +17,8 @@ export interface Recurrence {
   frequency: RecurrenceFrequency;
   dueDay: number;
   isActive: boolean;
+  /** Previsão (cancelável) ou compromisso firmado (`false`). */
+  forecast: boolean;
   nextDate: string;
   /** Ocorrências confirmadas de hoje em diante. */
   remaining: number;

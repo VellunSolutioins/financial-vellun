@@ -14,9 +14,14 @@ export interface CategoryTotal {
 }
 
 export interface TransactionSummary {
+  /** `due`: período pela data de vencimento; `event`: pela data do fato (compra). */
+  dateBasis?: 'due' | 'event';
   income: number;
   expense: number;
   net: number;
+  /** Ainda a receber/pagar (conta comum) entre os lançamentos filtrados. */
+  openIncome: number;
+  openExpense: number;
   count: number;
   byCategory: CategoryTotal[];
 }

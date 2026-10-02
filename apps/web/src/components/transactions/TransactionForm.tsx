@@ -14,6 +14,7 @@ import type { Transaction } from '@/hooks/useTransactions';
 import { useFinancialResources } from '@/hooks/useFinancialResources';
 import { ResourceSelect } from '@/components/resources/ResourceSelect';
 import { CURRENCY_REGEX, currencyToNumber, formatCurrencyInput, maskCurrency } from '@/lib/masks';
+import { newIdempotencyKey, todayInputValue } from '@/lib/transaction-display';
 import { cn } from '@/lib/utils';
 
 const schema = z
@@ -32,6 +33,16 @@ const schema = z
     recurrenceFrequency: z.enum(['monthly', 'bimonthly', 'semiannual', 'annual']),
     installments: z.string().optional(),
     recurrenceMonths: z.string().optional(),
+    /** Já foi pago/recebido (a primeira ocorrência): a liquidação nasce junto. */
+    settle: z.boolean(),
+    /** Só no fixo: compromisso firmado (contrato) em vez de previsão cancelável. */
+    committed: z.boolean(),
+    /** Data do fato, quando difere do vencimento (vazio = a mesma). */
+    eventDate: z.string().optional(),
+  })
+  .refine((data) => !data.settle || data.transactionDate <= todayInputValue(), {
+    message: 'Data futura ainda não foi paga: desmarque "já foi pago" ou use a data do pagamento.',
+    path: ['settle'],
   })
   .refine(
     (data) =>
@@ -84,6 +95,11 @@ export function TransactionForm({
   const { data: resources } = useFinancialResources();
   const [categories, setCategories] = useState<{ id: string; name: string; type: string }[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  // Uma chave por abertura do formulário: duplo clique não cria dois lançamentos.
+  const [idempotencyKey] = useState(newIdempotencyKey);
+  // Enquanto o usuário não mexe, "já foi pago" acompanha a data (passada = à vista).
+  const [settleTouched, setSettleTouched] = useState(false);
+  const [showEventDate, setShowEventDate] = useState(false);
   const toast = useToast();
   const confirm = useConfirm();
 
@@ -116,11 +132,17 @@ export function TransactionForm({
       recurrenceFrequency: 'monthly',
       installments: '',
       recurrenceMonths: '',
+      settle: !transaction && !fixedOnly && !installmentOnly,
+      committed: false,
+      eventDate: '',
     },
   });
 
   const selectedType = watch('type');
   const selectedRecurrenceType = watch('recurrenceType');
+  const watchedDate = watch('transactionDate');
+  const watchedAccount = watch('accountId');
+  const watchedSettle = watch('settle');
   const watchedAmount = watch('amount');
   const watchedInstallments = watch('installments');
 
@@ -153,6 +175,16 @@ export function TransactionForm({
 
   const isCardAccount = (accountId: string) =>
     !!resources?.cards.some((c) => c.accountId === accountId);
+  const onCard = isCardAccount(watchedAccount);
+  const isFuture = !!watchedDate && watchedDate > todayInputValue();
+
+  // Padrão de "já foi pago": avulso em conta comum com data até hoje. Data
+  // futura nunca está paga. Depois que o usuário escolhe, a escolha vale.
+  useEffect(() => {
+    if (transaction) return;
+    if (isFuture) setValue('settle', false);
+    else if (!settleTouched) setValue('settle', selectedRecurrenceType === 'avulso');
+  }, [transaction, isFuture, settleTouched, selectedRecurrenceType, setValue]);
 
   /** Preferencial que serve para o tipo: cartão não recebe receita. */
   const preferredFor = (type: FormData['type']) => {
@@ -172,17 +204,32 @@ export function TransactionForm({
 
   const onSubmit = async (data: FormData) => {
     setSubmitting(true);
-    const { installments, recurrenceMonths, recurrenceType, recurrenceFrequency, ...rest } = data;
+    const {
+      installments,
+      recurrenceMonths,
+      recurrenceType,
+      recurrenceFrequency,
+      settle,
+      committed,
+      eventDate,
+      ...rest
+    } = data;
+    const card = isCardAccount(data.accountId);
     const payload = transaction
       ? { ...rest, amount: currencyToNumber(data.amount) }
       : {
           ...rest,
           recurrenceType,
           amount: currencyToNumber(data.amount),
+          idempotencyKey,
+          // No cartão quem paga é a fatura: a API ignora, e a tela nem pergunta.
+          ...(!card && { settle }),
+          ...(!card && recurrenceType === 'avulso' && eventDate && { eventDate }),
           ...(recurrenceType === 'parcelado' && { installments: Number(installments) }),
           ...(recurrenceType === 'fixo' && {
             recurrenceFrequency,
             recurrenceMonths: Number(recurrenceMonths),
+            forecast: !committed,
           }),
         };
     try {
@@ -314,12 +361,62 @@ export function TransactionForm({
         </div>
       </div>
       <div className="space-y-1">
-        <Label>Data</Label>
+        <Label>
+          {isInstallment
+            ? 'Data da compra (e da 1ª parcela)'
+            : selectedRecurrenceType === 'fixo' && !transaction
+              ? 'Data da primeira ocorrência'
+              : onCard
+                ? 'Data da compra'
+                : 'Data (vencimento ou previsão)'}
+        </Label>
         <Input type="date" {...register('transactionDate')} />
         {errors.transactionDate && (
           <p className="text-xs text-destructive">{errors.transactionDate.message}</p>
         )}
       </div>
+      {!transaction && !onCard && (
+        <div className="space-y-2 rounded-md border border-border p-3">
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="mt-0.5 h-4 w-4"
+              disabled={isFuture}
+              {...register('settle', { onChange: () => setSettleTouched(true) })}
+            />
+            <span>
+              {selectedType === 'income' ? 'Já foi recebido' : 'Já foi pago'}
+              {selectedRecurrenceType !== 'avulso' && ' (a primeira)'}
+              <span className="block text-xs text-muted-foreground">
+                {isFuture
+                  ? 'Data futura: fica em aberto até você registrar o pagamento.'
+                  : watchedSettle
+                    ? 'O saldo da conta muda agora.'
+                    : 'Fica em aberto (e vencido, se a data passou) até você registrar o pagamento.'}
+              </span>
+            </span>
+          </label>
+          {errors.settle && <p className="text-xs text-destructive">{errors.settle.message}</p>}
+          {selectedRecurrenceType === 'avulso' &&
+            (showEventDate ? (
+              <div className="space-y-1">
+                <Label htmlFor="transaction-event-date">Data do consumo (opcional)</Label>
+                <Input id="transaction-event-date" type="date" {...register('eventDate')} />
+                <p className="text-xs text-muted-foreground">
+                  Ex.: a conta de luz de setembro que vence em outubro conta como gasto de setembro.
+                </p>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="text-xs text-primary underline-offset-2 hover:underline"
+                onClick={() => setShowEventDate(true)}
+              >
+                O consumo foi em outra data?
+              </button>
+            ))}
+        </div>
+      )}
       {!transaction && (
         <div className="space-y-1">
           {/* Em Recorrências/Parcelamentos o tipo já vem no valor padrão do form: o seletor sai. */}
@@ -384,6 +481,16 @@ export function TransactionForm({
                   {errors.recurrenceMonths.message}
                 </p>
               )}
+              <label className="col-span-2 flex items-start gap-2 text-sm">
+                <input type="checkbox" className="mt-0.5 h-4 w-4" {...register('committed')} />
+                <span>
+                  Compromisso firmado (contrato)
+                  <span className="block text-xs text-muted-foreground">
+                    Sem marcar, as próximas ocorrências são previsão: entram no planejamento, não na
+                    dívida. Marque para aluguel, financiamento e outros contratos.
+                  </span>
+                </span>
+              </label>
             </div>
           )}
         </div>

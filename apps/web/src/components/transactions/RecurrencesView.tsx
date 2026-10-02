@@ -151,7 +151,8 @@ export function RecurrencesView() {
                         <p className="truncate font-medium">{r.description}</p>
                         <p className="text-xs text-muted-foreground">
                           {r.type === 'income' ? 'Receita' : 'Despesa'} ·{' '}
-                          {frequencyLabels[r.frequency]} · Dia {r.dueDay}
+                          {frequencyLabels[r.frequency]} · Dia {r.dueDay} ·{' '}
+                          {r.forecast ? 'previsão' : 'compromisso firmado'}
                         </p>
                       </div>
                       <span className={cn('shrink-0', amountClass(r))}>
