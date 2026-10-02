@@ -1,6 +1,7 @@
 import {
   AccountType,
   BillingInterval,
+  CategoryNature,
   PrismaClient,
   ProfileType,
   TransactionType,
@@ -128,6 +129,22 @@ const individualCategories = [
     color: '#D3D3D3',
     profileType: ProfileType.individual,
   },
+  // Natureza própria (docs/adrs/0018): juros e tarifas aparecem à parte do
+  // consumo, e compra de bem durável não é tratada como consumo do mês.
+  {
+    name: 'Juros e tarifas',
+    type: TransactionType.expense,
+    color: '#E57373',
+    profileType: ProfileType.individual,
+    nature: CategoryNature.financial_cost,
+  },
+  {
+    name: 'Aquisição de bens',
+    type: TransactionType.expense,
+    color: '#A1887F',
+    profileType: ProfileType.individual,
+    nature: CategoryNature.asset_acquisition,
+  },
 ];
 
 const businessCategories = [
@@ -215,6 +232,7 @@ async function main() {
         data: {
           color: category.color,
           isDefault: true,
+          ...('nature' in category && { nature: category.nature }),
         },
       });
       continue;

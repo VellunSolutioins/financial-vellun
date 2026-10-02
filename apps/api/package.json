@@ -14,6 +14,7 @@
     "db:audit:cards": "ts-node prisma/audit-cards.ts",
     "db:backfill:invoices": "ts-node prisma/backfill-card-invoices.ts",
     "db:verify:restore": "ts-node prisma/verify-restore.ts",
+    "db:verify:financial-model": "ts-node prisma/verify-financial-model.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
