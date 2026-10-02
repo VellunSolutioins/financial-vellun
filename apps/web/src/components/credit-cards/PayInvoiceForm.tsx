@@ -9,11 +9,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
 import { useToast } from '@/components/ui/toast';
-import type { CardInvoiceDetail } from '@/hooks/useCreditCards';
+import type { CardInvoice } from '@/hooks/useCreditCards';
 import type { ResourceAccount } from '@/hooks/useFinancialResources';
 import { apiClient } from '@/lib/api-client';
 import { CURRENCY_REGEX, currencyToNumber, formatCurrencyInput, maskCurrency } from '@/lib/masks';
 import { newIdempotencyKey } from '@/lib/transaction-display';
+import { formatDateBR } from '@/lib/utils';
 
 function todayLocal() {
   const now = new Date();
@@ -38,9 +39,10 @@ type FormData = z.infer<typeof schema>;
 
 interface Props {
   cardId: string;
-  invoice: CardInvoiceDetail;
+  invoice: CardInvoice;
   /** Só contas comuns: cartão não paga cartão. */
   accounts: ResourceAccount[];
+  /** Conta sugerida; sem ela (ou se não existir mais), a primeira da lista. */
   suggestedAccountId: string | null;
   onSuccess: () => void;
   onCancel: () => void;
@@ -62,12 +64,13 @@ export function PayInvoiceForm({
   const [idempotencyKey] = useState(newIdempotencyKey);
   const [submitting, setSubmitting] = useState(false);
   const toast = useToast();
-  const suggested = accounts.find((a) => a.id === suggestedAccountId)?.id ?? '';
+  const suggested = accounts.find((a) => a.id === suggestedAccountId)?.id ?? accounts[0]?.id ?? '';
 
   const {
     register,
     handleSubmit,
     setValue,
+    watch,
     formState: { errors },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -77,6 +80,11 @@ export function PayInvoiceForm({
       paymentDate: todayLocal(),
     },
   });
+
+  const watchedAmount = watch('amount');
+  const overpaid =
+    CURRENCY_REGEX.test(watchedAmount ?? '') &&
+    Math.round(currencyToNumber(watchedAmount) * 100) > Math.round(invoice.remaining * 100);
 
   const onSubmit = async (data: FormData) => {
     setSubmitting(true);
@@ -144,8 +152,22 @@ export function PayInvoiceForm({
           )}
         </div>
       </div>
+      {invoice.state === 'open' && !invoice.isOpening && (
+        <p className="rounded-md bg-amber-50 p-2 text-xs text-amber-900">
+          Esta fatura ainda está aberta: compras feitas até{' '}
+          {formatDateBR(
+            new Date(new Date(invoice.closingDate).getTime() - 86_400_000).toISOString(),
+          )}{' '}
+          ainda podem entrar nela.
+        </p>
+      )}
+      {overpaid && (
+        <p className="rounded-md bg-muted p-2 text-xs text-muted-foreground">
+          O que passar do valor da fatura vira crédito para a próxima.
+        </p>
+      )}
       <p className="text-xs text-muted-foreground">
-        O pagamento sai do saldo da conta e não conta como despesa: as compras já foram contadas.
+        O valor sai do saldo da conta escolhida e aparece em Lançamentos como pagamento da fatura.
       </p>
       <div className="flex gap-2">
         <Button type="submit" size="sm" disabled={submitting} className="flex-1">

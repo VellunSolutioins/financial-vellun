@@ -134,48 +134,18 @@ export interface CardInvoiceDetail extends CardInvoice {
   paymentRecords: InvoicePayment[];
 }
 
-export interface CreditCardSummary {
-  /** Dívida efetiva de todos os cartões configurados, inclusive arquivados. */
-  totalDebt: number;
-  /** Limite comprometido dos cartões ativos. */
-  totalCommitted: number;
-  /** Soma das faturas abertas hoje. */
-  totalCurrentInvoices: number;
-  totalOverdue: number;
-  totalFutureInstallments: number;
-  totalForecast: number;
-  /** Saldo credor somado. */
-  totalCredit: number;
-  /** Limite dos cartões ativos. */
-  totalLimit: number;
-  totalAvailable: number;
-  cardCount: number;
-  archivedCount: number;
-  archivedWithDebtCount: number;
-  pendingSetupCount: number;
-  /** Cartões sem configuração: a dívida deles fica fora do total (desconhecida). */
-  incompleteCards: number;
-  monthlyIncome: number;
-  incomePercentage: number | null;
-  incomeHealth: { key: string; emoji: string; label: string } | null;
-}
-
+/** Cartões ativos e arquivados. O limite de cada um fica na tela Faturas (docs/adrs/0020). */
 export function useCreditCards() {
   const [data, setData] = useState<CreditCard[]>([]);
   const [archived, setArchived] = useState<CreditCard[]>([]);
-  const [summary, setSummary] = useState<CreditCardSummary | null>(null);
   const [loading, setLoading] = useState(true);
 
   const refetch = useCallback(async () => {
     setLoading(true);
     try {
-      const [cards, summaryData] = await Promise.all([
-        apiClient.get<CreditCard[]>('/credit-cards?includeArchived=true'),
-        apiClient.get<CreditCardSummary>('/credit-cards/summary'),
-      ]);
+      const cards = await apiClient.get<CreditCard[]>('/credit-cards?includeArchived=true');
       setData(cards.filter((c) => c.isActive));
       setArchived(cards.filter((c) => !c.isActive));
-      setSummary(summaryData);
     } finally {
       setLoading(false);
     }
@@ -185,5 +155,5 @@ export function useCreditCards() {
     void refetch();
   }, [refetch]);
 
-  return { data, archived, summary, loading, refetch };
+  return { data, archived, loading, refetch };
 }

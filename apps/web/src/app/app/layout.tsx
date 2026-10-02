@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard,
   Receipt,
+  ReceiptText,
   Repeat,
   Layers,
   Target,
@@ -94,6 +95,7 @@ const navItems: Record<
     { href: '/app/pessoal/lancamentos', label: 'Lançamentos', icon: Receipt },
     { href: '/app/pessoal/recorrencias', label: 'Recorrências', icon: Repeat },
     { href: '/app/pessoal/parcelamentos', label: 'Parcelamentos', icon: Layers },
+    { href: '/app/pessoal/faturas', label: 'Faturas', icon: ReceiptText },
     { href: '/app/pessoal/metas', label: 'Metas de Gastos', icon: Target },
     { href: '/app/pessoal/cartoes', label: 'Cartões', icon: CreditCard },
     { href: '/app/pessoal/contas', label: 'Contas', icon: Wallet },

@@ -9,28 +9,20 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { CardSetupForm } from '@/components/credit-cards/CardSetupForm';
 import { OpeningPositionForm } from '@/components/credit-cards/OpeningPositionForm';
-import { InvoicesTab } from '@/components/credit-cards/InvoicesTab';
 import { ResourcePeriodView } from '@/components/resources/ResourcePeriodView';
 import type { CreditCard } from '@/hooks/useCreditCards';
 import { apiClient } from '@/lib/api-client';
-import { cn, formatDateBR } from '@/lib/utils';
+import { formatDateBR } from '@/lib/utils';
 
 function formatCurrency(v: number) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 }
 
-const TABS = [
-  { key: 'periodo', label: 'Por período' },
-  { key: 'faturas', label: 'Faturas' },
-] as const;
-type Tab = (typeof TABS)[number]['key'];
-
-/** Um cartão: lançamentos por período (competência) e faturas. */
+/** Um cartão: lançamentos por período. As faturas ficam na tela Faturas (docs/adrs/0020). */
 export default function CartaoDetalhePage() {
   const { id } = useParams<{ id: string }>();
   const [card, setCard] = useState<CreditCard | null>(null);
   const [notFound, setNotFound] = useState(false);
-  const [tab, setTab] = useState<Tab>('faturas');
   const [editingOpening, setEditingOpening] = useState(false);
 
   const load = useCallback(() => {
@@ -114,7 +106,7 @@ export default function CartaoDetalhePage() {
         <Card className="rounded-2xl border-amber-200">
           <CardContent className="p-4">
             <p className="mb-3 text-sm font-medium">Configurar fechamento</p>
-            <CardSetupForm card={card} onSuccess={load} onCancel={() => setTab('periodo')} />
+            <CardSetupForm card={card} onSuccess={load} onCancel={() => undefined} />
           </CardContent>
         </Card>
       )}
@@ -186,33 +178,13 @@ export default function CartaoDetalhePage() {
         </Card>
       )}
 
-      <div role="tablist" className="grid grid-cols-2 gap-1 rounded-lg bg-muted p-1 sm:inline-grid">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            role="tab"
-            aria-selected={tab === t.key}
-            onClick={() => setTab(t.key)}
-            className={cn(
-              'h-9 rounded-md px-4 text-sm font-medium transition-colors',
-              tab === t.key ? 'bg-background shadow-sm' : 'text-muted-foreground',
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {tab === 'periodo' ? (
-        <ResourcePeriodView selection={{ accountIds: [], cardIds: [id] }} basis="card" />
-      ) : card && !card.needsSetup ? (
-        <InvoicesTab card={card} onChanged={load} />
-      ) : (
-        <p className="text-sm text-muted-foreground">
-          As faturas aparecem depois de configurar o fechamento do cartão.
-        </p>
+      {card && !card.needsSetup && (
+        <Button asChild variant="outline" className="w-full sm:w-auto">
+          <Link href={`/app/pessoal/faturas?cartao=${card.id}`}>Ver e pagar as faturas</Link>
+        </Button>
       )}
+
+      <ResourcePeriodView selection={{ accountIds: [], cardIds: [id] }} basis="card" />
     </div>
   );
 }

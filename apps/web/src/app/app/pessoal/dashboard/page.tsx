@@ -844,7 +844,8 @@ function DashboardContent() {
                   <li key={`${bill.kind}-${bill.id}`} className="py-3 first:pt-0 last:pb-0">
                     {isInvoice && bill.cardId ? (
                       <Link
-                        href={`/app/pessoal/cartoes/${bill.cardId}`}
+                        // A fatura é identificada pelo mês do vencimento.
+                        href={`/app/pessoal/faturas?cartao=${bill.cardId}&mes=${bill.transactionDate.slice(0, 7)}`}
                         className="-mx-2 flex items-center justify-between gap-3 rounded-lg px-2 transition-colors hover:bg-muted/40"
                         aria-label={`${bill.description}, ${formatCurrency(bill.remaining)}, vence em ${formatDueDate(bill.transactionDate)}`}
                       >
