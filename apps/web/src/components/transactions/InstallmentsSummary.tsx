@@ -13,7 +13,7 @@ interface CardCommitment {
   name: string;
   color: string | null;
   creditLimit: number | null;
-  /** Parcelas deste cartão ainda não faturadas. */
+  /** O que falta pagar das compras parceladas deste cartão. */
   committed: number;
   /** `null` quando o cartão não tem limite cadastrado. */
   percentage: number | null;
@@ -21,7 +21,7 @@ interface CardCommitment {
 }
 
 export interface InstallmentsSummaryData {
-  /** Só cartões com alguma parcela a faturar. */
+  /** Só cartões com alguma parcela a pagar. */
   byCard: CardCommitment[];
   /** Restante a pagar (parcelas de hoje em diante). */
   remaining: number;
@@ -70,7 +70,7 @@ function CardBar({ card }: { card: CardCommitment }) {
       </div>
       <div
         role="progressbar"
-        aria-label={`Limite do ${card.name} comprometido com parcelas`}
+        aria-label={`Limite do ${card.name} ocupado pelas parcelas que faltam pagar`}
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={Math.round(width)}
@@ -83,8 +83,8 @@ function CardBar({ card }: { card: CardCommitment }) {
       </div>
       <p className="text-xs text-muted-foreground">
         {card.percentage !== null
-          ? `${card.percentage.toFixed(0)}% do limite ocupado por parcelas ainda não faturadas.`
-          : 'Cadastre o limite do cartão para ver quanto os parcelamentos comprometem.'}
+          ? `Falta pagar destas compras: ocupa ${card.percentage.toFixed(0)}% do limite.`
+          : 'Falta pagar destas compras. Cadastre o limite do cartão para ver quanto ele ocupa.'}
       </p>
     </li>
   );
@@ -96,8 +96,8 @@ interface Props {
 }
 
 /**
- * Por cartão, quanto do limite está comprometido com parcelas ainda não
- * faturadas (cartão sem parcelamento não aparece); e o restante a pagar dos
+ * Por cartão, quanto falta pagar das compras parceladas e quanto isso ocupa do
+ * limite (cartão sem parcelamento não aparece); e o restante a pagar dos
  * parcelamentos por categoria.
  */
 export function InstallmentsSummary({ version }: Props) {
@@ -125,9 +125,7 @@ export function InstallmentsSummary({ version }: Props) {
               <span className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-foreground">
                 <CreditCardIcon className="h-4 w-4" />
               </span>
-              <span className="text-sm text-muted-foreground">
-                Limite comprometido com parcelas
-              </span>
+              <span className="text-sm text-muted-foreground">Parcelas no cartão a pagar</span>
             </div>
             <ul className="space-y-4">
               {summary.byCard.map((card) => (

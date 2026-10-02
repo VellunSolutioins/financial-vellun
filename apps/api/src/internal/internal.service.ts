@@ -18,6 +18,7 @@ import { FINANCIAL_TX_OPTIONS, lockAccounts } from '../common/db';
 import {
   assertAccountAcceptsEntries,
   assertAccountAcceptsType,
+  assertInstallmentIsExpense,
 } from '../transactions/transactions.service';
 import { CardLedgerService } from '../credit-cards/card-ledger.service';
 import { cardNeedsSetup } from '../credit-cards/card-setup';
@@ -200,6 +201,7 @@ export class InternalService {
     }
     assertAccountAcceptsEntries(account);
     assertAccountAcceptsType(account, dto.type);
+    assertInstallmentIsExpense(dto.type, dto.recurrenceType);
 
     if (dto.categoryId) {
       const category = await this.prisma.category.findUnique({ where: { id: dto.categoryId } });

@@ -86,7 +86,8 @@ mensagem, use a data atual.
 - `recurrence_type`: "avulso" (padrão, uma única vez); "parcelado" para compra \
 parcelada ("parcelado", "parcelei", "em 10x", "em 10 vezes", "10 parcelas"); \
 "fixo" para lançamento que se repete ("todo mês", "mensal", "mensalidade", \
-"assinatura", "recorrente", "fixo", "anual"). "1x" ou "à vista" é "avulso".
+"assinatura", "recorrente", "fixo", "anual"). "1x" ou "à vista" é "avulso". \
+Parcelado só existe para despesa: nunca use "parcelado" numa receita.
 - `installments`: no parcelado, o número de parcelas, se informado; senão nulo.
 - `amount_basis`: no parcelado, "installment" se `amount` for o valor de cada \
 parcela, "total" se for o valor da compra inteira. Decide o que liga o valor \

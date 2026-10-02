@@ -189,4 +189,77 @@ integration('compra parcelada × calendário de cobrança (PostgreSQL)', () => {
       200,
     );
   });
+
+  it('resumo de Parcelamentos: por cartão, o que falta pagar das compras — inclusive a parcela da fatura aberta', async () => {
+    const checking = await env.account(userId, 5000);
+    const card = await newCard();
+    const purchase = await env.transactions.create(userId, {
+      accountId: card.accountId,
+      type: 'expense',
+      amount: 900,
+      description: 'Notebook',
+      transactionDate: dayFromToday(0),
+      recurrenceType: 'parcelado',
+      installments: 3,
+    });
+    const committedOf = async () =>
+      (await env.installments.summary(userId)).byCard.find((c) => c.accountId === card.accountId)
+        ?.committed ?? 0;
+
+    // A parcela 1 já está na fatura aberta e continua contando: falta pagar R$ 900.
+    expect(await committedOf()).toBe(900);
+
+    const { invoiceId } = await env.prisma.transaction.findUniqueOrThrow({
+      where: { id: purchase.id },
+    });
+    await env.payments.pay(userId, card.id, invoiceId!, {
+      sourceAccountId: checking,
+      amount: 300,
+      paymentDate: dayFromToday(0),
+      idempotencyKey: key(),
+    });
+    // Paga a fatura com a parcela 1: falta R$ 600.
+    expect(await committedOf()).toBe(600);
+  });
+
+  it('parcelamento só existe para despesa: receita parcelada é recusada na criação e na edição', async () => {
+    const checking = await env.account(userId, 0);
+    await expect(
+      env.transactions.create(userId, {
+        accountId: checking,
+        type: 'income',
+        amount: 900,
+        description: 'Venda',
+        transactionDate: dayFromToday(0),
+        recurrenceType: 'parcelado',
+        installments: 3,
+      }),
+    ).rejects.toMatchObject({ status: 400, message: 'Parcelamento só existe para despesas.' });
+
+    const purchase = await env.transactions.create(userId, {
+      accountId: checking,
+      type: 'expense',
+      amount: 900,
+      description: 'Curso',
+      transactionDate: dayFromToday(0),
+      recurrenceType: 'parcelado',
+      installments: 3,
+      settle: false,
+    });
+    await expect(
+      env.transactions.update(userId, purchase.id, { type: 'income' }),
+    ).rejects.toMatchObject({ status: 400 });
+    // Avulso continua podendo trocar de tipo.
+    const single = await env.transactions.create(userId, {
+      accountId: checking,
+      type: 'expense',
+      amount: 50,
+      description: 'Ajuste',
+      transactionDate: dayFromToday(0),
+      settle: false,
+    });
+    await expect(
+      env.transactions.update(userId, single.id, { type: 'income' }),
+    ).resolves.toMatchObject({ type: 'income' });
+  });
 });

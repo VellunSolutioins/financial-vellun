@@ -17,6 +17,7 @@ from src.services.confirmation_rules import (
     FIELD_CONFIRM,
     FIELD_DATE,
     FIELD_FREQUENCY,
+    FIELD_INCOME_SINGLE,
     FIELD_INSTALLMENTS,
     FIELD_OCCURRENCES,
     needs_confirmation,
@@ -79,6 +80,21 @@ def test_data_vaga_pede_a_data():
 
 def test_parcelado_sem_parcelas_pergunta_quantas():
     assert campo(recurrence_type=RecurrenceTypeEnum.parcelado) == FIELD_INSTALLMENTS
+
+
+def test_receita_parcelada_pergunta_se_registra_como_unica():
+    question = next_question(
+        intent(
+            transaction_type=TransactionTypeEnum.income,
+            amount=1000,
+            recurrence_type=RecurrenceTypeEnum.parcelado,
+            installments=3,
+        )
+    )
+    assert question.field == FIELD_INCOME_SINGLE
+    assert question.text == (
+        "Parcelamento é só para despesas. Registro como receita única de R$ 1.000,00?"
+    )
 
 
 def test_parcelado_fora_da_faixa_pergunta_de_novo():

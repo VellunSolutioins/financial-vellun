@@ -19,7 +19,8 @@
  * - **ambiguidades históricas**: séries parceladas sem a parcela 1 (data da
  *   compra aproximada), cartões sem configuração (dívida desconhecida),
  *   cartões com lançamentos anteriores ao controle e sem posição inicial
- *   (candidatos a informar a fatura anterior), faturas pagas acima do cobrado.
+ *   (candidatos a informar a fatura anterior), faturas pagas acima do cobrado,
+ *   receitas parceladas gravadas antes de o parcelamento ficar só para despesa.
  */
 import { PrismaClient } from '@prisma/client';
 
@@ -169,6 +170,11 @@ async function main() {
            AND t."type" IN ('expense', 'refund', 'opening_debt', 'opening_credit')
       )
     ) x`;
+  // Parcelamento passou a ser só de despesa (docs/adrs/0020); as antigas seguem valendo.
+  const [incomeSeries] = await prisma.$queryRaw<{ count: bigint; users: bigint }[]>`
+    SELECT COUNT(DISTINCT "series_id") AS count, COUNT(DISTINCT "user_id") AS users
+      FROM "transactions"
+     WHERE "recurrence_type" = 'parcelado' AND "type" = 'income' AND "status" = 'confirmed'`;
 
   console.log('\n## Ambiguidades históricas');
   console.log(`- séries parceladas sem a parcela 1 (data da compra aproximada): ${series.count}`);
@@ -176,6 +182,9 @@ async function main() {
   console.log(`- cartões sem configuração (dívida desconhecida): ${pendingCards.count}`);
   console.log(`- cartões com compras antes do controle e sem posição inicial: ${preControl.count}`);
   console.log(`- faturas pagas acima do cobrado (crédito a aplicar): ${overpaid.count}`);
+  console.log(
+    `- receitas parceladas anteriores à regra (seguem funcionando): ${incomeSeries.count} série(s) de ${incomeSeries.users} usuário(s)`,
+  );
 
   if (drift.length > 0 || Number(orphans.count) > 0) {
     console.error('\nDivergência entre a regra antiga e a nova: confira antes de liberar.');

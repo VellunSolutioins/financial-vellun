@@ -50,6 +50,10 @@ const schema = z
       (Number(data.installments) >= 2 && Number(data.installments) <= 72),
     { message: 'Informe entre 2 e 72 parcelas', path: ['installments'] },
   )
+  .refine((data) => !(data.type === 'income' && data.recurrenceType === 'parcelado'), {
+    message: 'Parcelamento só existe para despesas',
+    path: ['recurrenceType'],
+  })
   .refine(
     (data) =>
       data.recurrenceType !== 'fixo' ||
@@ -274,6 +278,8 @@ export function TransactionForm({
   };
 
   const filteredCategories = categories.filter((c) => c.type === selectedType);
+  // Parcelamento só existe para despesa: parcela já gravada não vira receita.
+  const lockedToExpense = installmentOnly || transaction?.recurrenceType === 'parcelado';
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
@@ -287,17 +293,23 @@ export function TransactionForm({
         >
           {typeOptions.map((option) => {
             const selected = selectedType === option.value;
+            const disabled = lockedToExpense && option.value === 'income';
             return (
               <button
                 key={option.value}
                 type="button"
                 role="radio"
                 aria-checked={selected}
+                disabled={disabled}
+                title={disabled ? 'Parcelamento só existe para despesas' : undefined}
                 onClick={() => {
-                  if (selected) return;
+                  if (selected || disabled) return;
                   setValue('type', option.value, { shouldDirty: true, shouldValidate: true });
                   // Categoria de despesa não serve para receita (e vice-versa).
                   setValue('categoryId', '', { shouldDirty: true });
+                  if (option.value === 'income' && getValues('recurrenceType') === 'parcelado') {
+                    setValue('recurrenceType', 'avulso', { shouldDirty: true });
+                  }
                   // Receita não vai para cartão: troca pelo preferencial que serve.
                   const current = getValues('accountId');
                   if ((option.value === 'income' && isCardAccount(current)) || !current) {
@@ -305,7 +317,7 @@ export function TransactionForm({
                   }
                 }}
                 className={cn(
-                  'h-10 rounded-md border text-sm font-medium transition-colors',
+                  'h-10 rounded-md border text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50',
                   selected
                     ? option.active
                     : 'border-input bg-background text-muted-foreground hover:bg-muted',
@@ -430,12 +442,17 @@ export function TransactionForm({
             <>
               <Label>Recorrência</Label>
               <Select {...register('recurrenceType')}>
-                {Object.entries(recurrenceLabels).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
-                  </option>
-                ))}
+                {Object.entries(recurrenceLabels)
+                  .filter(([value]) => !(selectedType === 'income' && value === 'parcelado'))
+                  .map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
               </Select>
+              {errors.recurrenceType && (
+                <p className="text-xs text-destructive">{errors.recurrenceType.message}</p>
+              )}
             </>
           )}
           {selectedRecurrenceType === 'parcelado' && (

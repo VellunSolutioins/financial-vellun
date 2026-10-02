@@ -22,6 +22,16 @@ export interface TransactionSummary {
   /** Ainda a receber/pagar (conta comum) entre os lançamentos filtrados. */
   openIncome: number;
   openExpense: number;
+  /** Dinheiro que entrou (recebimentos em conta comum). */
+  received: number;
+  toReceive: number;
+  /** Dinheiro que saiu: contas pagas e faturas pagas, menos estornos recebidos. */
+  paid: number;
+  toPay: number;
+  /** Compras no cartão: viram "pago" quando a fatura for paga. */
+  onCard: number;
+  /** Recebido − pago. */
+  leftover: number;
   count: number;
   byCategory: CategoryTotal[];
 }

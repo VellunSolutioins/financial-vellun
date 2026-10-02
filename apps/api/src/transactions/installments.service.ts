@@ -197,8 +197,8 @@ export interface SummaryInput {
     creditLimit: number | null;
     isActive?: boolean;
   }[];
-  /** Parcelas de cartão ainda não faturadas (fatura aberta ou futura). */
-  unbilled: { accountId: string; amount: number }[];
+  /** O que falta pagar das parcelas de cada cartão (ver `RemainingByParcel`). */
+  cardRemaining: { accountId: string; amount: number }[];
   /** Compromisso restante por parcela (ver `RemainingByParcel`). */
   remaining: {
     categoryId: string | null;
@@ -211,14 +211,14 @@ export interface SummaryInput {
 const cents = (v: number) => Math.round(v * 100);
 
 /**
- * Por cartão, quanto do limite está comprometido com parcelas ainda não
- * faturadas (só os cartões com alguma); e o restante a pagar dos
- * parcelamentos, por categoria. Cartão sem limite cadastrado não tem
+ * Por cartão, quanto falta pagar das compras parceladas e quanto isso ocupa do
+ * limite (só os cartões com algum valor; docs/adrs/0020); e o restante a pagar
+ * dos parcelamentos, por categoria. Cartão sem limite cadastrado não tem
  * percentual nem faixa.
  */
 export function buildInstallmentsSummary(input: SummaryInput) {
   const byAccount = new Map<string, number>();
-  for (const p of input.unbilled) {
+  for (const p of input.cardRemaining) {
     byAccount.set(p.accountId, (byAccount.get(p.accountId) ?? 0) + cents(p.amount));
   }
 
@@ -304,13 +304,12 @@ export class InstallmentsService {
   }
 
   /**
-   * Limite comprometido por cartão (parcelas ainda não faturadas, efetivas) e
-   * compromisso restante por categoria (o que falta pagar das compras já
-   * feitas, ver `RemainingByParcel`). Cartões arquivados entram: arquivar não
+   * Por cartão e por categoria, o que falta pagar das compras parceladas já
+   * feitas (`RemainingByParcel`: desconta o que a fatura já pagou, inclusive
+   * fatura fechada e ainda não paga). Cartões arquivados entram: arquivar não
    * apaga o que se deve.
    */
   async summary(userId: string) {
-    const today = this.today();
     const category = { select: { id: true, name: true, color: true } };
 
     const [cards, parcels] = await Promise.all([
@@ -348,13 +347,6 @@ export class InstallmentsService {
       }),
     ]);
     const remaining = await this.remainingByParcel(parcels);
-    const cardParcels = parcels.filter((p) => p.account.type === 'credit_card');
-    // Fatura fechada ou paga = já faturada: vira dívida da fatura. Sem fatura
-    // (cartão ainda não configurado), vale a data.
-    const billed = await this.cardLedger.lockReasons(cardParcels);
-    const unbilled = cardParcels.filter((p) =>
-      p.invoiceId ? !billed.has(p.id) : p.transactionDate >= today,
-    );
 
     return buildInstallmentsSummary({
       cards: cards.map((c) => ({
@@ -364,7 +356,9 @@ export class InstallmentsService {
         creditLimit: c.creditLimit !== null ? Number(c.creditLimit) : null,
         isActive: c.account.isActive,
       })),
-      unbilled: unbilled.map((p) => ({ accountId: p.accountId, amount: Number(p.amount) })),
+      cardRemaining: parcels
+        .filter((p) => p.account.type === 'credit_card')
+        .map((p) => ({ accountId: p.accountId, amount: (remaining.get(p.id) ?? 0) / 100 })),
       remaining: parcels
         .filter((p) => (remaining.get(p.id) ?? 0) > 0)
         .map((p) => ({

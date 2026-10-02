@@ -152,7 +152,9 @@ class TransactionCreator:
             "source": "whatsapp",
             "rawInput": source_text,
         }
-        if intent.recurrence_type == RecurrenceTypeEnum.parcelado:
+        # Parcelado só existe para despesa: a pergunta de receita única vem antes,
+        # e a API recusa a combinação.
+        if intent.recurrence_type == RecurrenceTypeEnum.parcelado and tx_type == "expense":
             payload["recurrenceType"] = "parcelado"
             payload["installments"] = intent.installments
         elif intent.recurrence_type == RecurrenceTypeEnum.fixo:

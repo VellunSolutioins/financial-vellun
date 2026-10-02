@@ -162,16 +162,39 @@ export class TransactionsService {
    *
    * `openIncome`/`openExpense` são o que ainda falta receber/pagar (em conta
    * comum) entre esses lançamentos.
+   *
+   * Os blocos da tela (docs/adrs/0020) leem o dinheiro, não o lançado:
+   * `received`/`paid` somam só liquidações `payment` ativas em conta comum
+   * (dispensa não é dinheiro) — `paid` inclui as faturas pagas e desconta
+   * estornos recebidos —; `onCard` é o que foi comprado no cartão e só vira
+   * `paid` quando a fatura é paga; `leftover` = recebido − pago.
    */
   async summary(userId: string, filters: TransactionFiltersDto) {
+    const base = await this.buildWhere(userId, filters);
     const where: Prisma.TransactionWhereInput = {
-      AND: [
-        await this.buildWhere(userId, filters),
-        { status: 'confirmed', type: { in: ['income', ...NET_EXPENSE_TYPES] } },
-      ],
+      AND: [base, { status: 'confirmed', type: { in: ['income', ...NET_EXPENSE_TYPES] } }],
     };
+    const onRegularAccount = { account: { type: { not: 'credit_card' as const } } };
+    const settledOf = (type: 'income' | 'expense' | 'refund') =>
+      this.prisma.transactionSettlement.aggregate({
+        where: {
+          status: 'active',
+          kind: 'payment',
+          transaction: { AND: [where, { type }, onRegularAccount] },
+        },
+        _sum: { amount: true },
+      });
 
-    const [byType, byCategory, open] = await Promise.all([
+    const [
+      byType,
+      byCategory,
+      open,
+      settledIncome,
+      settledExpense,
+      settledRefund,
+      invoicePayments,
+      onCardByType,
+    ] = await Promise.all([
       this.prisma.transaction.groupBy({
         by: ['type'],
         where,
@@ -190,6 +213,29 @@ export class TransactionsService {
         },
         _sum: { amount: true, settledAmount: true },
       }),
+      settledOf('income'),
+      settledOf('expense'),
+      settledOf('refund'),
+      // Perna de saída do pagamento de fatura: cai no mês em que a fatura foi paga.
+      this.prisma.transaction.aggregate({
+        where: {
+          AND: [
+            base,
+            {
+              status: 'confirmed',
+              type: 'transfer',
+              transferDirection: 'out',
+              cardPaymentId: { not: null },
+            },
+          ],
+        },
+        _sum: { amount: true },
+      }),
+      this.prisma.transaction.groupBy({
+        by: ['type'],
+        where: { AND: [where, { account: { type: 'credit_card' } }] },
+        _sum: { amount: true },
+      }),
     ]);
 
     const income = Number(byType.find((row) => row.type === 'income')?._sum.amount ?? 0);
@@ -207,6 +253,12 @@ export class TransactionsService {
     });
     const categoryById = new Map(categories.map((c) => [c.id, c]));
 
+    const receivedCents = cents(settledIncome._sum.amount);
+    const paidCents =
+      cents(settledExpense._sum.amount) -
+      cents(settledRefund._sum.amount) +
+      cents(invoicePayments._sum.amount);
+
     return {
       dateBasis: filters.dateBasis ?? 'due',
       income,
@@ -214,6 +266,12 @@ export class TransactionsService {
       net: roundCents(income - expense),
       openIncome: openOf('income'),
       openExpense: openOf('expense'),
+      received: receivedCents / 100,
+      toReceive: openOf('income'),
+      paid: paidCents / 100,
+      toPay: openOf('expense'),
+      onCard: roundCents(netExpenseOf(onCardByType)),
+      leftover: (receivedCents - paidCents) / 100,
       count: byType.reduce((sum, row) => sum + row._count._all, 0),
       byCategory: [
         ...byCategory
@@ -265,6 +323,7 @@ export class TransactionsService {
       const existing = await this.findByIdempotencyKey(userId, dto.idempotencyKey);
       if (existing) return existing;
     }
+    assertInstallmentIsExpense(dto.type, dto.recurrenceType);
     const account = await this.validateOwnership(userId, dto.accountId, dto.categoryId, dto.type);
 
     let firstId: string;
@@ -314,6 +373,9 @@ export class TransactionsService {
 
   async update(userId: string, id: string, dto: UpdateTransactionDto) {
     const existing = await this.findOne(userId, id);
+    if (dto.type !== undefined && dto.type !== existing.type) {
+      assertInstallmentIsExpense(dto.type, existing.recurrenceType ?? undefined);
+    }
     await this.assertValueChangeAllowed(existing, dto);
 
     // A conta só é revalidada quando muda: editar a descrição de um lançamento
@@ -733,6 +795,16 @@ function assertNoActiveSettlement(
     throw new ConflictException(
       `Este lançamento já tem pagamento registrado e não pode ser ${action}. Reverta os pagamentos antes.`,
     );
+  }
+}
+
+/**
+ * Parcelamento só existe para despesa (docs/adrs/0020). Receitas parceladas
+ * gravadas antes continuam funcionando; só não nascem novas.
+ */
+export function assertInstallmentIsExpense(type: string | undefined, recurrenceType?: string) {
+  if (recurrenceType === 'parcelado' && type === 'income') {
+    throw new BadRequestException('Parcelamento só existe para despesas.');
   }
 }
 

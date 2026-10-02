@@ -32,6 +32,7 @@ from .confirmation_rules import (
     FIELD_CONFIRM,
     FIELD_DATE,
     FIELD_FREQUENCY,
+    FIELD_INCOME_SINGLE,
     FIELD_INSTALLMENTS,
     FIELD_OCCURRENCES,
     FIELD_TYPE,
@@ -617,6 +618,17 @@ class MessageProcessor:
                     pending.amount_basis = parsers.parse_amount_basis(reply)
                 return True, ""
             return False, "O parcelamento aceita de 2 a 72 parcelas. Em quantas parcelas foi?"
+
+        if field == FIELD_INCOME_SINGLE:
+            # Parcelamento só existe para despesa: "sim" registra uma vez só.
+            if parsers.is_affirmative(reply):
+                pending.recurrence_type = RecurrenceTypeEnum.avulso
+                pending.installments = None
+                pending.amount_basis = None
+                return True, ""
+            return False, (
+                "Responda sim para registrar como receita única, ou não para cancelar."
+            )
 
         if field == FIELD_AMOUNT_BASIS:
             basis = parsers.parse_amount_basis(reply)

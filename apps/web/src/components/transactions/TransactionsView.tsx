@@ -31,7 +31,6 @@ import { useTransactionSummary } from '@/hooks/useTransactionSummary';
 import { useFinancialResources } from '@/hooks/useFinancialResources';
 import { resourceQuery, useResourceFilter } from '@/hooks/useResourceFilter';
 import { ResourceFilter } from '@/components/resources/ResourceFilter';
-import { DateBasisNote } from '@/components/resources/DateBasisNote';
 import { RefundForm } from '@/components/transactions/RefundForm';
 import { DeleteInstallmentDialog } from '@/components/transactions/DeleteInstallmentDialog';
 import { AdvanceInstallmentDialog } from '@/components/transactions/AdvanceInstallmentDialog';
@@ -392,7 +391,7 @@ function TransacoesContent() {
         <div>
           <h1 className="text-xl font-bold sm:text-2xl">Lançamentos</h1>
           <p className="text-sm text-muted-foreground">
-            Receitas e despesas pela data de vencimento, com a situação de cada pagamento.
+            O que entra e o que sai no mês, e o que já foi pago ou recebido.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -487,15 +486,14 @@ function TransacoesContent() {
 
       {totals && (
         <div className="space-y-2">
+          {/* Dinheiro que de fato entrou e saiu (docs/adrs/0020). */}
           <div className="grid grid-cols-3 gap-2 sm:gap-4">
             {[
-              { label: 'Receitas', value: totals.income, tone: 'text-emerald-600' },
-              { label: 'Despesas', value: totals.expense, tone: 'text-rose-600' },
-              {
-                label: 'Resultado',
-                value: totals.net,
-                tone: totals.net >= 0 ? 'text-foreground' : 'text-rose-600',
-              },
+              { label: 'Recebido', value: totals.received, tone: 'text-emerald-600' },
+              { label: 'Pago', value: totals.paid, tone: 'text-rose-600' },
+              totals.leftover >= 0
+                ? { label: 'Sobrou', value: totals.leftover, tone: 'text-foreground' }
+                : { label: 'Faltou', value: -totals.leftover, tone: 'text-rose-600' },
             ].map((item) => (
               <Card key={item.label} className="rounded-2xl">
                 <CardContent className="p-3 sm:p-4">
@@ -507,13 +505,32 @@ function TransacoesContent() {
               </Card>
             ))}
           </div>
-          {(totals.openExpense > 0 || totals.openIncome > 0) && (
-            <p className="text-xs text-muted-foreground">
-              Ainda em aberto entre estes lançamentos: {formatCurrency(totals.openExpense)} a pagar
-              {totals.openIncome > 0 && ` · ${formatCurrency(totals.openIncome)} a receber`}.
-            </p>
+          {(totals.toReceive > 0 || totals.toPay > 0 || totals.onCard > 0) && (
+            <div className="flex flex-wrap gap-2 text-xs">
+              {totals.toReceive > 0 && (
+                <span className="rounded-full border bg-background px-2.5 py-1">
+                  {formatCurrency(totals.toReceive)} a receber
+                </span>
+              )}
+              {totals.toPay > 0 && (
+                <span className="rounded-full border bg-background px-2.5 py-1">
+                  {formatCurrency(totals.toPay)} a pagar
+                </span>
+              )}
+              {totals.onCard > 0 && (
+                <Link
+                  href="/app/pessoal/faturas"
+                  className="rounded-full border bg-background px-2.5 py-1 hover:bg-muted"
+                >
+                  {formatCurrency(totals.onCard)} no cartão — entra em &quot;Pago&quot; quando a
+                  fatura for paga
+                </Link>
+              )}
+            </div>
           )}
-          <DateBasisNote variant="due" />
+          <p className="text-xs text-muted-foreground">
+            Lançamentos com vencimento em {monthLabel(selectedMonth).toLowerCase()}.
+          </p>
         </div>
       )}
 

@@ -391,6 +391,44 @@ async def test_parcelado_respondido_a_vista_vira_unica_vez(mundo):
     assert "recurrenceType" not in mundo.payload
 
 
+def receita_parcelada() -> FinancialIntent:
+    return despesa(
+        transaction_type=TransactionTypeEnum.income,
+        amount=1000,
+        description="venda do sofá",
+        category_name="Salário",
+        account_name="Itaú",
+        recurrence_type=RecurrenceTypeEnum.parcelado,
+        installments=3,
+    )
+
+
+async def test_receita_parcelada_pergunta_e_o_sim_grava_receita_unica(mundo):
+    mundo.llm["recebi 1000 da venda em 3x"] = receita_parcelada()
+
+    pergunta = await mundo.enviar("recebi 1000 da venda em 3x")
+    assert pergunta == (
+        "Parcelamento é só para despesas. Registro como receita única de R$ 1.000,00?"
+    )
+    assert mundo.enviados == []
+
+    await mundo.enviar("sim")
+
+    assert mundo.payload["type"] == "income"
+    assert mundo.payload["amount"] == 1000
+    assert "recurrenceType" not in mundo.payload
+    assert "installments" not in mundo.payload
+
+
+async def test_receita_parcelada_respondida_com_nao_cancela(mundo):
+    mundo.llm["recebi 1000 da venda em 3x"] = receita_parcelada()
+
+    await mundo.enviar("recebi 1000 da venda em 3x")
+    await mundo.enviar("não")
+
+    assert mundo.enviados == []
+
+
 # ── Categoria ────────────────────────────────────────────────────────────────
 async def test_sem_categoria_pergunta_com_opcoes_e_a_resposta_define(mundo):
     mundo.llm["paguei 300"] = despesa(amount=300, category_name=None)

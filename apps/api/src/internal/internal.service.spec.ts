@@ -207,6 +207,26 @@ describe('InternalService', () => {
       expect(prisma.transaction.create).not.toHaveBeenCalled();
     });
 
+    it('createTransactionFromAi recusa receita parcelada', async () => {
+      prisma.account.findUnique.mockResolvedValue({
+        id: 'a1',
+        userId: 'u1',
+        type: 'checking',
+        isActive: true,
+      });
+
+      await expect(
+        service.createTransactionFromAi({
+          userId: 'u1',
+          accountId: 'a1',
+          type: 'income',
+          recurrenceType: 'parcelado',
+          installments: 3,
+        } as any),
+      ).rejects.toThrow('Parcelamento só existe para despesas.');
+      expect(prisma.transaction.create).not.toHaveBeenCalled();
+    });
+
     it('createTransactionFromAi recusa compra em cartão arquivado', async () => {
       prisma.account.findUnique.mockResolvedValue({
         id: 'a1',

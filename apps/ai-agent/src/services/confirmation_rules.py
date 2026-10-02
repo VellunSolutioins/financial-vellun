@@ -17,6 +17,7 @@ from ..schemas.financial_intent import (
     AmountBasisEnum,
     FinancialIntent,
     RecurrenceTypeEnum,
+    TransactionTypeEnum,
 )
 
 # Limiar de coerência de valor: acima disso sem contexto, pedir confirmação.
@@ -38,6 +39,8 @@ FIELD_FREQUENCY = "frequency"
 FIELD_OCCURRENCES = "occurrences"
 #: Sim ou não sobre o lançamento inteiro (valor alto, baixa confiança, comprovante).
 FIELD_CONFIRM = "confirm"
+#: Receita veio como parcelada: "sim" registra como receita única.
+FIELD_INCOME_SINGLE = "income_single"
 
 _AMBIGUOUS_DATE_RE = re.compile(
     r"\b(semana passada|m(ê|e)s passado|outro dia|esses dias|recentemente)\b",
@@ -126,7 +129,19 @@ def next_question(
 
 def _recurrence_question(intent: FinancialIntent) -> Question | None:
     """Parcelado precisa do número de parcelas e de saber se o valor é o total;
-    fixo precisa da frequência e de quantas vezes repete."""
+    fixo precisa da frequência e de quantas vezes repete. Parcelado só existe
+    para despesa (docs/adrs/0020): receita parcelada vira a pergunta de
+    registrar como receita única."""
+    if (
+        intent.recurrence_type == RecurrenceTypeEnum.parcelado
+        and intent.transaction_type == TransactionTypeEnum.income
+    ):
+        return Question(
+            FIELD_INCOME_SINGLE,
+            "Parcelamento é só para despesas. "
+            f"Registro como receita única de {format_brl(intent.amount or 0)}?",
+        )
+
     if intent.recurrence_type == RecurrenceTypeEnum.parcelado:
         if intent.installments is None:
             return Question(FIELD_INSTALLMENTS, QUESTION_INSTALLMENTS)

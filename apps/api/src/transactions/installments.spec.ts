@@ -363,10 +363,10 @@ describe('buildInstallmentsSummary', () => {
     amount,
   });
 
-  it('compara as parcelas a faturar de cada cartão com o limite dele', () => {
+  it('compara o que falta pagar das parcelas de cada cartão com o limite dele', () => {
     const { byCard } = buildInstallmentsSummary({
       cards: [card('nubank', 1000), card('inter', 2000)],
-      unbilled: [
+      cardRemaining: [
         { accountId: 'nubank', amount: 200 },
         { accountId: 'nubank', amount: 100 },
         { accountId: 'inter', amount: 1700 },
@@ -383,7 +383,7 @@ describe('buildInstallmentsSummary', () => {
   it('cartão sem parcelamento fica de fora', () => {
     const { byCard } = buildInstallmentsSummary({
       cards: [card('nubank', 1000), card('inter', 2000)],
-      unbilled: [{ accountId: 'nubank', amount: 100 }],
+      cardRemaining: [{ accountId: 'nubank', amount: 100 }],
       remaining: [],
     });
 
@@ -393,7 +393,7 @@ describe('buildInstallmentsSummary', () => {
   it('cartão sem limite cadastrado não tem percentual nem faixa', () => {
     const { byCard } = buildInstallmentsSummary({
       cards: [card('sem-limite', null)],
-      unbilled: [{ accountId: 'sem-limite', amount: 500 }],
+      cardRemaining: [{ accountId: 'sem-limite', amount: 500 }],
       remaining: [],
     });
 
@@ -403,7 +403,7 @@ describe('buildInstallmentsSummary', () => {
   it('agrupa o restante a pagar por categoria, com "Sem categoria"', () => {
     const { remaining: total, byCategory } = buildInstallmentsSummary({
       cards: [],
-      unbilled: [],
+      cardRemaining: [],
       remaining: [
         remaining('eletronicos', 33.33),
         remaining('eletronicos', 33.34),
