@@ -12,6 +12,10 @@ class IntentType(str, Enum):
     cancel_last = "cancel_last"
     help = "help"
     confirmation_reply = "confirmation_reply"
+    # Transferência entre contas próprias, empréstimo (recebido ou amortizado),
+    # aporte ou resgate de investimento: não é receita nem despesa, e o agente
+    # não registra — orienta a usar "Transferir" no app (docs/adrs/0018).
+    unsupported_movement = "unsupported_movement"
     unknown = "unknown"
 
 
@@ -77,6 +81,13 @@ class FinancialIntent(BaseModel):
     )
     installments: int | None = Field(default=None, description="No parcelado: número de parcelas")
     amount_basis: AmountBasisEnum | None = None
+    settled: bool | None = Field(
+        default=None,
+        description=(
+            "true se já foi pago/recebido (gastei, paguei, recebi); false se ainda vai "
+            "acontecer (vence, vou pagar, a receber); nulo se não der para saber"
+        ),
+    )
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     needs_confirmation: bool = False
     confirmation_question: str | None = None

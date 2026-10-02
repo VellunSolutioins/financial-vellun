@@ -341,3 +341,24 @@ async def test_fixo_envia_frequencia_e_repeticoes(catalogo, api):
         "Lançamento criado! Despesa fixa mensal de R$ 55,00 em Outros, na conta Itaú, "
         "12 vezes a partir de 20/09/2026."
     )
+
+
+# ── Pago na hora × em aberto (docs/adrs/0018) ──────────────────────────────
+
+
+async def test_pago_na_hora_envia_settle(catalogo, api):
+    await TransactionCreator().create_from_intent(intent(settled=True), "u1", "gastei 47,50")
+    assert api[0]["settle"] is True
+
+
+async def test_conta_a_pagar_fica_em_aberto_e_a_resposta_diz(catalogo, api):
+    resultado = await TransactionCreator().create_from_intent(
+        intent(settled=False), "u1", "luz vence dia 30"
+    )
+    assert api[0]["settle"] is False
+    assert "Ficou em aberto" in resultado["message"]
+
+
+async def test_sem_indicacao_nao_envia_settle(catalogo, api):
+    await TransactionCreator().create_from_intent(intent(), "u1", "mercado 47,50")
+    assert "settle" not in api[0]

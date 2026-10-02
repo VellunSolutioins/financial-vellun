@@ -34,6 +34,21 @@ QUERY_KEYWORDS = ("resumo", "saldo", "quanto", "balanço", "balanco", "relatóri
 HELP_KEYWORDS = ("ajuda", "help", "socorro", "como funciona", "o que voce faz", "o que você faz")
 CANCEL_KEYWORDS = ("cancela", "cancelar", "apaga", "apagar", "desfaz", "desfazer", "remove")
 CORRECT_KEYWORDS = ("corrige", "corrigir", "errei", "na verdade", "muda", "mudar", "ajusta")
+# Dinheiro que só muda de lugar entre contas do usuário: não é receita nem
+# despesa (docs/adrs/0018). O agente não registra; orienta a usar o app.
+MOVEMENT_KEYWORDS = (
+    "entre minhas contas", "para minha conta", "pra minha conta", "da minha conta para",
+    "transferi para a poupança", "transferi pra poupança", "para a poupança",
+    "apliquei", "aportei", "aporte", "resgatei", "resgate",
+    "empréstimo", "emprestimo", "financiamento", "amortizei", "amortização", "amortizacao",
+)
+# Ainda vai acontecer: o lançamento fica em aberto.
+OPEN_KEYWORDS = (
+    "vence", "vencimento", "vou pagar", "a pagar", "vou receber", "a receber", "boleto",
+    "tenho que pagar", "preciso pagar",
+)
+# Já aconteceu: pago/recebido.
+SETTLED_KEYWORDS = ("gastei", "paguei", "comprei", "recebi", "ganhei", "caiu", "vendi")
 
 # Palavra-chave -> nome de categoria padrão (do seed §7).
 CATEGORY_KEYWORDS: dict[str, str] = {
@@ -190,6 +205,10 @@ class IntentClassifier:
             text, EXPENSE_KEYWORDS + INCOME_KEYWORDS
         ):
             return FinancialIntent(intent=IntentType.query_summary, confidence=0.85)
+        if self._has_any(text, MOVEMENT_KEYWORDS) and not self._has_any(
+            text, ("juros", "tarifa", "rendimento", "rendeu")
+        ):
+            return FinancialIntent(intent=IntentType.unsupported_movement, confidence=0.8)
 
         transaction_type = self._detect_type(text)
         amount = self._extract_amount(text)
@@ -215,10 +234,19 @@ class IntentClassifier:
             amount_basis=recurrence.amount_basis,
             recurrence_frequency=recurrence.frequency,
             occurrences=recurrence.occurrences,
+            settled=self._detect_settled(text),
         )
 
         intent.confidence = self._estimate_confidence(intent)
         return self._finalize(intent)
+
+    def _detect_settled(self, text: str) -> bool | None:
+        """Já pago/recebido, ainda em aberto, ou desconhecido (a API decide pela data)."""
+        if self._has_any(text, OPEN_KEYWORDS):
+            return False
+        if self._has_any(text, SETTLED_KEYWORDS):
+            return True
+        return None
 
     def _detect_type(self, text: str) -> TransactionTypeEnum | None:
         if self._has_any(text, INCOME_KEYWORDS):

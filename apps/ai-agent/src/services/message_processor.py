@@ -66,8 +66,8 @@ NOT_LINKED_MESSAGE = (
     "toque em \"Verificar WhatsApp\" e envie o código aqui."
 )
 HELP_MESSAGE = (
-    "Posso registrar seus lançamentos! Ex.: 'gastei 100 no mercado' ou "
-    "'recebi 5000 de salário'. Você também pode pedir um resumo."
+    "Posso registrar seus lançamentos! Ex.: 'gastei 100 no mercado' (já pago) ou "
+    "'conta de luz de 180 vence dia 10' (fica em aberto até você pagar)."
 )
 #: Quando ativa, ``respond`` acumula o texto aqui em vez de enviar. Só o
 #: ``process_job`` a ativa — ver a docstring dele.
@@ -85,6 +85,14 @@ job_identity: ContextVar[dict[str, str | None] | None] = ContextVar(
 NOT_UNDERSTOOD_MESSAGE = (
     "Não entendi. Para registrar um lançamento, mande algo como 'gastei 50 no mercado' "
     "ou 'recebi 5000 de salário'."
+)
+#: Transferência entre contas próprias, empréstimo, aporte ou resgate: não é
+#: receita nem despesa (docs/adrs/0018). Registrar como uma das duas distorceria
+#: os números, então o agente orienta a usar "Transferir" no app.
+UNSUPPORTED_MOVEMENT_MESSAGE = (
+    "Transferência entre suas contas, empréstimo, aporte ou resgate não é receita nem "
+    "despesa, então não registro pelo WhatsApp. No app, use Lançamentos › Transferir. "
+    "Juros e tarifas você pode mandar aqui como gasto."
 )
 NO_PENDING_MESSAGE = (
     "Não há lançamento aguardando confirmação. Para registrar, mande algo como "
@@ -397,6 +405,9 @@ class MessageProcessor:
                 response_prefix
                 + "Consulta de resumo via WhatsApp ainda não está disponível. Veja no app.",
             )
+        if intent.intent == IntentType.unsupported_movement:
+            metrics.incr("intent_unsupported_movement")
+            return await self._respond(phone, response_prefix + UNSUPPORTED_MOVEMENT_MESSAGE)
         if intent.intent in (IntentType.cancel_last, IntentType.correct_last):
             return await self._respond(
                 phone,
