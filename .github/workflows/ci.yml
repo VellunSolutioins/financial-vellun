@@ -39,6 +39,47 @@ jobs:
       # fora do padrão do Prettier (docs e planos, na maioria). Acrescentar o
       # passo depois de um `pnpm format` de faxina, num commit só de formatação.
 
+  api-integration:
+    name: Integração da API (PostgreSQL real)
+    runs-on: ubuntu-latest
+    # Os `*.integration.spec.ts` (saldo, liquidação, faturas, migração do
+    # modelo financeiro — docs/adrs/0018) só rodam com um banco de verdade.
+    # Localmente são pulados sem `SELECTED_FEATURES_TEST_DATABASE_URL`; aqui o
+    # banco existe, então eles rodam. O nome termina em `_validation`, como o
+    # guarda dos testes exige, e o banco é descartado com o job.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: vellun
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: financial_vellun_validation
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U vellun"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      PGUSER: vellun
+      PGPASSWORD: ci-only-password
+      PGDATABASE: financial_vellun_validation
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Gerar o Prisma Client
+        run: pnpm --filter @financial-vellun/api exec prisma generate
+      - name: Aplicar as migrations e rodar os testes de integração
+        run: |
+          # URL montada das variáveis do serviço (só do CI, descartável).
+          URL=$(printf '%s://%s:%s@%s/%s' postgresql "$PGUSER" "$PGPASSWORD" localhost:5432 "$PGDATABASE")
+          export DATABASE_URL="$URL" DIRECT_URL="$URL" SELECTED_FEATURES_TEST_DATABASE_URL="$URL"
+          pnpm --filter @financial-vellun/api exec prisma migrate deploy
+          pnpm --filter @financial-vellun/api exec jest integration
+
   agent:
     name: Testes do agente de IA
     runs-on: ubuntu-latest
