@@ -1,6 +1,6 @@
 # 0014 — Faturas de cartão: ciclo, atribuição e limite
 
-- **Status:** Aceito
+- **Status:** Aceito — substituído em parte pela [0018](0018-gasto-obrigacao-liquidacao.md) quanto a dívida e limite (cobrança efetiva × prevista, créditos entre faturas, posição inicial)
 - **Data:** 2026-09-24
 - **Plano:** [`plan/contas-cartoes-faturas.md`](../../plan/contas-cartoes-faturas.md), fase 3
 
