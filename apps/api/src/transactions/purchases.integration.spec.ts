@@ -8,10 +8,10 @@ import {
 } from '../../test/financial-test-env';
 
 /**
- * Item 3 da revisão do modelo pessoal (docs/adrs/0018): a compra parcelada é
- * uma operação com data e total próprios; as parcelas são o calendário de
- * cobrança. "Gastos por data da compra" e "Compromissos por vencimento" são
- * visões separadas e nunca se somam.
+ * Compra parcelada (docs/adrs/0018 e 0019): uma operação com data e total
+ * próprios; as parcelas são o calendário de cobrança. A dívida é a compra
+ * inteira desde o dia dela; nos gastos, cada parcela pesa no mês dela. Compra
+ * e parcelas nunca se somam na mesma métrica.
  */
 integration('compra parcelada × calendário de cobrança (PostgreSQL)', () => {
   let env: FinancialEnv;
@@ -41,7 +41,7 @@ integration('compra parcelada × calendário de cobrança (PostgreSQL)', () => {
     return card;
   }
 
-  it('R$ 1.200 em 3x consumidos em setembro: R$ 1.200 em setembro na visão de gastos, 3 × R$ 400 nas faturas', async () => {
+  it('R$ 1.200 em 3x: R$ 400 por mês nos gastos, dívida de R$ 1.200 desde a compra, 3 × R$ 400 nas faturas', async () => {
     const checking = await env.account(userId, 5000);
     const card = await newCard();
     const purchase = await env.transactions.create(userId, {
@@ -55,11 +55,30 @@ integration('compra parcelada × calendário de cobrança (PostgreSQL)', () => {
     });
     const scope = { cardIds: [card.id] };
 
-    // Gastos por data da compra: R$ 1.200 em setembro, nada em outubro.
-    const september = await env.dashboard.getSummary(userId, '2026-09-01', '2026-09-30', scope);
-    expect(september.spending.realized).toBe(1200);
-    const october = await env.dashboard.getSummary(userId, '2026-10-01', '2026-10-31', scope);
-    expect(october.spending.realized).toBe(0);
+    // Gastos do mês: uma parcela por mês (ADR 0019) — nunca a compra inteira
+    // somada à parcela.
+    const spendingIn = async (start: string, end: string) =>
+      (await env.dashboard.getSummary(userId, start, end, scope)).spending.realized;
+    expect(await spendingIn('2026-09-01', '2026-09-30')).toBe(400);
+    expect(await spendingIn('2026-10-01', '2026-10-31')).toBe(400);
+    expect(await spendingIn('2026-11-01', '2026-11-30')).toBe(400);
+    const monthly = await env.transactions.summary(userId, {
+      periodStart: '2026-09-01',
+      periodEnd: '2026-09-30',
+      dateBasis: 'spending',
+      realizedOnly: true,
+      ...scope,
+    });
+    expect(monthly.expense).toBe(400);
+
+    // Comparativo mensal (SQL) e gráfico diário seguem a mesma regra.
+    const summary = await env.dashboard.getSummary(userId, '2026-10-01', '2026-10-31', scope);
+    const byMonth = new Map(summary.monthlyComparison.map((m) => [m.month, m.expense]));
+    expect([byMonth.get('2026-09'), byMonth.get('2026-10')]).toEqual([400, 400]);
+    const daily = await env.dashboard.getDailyBreakdown(userId, '2026-10', scope);
+    expect(daily.days.find((d) => d.day === 5)?.expense).toBe(400);
+
+    // A compra inteira continua consultável pela data dela.
     expect(
       (
         await env.transactions.summary(userId, {
@@ -70,6 +89,12 @@ integration('compra parcelada × calendário de cobrança (PostgreSQL)', () => {
         })
       ).expense,
     ).toBe(1200);
+
+    // A dívida e o limite comprometido são a compra inteira, desde já.
+    expect(await env.cards.findOne(userId, card.id)).toMatchObject({
+      totalDebt: 1200,
+      committed: 1200,
+    });
 
     // Compromissos por vencimento: uma parcela por mês — nunca somada à compra.
     const dueSeptember = await env.transactions.summary(userId, {
@@ -112,10 +137,8 @@ integration('compra parcelada × calendário de cobrança (PostgreSQL)', () => {
       800,
     );
     expect((await env.cards.findOne(userId, card.id)).totalDebt).toBe(800);
-    // O pagamento da fatura não é gasto: a visão de setembro não muda.
-    expect(
-      (await env.dashboard.getSummary(userId, '2026-09-01', '2026-09-30', scope)).spending.realized,
-    ).toBe(1200);
+    // O pagamento da fatura não é gasto: os gastos de setembro não mudam.
+    expect(await spendingIn('2026-09-01', '2026-09-30')).toBe(400);
   });
 
   it('a soma das parcelas preserva o total, inclusive com arredondamento', async () => {

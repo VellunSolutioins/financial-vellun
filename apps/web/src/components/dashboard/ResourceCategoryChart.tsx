@@ -50,7 +50,7 @@ export function ResourceCategoryChart({
     return (
       <CategoryBars
         title={labels.title}
-        subtitle="Realizados · data da compra"
+        subtitle="Gastos do mês · parcela no mês dela"
         slices={resources ? [] : null}
         emptyText={emptyText}
       />
@@ -80,15 +80,17 @@ export function ResourceCategoryChart({
       title={labels.title}
       // Com um recurso só, o nome dele; com vários, o seletor já diz qual.
       subtitle={
-        resources.length === 1 ? `${resources[0].name} · realizados` : 'Realizados · data da compra'
+        resources.length === 1
+          ? `${resources[0].name} · gastos do mês`
+          : 'Gastos do mês · parcela no mês dela'
       }
       action={selector}
       query={{
         periodStart,
         periodEnd,
-        // Mesma base dos gastos do dashboard: a compra parcelada conta no mês
-        // da compra, não parcela a parcela (docs/adrs/0018).
-        dateBasis: 'event',
+        // Mesma base dos gastos do dashboard: a parcela no mês dela, o resto
+        // na data do fato (docs/adrs/0019).
+        dateBasis: 'spending',
         realizedOnly: true,
         ...(kind === 'accounts' ? { accountIds: ids.join(',') } : { cardIds: ids.join(',') }),
       }}
@@ -112,7 +114,7 @@ function ResourceCategoryData({
   query: {
     periodStart: string;
     periodEnd: string;
-    dateBasis: 'event';
+    dateBasis: 'spending';
     realizedOnly: true;
     accountIds?: string;
     cardIds?: string;

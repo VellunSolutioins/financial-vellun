@@ -53,7 +53,7 @@ interface DashboardSummary {
   cashBalance: number | null;
   investmentsBalance: number;
   loansDebt: number;
-  /** Gastos pela data da compra: realizados e previstos no período. */
+  /** Gastos do mês (parcela no mês dela): realizados e previstos no período. */
   spending: {
     realized: number;
     forecast: number;
@@ -405,7 +405,7 @@ function DashboardContent() {
       ),
     },
     {
-      label: 'Gastos por data da compra',
+      label: 'Gastos do mês',
       value: data.spending.realized,
       icon: TrendingDown,
       tone: 'text-rose-600 bg-rose-50',
@@ -429,7 +429,7 @@ function DashboardContent() {
         <span className="text-xs text-muted-foreground">
           {hasIncome
             ? `${savingsRate.toFixed(0)}% das receitas recebidas`
-            : 'recebidas − gastos; sem receita recebida'}
+            : 'recebidas − gastos do mês; sem receita recebida'}
         </span>
       ),
     },
@@ -474,7 +474,7 @@ function DashboardContent() {
           </Select>
         </div>
       </div>
-      <DateBasisNote variant="purchase" />
+      <DateBasisNote variant="spending" />
       {isFutureMonth && (
         <p className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
           Mês futuro: nada foi realizado ainda. Veja os valores previstos em cada indicador; o saldo
@@ -663,7 +663,7 @@ function DashboardContent() {
           </div>
           <p className="text-xs text-muted-foreground">
             {hasIncome
-              ? `O resultado do período (receitas recebidas − gastos por data da compra) é ${savingsRate.toFixed(0)}% das receitas recebidas.`
+              ? `O resultado do período (receitas recebidas − gastos do mês) é ${savingsRate.toFixed(0)}% das receitas recebidas.`
               : 'Ainda sem receita recebida neste período para calcular.'}
           </p>
         </CardContent>
@@ -675,8 +675,8 @@ function DashboardContent() {
           title={'Para onde foi\nseu dinheiro'}
           subtitle={
             filterActive
-              ? 'Gastos realizados do filtro · data da compra'
-              : 'Gastos realizados · data da compra'
+              ? 'Gastos do mês no filtro · parcela no mês dela'
+              : 'Gastos do mês · parcela no mês dela'
           }
           slices={data.expensesByCategory}
         />
@@ -703,7 +703,7 @@ function DashboardContent() {
             <div>
               <CardTitle className="text-base">Receitas x Gastos</CardTitle>
               <p className="text-xs text-muted-foreground">
-                Recebidas e gastos pela data da compra, por mês
+                Receitas recebidas e gastos do mês (parcela no mês dela)
               </p>
             </div>
             <Select

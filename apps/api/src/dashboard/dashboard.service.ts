@@ -28,7 +28,11 @@ import { cents } from '../common/db';
 import { CardLedgerService, toDbDate } from '../credit-cards/card-ledger.service';
 import { cardNeedsSetup } from '../credit-cards/card-setup';
 import { cardPosition, cycleState } from '../credit-cards/invoice-cycle';
-import { realizedWhere, settlementWhere } from '../transactions/settlement-state';
+import {
+  realizedSpendingFilter,
+  settlementWhere,
+  spendingPeriodWhere,
+} from '../transactions/settlement-state';
 
 /** Itens da lista "Próximas contas a pagar" do dashboard pessoal. */
 const UPCOMING_BILLS_LIMIT = 5;
@@ -61,8 +65,8 @@ export type MonthlyTotalRow = {
  * mostra a base ao lado de cada número.
  */
 export const DASHBOARD_BASES = {
-  /** Gastos: data do fato (a da compra, também nas parcelas). */
-  spending: 'purchase_date',
+  /** Gastos: a parcela no mês dela; o resto na data do fato (ADR 0019). */
+  spending: 'installment_month',
   /** Receitas: data do fato, só o que foi recebido conta como realizado. */
   income: 'event_date_received',
   /** Fluxo de caixa: data do pagamento/recebimento e das transferências. */
@@ -106,26 +110,28 @@ function realizedSpendingWhere(
 ): Prisma.TransactionWhereInput {
   return {
     AND: [
-      realizedWhere(endOfToday),
+      realizedSpendingFilter(endOfToday),
       { status: 'confirmed', type: { in: [...NET_EXPENSE_TYPES] } },
-      { eventDate: { gte: start, lte: end } },
+      spendingPeriodWhere(start, end),
     ],
   };
 }
 
-/** Gasto **previsto** no período: fato futuro, ou previsão de conta comum ainda não paga. */
+/**
+ * Gasto **previsto** no período: o que cai no período mas ainda não é
+ * realizado — compra com data futura (e as parcelas dela), previsão de conta
+ * comum ainda não paga.
+ */
 function forecastSpendingWhere(
   start: Date,
   end: Date,
   endOfToday: Date,
 ): Prisma.TransactionWhereInput {
   return {
-    status: 'confirmed',
-    type: 'expense',
-    eventDate: { gte: start, lte: end },
-    OR: [
-      { eventDate: { gt: endOfToday } },
-      { forecast: true, settledAmount: 0, account: { type: { not: 'credit_card' } } },
+    AND: [
+      { status: 'confirmed', type: 'expense' },
+      spendingPeriodWhere(start, end),
+      { NOT: realizedSpendingFilter(endOfToday) },
     ],
   };
 }
@@ -774,7 +780,13 @@ export class DashboardService {
     const [expenses, incomes] = await Promise.all([
       this.prisma.transaction.findMany({
         where: { userId, ...scopeWhere(scoped), ...realizedSpendingWhere(start, end, endOfToday) },
-        select: { type: true, amount: true, eventDate: true },
+        select: {
+          type: true,
+          amount: true,
+          eventDate: true,
+          transactionDate: true,
+          recurrenceType: true,
+        },
       }),
       this.prisma.transaction.findMany({
         where: {
@@ -793,7 +805,9 @@ export class DashboardService {
     for (let d = 1; d <= daysInMonth; d++) byDay.set(d, { income: 0, expense: 0 });
 
     for (const t of expenses) {
-      const entry = byDay.get(t.eventDate.getUTCDate());
+      // A parcela no dia dela; o resto na data do fato (ADR 0019).
+      const day = t.recurrenceType === 'parcelado' ? t.transactionDate : t.eventDate;
+      const entry = byDay.get(day.getUTCDate());
       if (!entry) continue;
       if (t.type === 'expense') entry.expense += Number(t.amount);
       else entry.expense -= Number(t.amount);
@@ -837,8 +851,8 @@ export class DashboardService {
 
   /**
    * Receitas recebidas e gastos realizados por mês, nos últimos `months`
-   * meses — as mesmas bases do resumo: gasto pela data da compra (a parcela
-   * conta no mês da compra), receita pela data do fato, só o que foi recebido.
+   * meses — as mesmas bases do resumo: a parcela no mês dela (ADR 0019), o
+   * resto na data do fato; receita só o que foi recebido.
    *
    * Uma query: antes eram duas agregações por mês, em série — 24 idas ao
    * banco para montar um gráfico. `$queryRaw` porque o `groupBy` do Prisma não
@@ -862,8 +876,10 @@ export class DashboardService {
     // Antes das bordas da janela, que o teste lê como os dois últimos parâmetros.
     const inScope = scoped ? Prisma.sql`AND t."account_id" = ANY(${scoped}::text[])` : Prisma.empty;
 
+    // Mês do gasto: a parcela no dela, o resto na data do fato (ADR 0019).
+    const budgetDate = Prisma.sql`(CASE WHEN t."recurrence_type" = 'parcelado' THEN t."transaction_date" ELSE t."event_date" END)`;
     const rows = await this.prisma.$queryRaw<MonthlyTotalRow[]>`
-      SELECT to_char(date_trunc('month', t."event_date"), 'YYYY-MM') AS month,
+      SELECT to_char(date_trunc('month', ${budgetDate}), 'YYYY-MM') AS month,
              t."type"::text AS type,
              sum(CASE WHEN t."type" = 'income' THEN t."settled_amount" ELSE t."amount" END)::text AS total
         FROM "transactions" t
@@ -872,10 +888,10 @@ export class DashboardService {
          AND t."status" = 'confirmed'
          AND t."type" IN ('income', 'expense', 'refund')
          AND t."event_date" <= (now() AT TIME ZONE 'America/Sao_Paulo')::date
-         AND NOT (t."type" = 'expense' AND t."forecast" AND t."settled_amount" = 0 AND a."type" <> 'credit_card')
+         AND NOT (t."recurrence_type" <> 'parcelado' AND t."type" = 'expense' AND t."forecast" AND t."settled_amount" = 0 AND a."type" <> 'credit_card')
          ${inScope}
-         AND t."event_date" >= ${first.toISOString().slice(0, 10)}::date
-         AND t."event_date" <= ${last.toISOString().slice(0, 10)}::date
+         AND ${budgetDate} >= ${first.toISOString().slice(0, 10)}::date
+         AND ${budgetDate} <= ${last.toISOString().slice(0, 10)}::date
        GROUP BY 1, 2
     `;
 

@@ -35,3 +35,4 @@ decisão não seja revertida sem que o contexto original seja considerado.
 | [0016](0016-conta-ou-cartao-preferencial.md)                | Conta ou cartão preferencial para lançamentos       | Aceito |
 | [0017](0017-adiantamento-de-parcelas.md)                    | Adiantamento de parcelas                            | Aceito |
 | [0018](0018-gasto-obrigacao-liquidacao.md)                  | Gasto, previsão, obrigação e liquidação             | Aceito |
+| [0019](0019-gasto-parcelado-no-mes-da-parcela.md)           | Gasto parcelado conta no mês de cada parcela        | Aceito |

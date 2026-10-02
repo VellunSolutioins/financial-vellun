@@ -91,16 +91,17 @@ export class TransactionFiltersDto extends ResourceFilterDto {
   forecast?: boolean;
 
   @ApiProperty({
-    enum: ['due', 'event'],
+    enum: ['due', 'event', 'spending'],
     default: 'due',
     required: false,
     description:
       'A que data o período se aplica: `due` = vencimento/ocorrência (na parcela, a data dela); ' +
-      '`event` = data do fato (na parcela, a data da compra).',
+      '`event` = data do fato (na parcela, a data da compra); `spending` = mês do gasto, como no ' +
+      'dashboard (a parcela no mês dela, o resto na data do fato).',
   })
   @IsOptional()
-  @IsIn(['due', 'event'])
-  dateBasis?: 'due' | 'event';
+  @IsIn(['due', 'event', 'spending'])
+  dateBasis?: 'due' | 'event' | 'spending';
 
   @ApiProperty({
     required: false,

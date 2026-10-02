@@ -68,8 +68,11 @@ export interface TransactionFilters {
   periodEnd?: string;
   /** Estado de liquidação: open, partial, settled, overdue ou forecast. */
   settlement?: string;
-  /** A que data o período se aplica: vencimento (`due`, padrão) ou fato (`event`). */
-  dateBasis?: 'due' | 'event';
+  /**
+   * A que data o período se aplica: vencimento (`due`, padrão), fato (`event`)
+   * ou mês do gasto (`spending`: a parcela no mês dela, como no dashboard).
+   */
+  dateBasis?: 'due' | 'event' | 'spending';
   /** Só gastos realizados (mesmo critério do dashboard). */
   realizedOnly?: boolean;
   sortBy?: string;

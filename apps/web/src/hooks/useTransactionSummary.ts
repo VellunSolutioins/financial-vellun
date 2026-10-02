@@ -14,8 +14,8 @@ export interface CategoryTotal {
 }
 
 export interface TransactionSummary {
-  /** `due`: período pela data de vencimento; `event`: pela data do fato (compra). */
-  dateBasis?: 'due' | 'event';
+  /** `due`: vencimento; `event`: data do fato; `spending`: mês do gasto (parcela no dela). */
+  dateBasis?: 'due' | 'event' | 'spending';
   income: number;
   expense: number;
   net: number;

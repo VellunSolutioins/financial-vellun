@@ -93,6 +93,36 @@ export function realizedWhere(endOfToday: Date): Prisma.TransactionWhereInput {
   };
 }
 
+/**
+ * Mês em que um gasto conta (docs/adrs/0019): a **parcela** no mês dela — uma
+ * compra de R$ 1.000 em 5x pesa R$ 200 por mês no orçamento —; todo o resto na
+ * data do fato. A dívida continua inteira desde a compra (o cartão lê o
+ * `eventDate` da parcela, que segue sendo a data da compra).
+ */
+export function spendingPeriodWhere(start: Date, end: Date): Prisma.TransactionWhereInput {
+  return {
+    OR: [
+      { recurrenceType: 'parcelado', transactionDate: { gte: start, lte: end } },
+      { recurrenceType: { not: 'parcelado' }, eventDate: { gte: start, lte: end } },
+    ],
+  };
+}
+
+/**
+ * Gasto **realizado** na visão por parcela: a parcela de uma compra já feita
+ * conta no mês dela (é compromisso firmado, não previsão); o resto segue
+ * `realizedWhere`. Previsto = o que não passa aqui (compra com data futura,
+ * previsão de conta comum ainda não paga).
+ */
+export function realizedSpendingFilter(endOfToday: Date): Prisma.TransactionWhereInput {
+  return {
+    OR: [
+      { recurrenceType: 'parcelado', eventDate: { lte: endOfToday } },
+      { recurrenceType: { not: 'parcelado' }, ...realizedWhere(endOfToday) },
+    ],
+  };
+}
+
 export type SettlementFilter = 'open' | 'partial' | 'settled' | 'overdue' | 'forecast';
 
 /**

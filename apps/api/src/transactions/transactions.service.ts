@@ -29,7 +29,12 @@ import {
 import { Db, FINANCIAL_TX_OPTIONS, cents, lockAccounts, lockTransaction } from '../common/db';
 import { writeEntrySeries } from './entry-writer';
 import { recordSettlement } from './settlements.service';
-import { realizedWhere, settlementWhere, withSettlementInfo } from './settlement-state';
+import {
+  realizedSpendingFilter,
+  settlementWhere,
+  spendingPeriodWhere,
+  withSettlementInfo,
+} from './settlement-state';
 
 const entryInclude = { category: true, account: true } satisfies Prisma.TransactionInclude;
 
@@ -85,14 +90,21 @@ export class TransactionsService {
         accountId ? { accountId } : {},
         scopeWhere(scoped),
         settlement ? settlementWhere(settlement, this.prisma.transaction.fields.amount) : {},
-        realizedOnly ? realizedWhere(endOfDayUtc(dateOnlyString(todaySaoPaulo()))) : {},
+        realizedOnly ? realizedSpendingFilter(endOfDayUtc(dateOnlyString(todaySaoPaulo()))) : {},
+        // Mês do gasto: a parcela no dela, o resto na data do fato (ADR 0019).
+        dateBasis === 'spending' && (periodStart || periodEnd)
+          ? spendingPeriodWhere(
+              periodStart ? startOfDayUtc(periodStart) : new Date(0),
+              periodEnd ? endOfDayUtc(periodEnd) : new Date('9999-12-31'),
+            )
+          : {},
       ],
       ...(status && { status }),
       ...(source && { source }),
       ...(recurrenceType && { recurrenceType }),
       ...(forecast !== undefined && { forecast }),
       ...(search && { description: { contains: search, mode: 'insensitive' } }),
-      ...(periodStart || periodEnd
+      ...(dateBasis !== 'spending' && (periodStart || periodEnd)
         ? {
             [dateColumn]: {
               ...(periodStart && { gte: startOfDayUtc(periodStart) }),

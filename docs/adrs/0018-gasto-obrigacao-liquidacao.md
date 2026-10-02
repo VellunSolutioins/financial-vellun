@@ -1,6 +1,6 @@
 # 0018 — Gasto, previsão, obrigação e liquidação (modelo financeiro pessoal)
 
-- **Status:** Aceito
+- **Status:** Aceito — substituído em parte pela [0019](0019-gasto-parcelado-no-mes-da-parcela.md) quanto ao mês do gasto parcelado
 - **Data:** 2026-10-02
 - **Substitui em parte:** [0013](0013-recorte-por-recurso-e-base-de-data.md) (base de data),
   [0014](0014-faturas-ciclos-e-limite.md) (dívida e limite),
