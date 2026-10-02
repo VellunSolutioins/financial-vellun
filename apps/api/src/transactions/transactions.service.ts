@@ -19,6 +19,7 @@ import { NET_EXPENSE_TYPES, netExpenseByCategory, netExpenseOf, roundCents } fro
 import {
   calendarDayFromUtcDate,
   compareCalendarDays,
+  dateOnlyString,
   endOfDayUtc,
   isFutureDay,
   parseDateOnly,
@@ -28,7 +29,7 @@ import {
 import { Db, FINANCIAL_TX_OPTIONS, cents, lockAccounts, lockTransaction } from '../common/db';
 import { writeEntrySeries } from './entry-writer';
 import { recordSettlement } from './settlements.service';
-import { settlementWhere, withSettlementInfo } from './settlement-state';
+import { realizedWhere, settlementWhere, withSettlementInfo } from './settlement-state';
 
 const entryInclude = { category: true, account: true } satisfies Prisma.TransactionInclude;
 
@@ -68,6 +69,7 @@ export class TransactionsService {
       search,
       settlement,
       forecast,
+      realizedOnly,
       dateBasis = 'due',
     } = filters;
     const scoped = await this.resourceScope.resolve(userId, filters);
@@ -83,6 +85,7 @@ export class TransactionsService {
         accountId ? { accountId } : {},
         scopeWhere(scoped),
         settlement ? settlementWhere(settlement, this.prisma.transaction.fields.amount) : {},
+        realizedOnly ? realizedWhere(endOfDayUtc(dateOnlyString(todaySaoPaulo()))) : {},
       ],
       ...(status && { status }),
       ...(source && { source }),

@@ -6,7 +6,6 @@ import {
   Param,
   Patch,
   Post,
-  Put,
   Query,
   Req,
   UseGuards,
@@ -100,7 +99,7 @@ export class CreditCardsController {
    * Posição no início do controle: fatura anterior ainda não paga e crédito.
    * Substitui a posição anterior; zero nos dois a remove. Não é despesa.
    */
-  @Put(':id/opening-position')
+  @Post(':id/opening-position')
   setOpeningPosition(
     @Req() req: Request,
     @Param('id') id: string,

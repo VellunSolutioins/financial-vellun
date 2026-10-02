@@ -40,6 +40,7 @@ import { TransferForm } from '@/components/transactions/TransferForm';
 import {
   isEditableEntry,
   isInflow,
+  isMovement,
   settlementLabel,
   signOf,
   typeLabel,
@@ -322,19 +323,41 @@ function TransacoesContent() {
       >
         <Eye className="h-4 w-4" />
       </Button>
-      <Button
-        size="sm"
-        variant="ghost"
-        className="text-destructive"
-        onClick={(e) => {
-          e.stopPropagation();
-          void handleDelete(tx);
-        }}
-      >
-        Excluir
-      </Button>
+      {!isMovement(tx) && (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="text-destructive"
+          onClick={(e) => {
+            e.stopPropagation();
+            void handleDelete(tx);
+          }}
+        >
+          Excluir
+        </Button>
+      )}
     </>
   );
+
+  const reverseTransfer = async (tx: Transaction) => {
+    const ok = await confirm({
+      title: 'Reverter transferência',
+      description:
+        'Os saldos das duas contas voltam ao que eram (e os juros/tarifa, se houver, são desfeitos). A transferência fica no histórico como revertida.',
+      confirmText: 'Reverter',
+      variant: 'destructive',
+    });
+    if (!ok) return;
+    try {
+      await apiClient.post(`/transfers/${tx.accountTransferId}/reverse`, {});
+      toast.success('Transferência revertida.');
+      setViewingTx(undefined);
+      refetchTotals();
+      void refetch();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Erro ao reverter transferência');
+    }
+  };
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -678,9 +701,21 @@ function TransacoesContent() {
           </p>
         )}
         {viewingTx?.type === 'transfer' && viewingTx.accountTransferId && (
-          <p className="mt-3 text-xs text-muted-foreground">
-            Parte de uma transferência entre suas contas: não é receita nem despesa.
-          </p>
+          <div className="mt-3 space-y-2">
+            <p className="text-xs text-muted-foreground">
+              Parte de uma transferência entre suas contas: não é receita nem despesa.
+            </p>
+            {viewingTx.status === 'confirmed' && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void reverseTransfer(viewingTx)}
+              >
+                Reverter transferência
+              </Button>
+            )}
+          </div>
         )}
         {viewingTx?.account?.type === 'credit_card' && viewingTx.type === 'expense' && (
           <p className="mt-3 text-xs text-muted-foreground">

@@ -88,7 +88,7 @@ A tabela central continua; os papéis passam a ser distintos:
   lançamentos ativos, reverter um pagamento desfaz a aplicação sozinho. Dívida,
   limite, restante por fatura, faturas futuras e "Contas a pagar" leem todos
   dessa conciliação.
-- **Posição inicial:** `PUT /credit-cards/:id/opening-position` grava a fatura
+- **Posição inicial:** `POST /credit-cards/:id/opening-position` grava a fatura
   anterior não paga (`opening_debt`) e o crédito (`opening_credit`) numa fatura
   que fecha no início do controle. Não é despesa. Compras anteriores ao controle
   ficam fora das faturas: importá-las depois não duplica nada.

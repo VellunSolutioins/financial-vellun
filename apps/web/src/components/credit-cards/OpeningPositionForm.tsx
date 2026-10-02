@@ -70,7 +70,7 @@ export function OpeningPositionForm({
   const onSubmit = async (data: FormData) => {
     setSubmitting(true);
     try {
-      await apiClient.put(`/credit-cards/${card.id}/opening-position`, {
+      await apiClient.post(`/credit-cards/${card.id}/opening-position`, {
         previousInvoiceAmount: data.previousInvoiceAmount
           ? currencyToNumber(data.previousInvoiceAmount)
           : 0,

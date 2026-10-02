@@ -26,7 +26,7 @@ export const INVOICE_ENTRY_TYPES = ['expense', 'refund', 'opening_debt', 'openin
 
 /**
  * Posição inicial (docs/adrs/0018): gravada direto na fatura anterior ao
- * controle pelo `PUT /credit-cards/:id/opening-position`. A sincronização não
+ * controle pelo `POST /credit-cards/:id/opening-position`. A sincronização não
  * a move — ela não tem data de compra para recalcular.
  */
 export const OPENING_TYPES = ['opening_debt', 'opening_credit'] as const;

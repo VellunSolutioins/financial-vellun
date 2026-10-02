@@ -56,7 +56,7 @@ export function typeLabel(tx: DisplayableTransaction): string {
       return 'Crédito anterior ao controle';
     default:
       if (tx.cardPaymentId) return 'Pagamento de fatura';
-      if (tx.accountTransferId) return 'Transferência entre contas';
+      if (tx.accountTransferId) return 'Transferência';
       return 'Transferência';
   }
 }
@@ -64,6 +64,14 @@ export function typeLabel(tx: DisplayableTransaction): string {
 /** Só receita e despesa abrem o formulário de edição; o resto abre os detalhes. */
 export function isEditableEntry(tx: DisplayableTransaction): tx is { type: 'income' | 'expense' } {
   return tx.type === 'income' || tx.type === 'expense';
+}
+
+/**
+ * Pernas de transferência e de pagamento de fatura, e a posição inicial, não se
+ * excluem pela lista: desfazem-se revertendo (ou, a posição, na tela do cartão).
+ */
+export function isMovement(tx: DisplayableTransaction): boolean {
+  return tx.type === 'transfer' || tx.type === 'opening_debt' || tx.type === 'opening_credit';
 }
 
 /** Rótulo do estado de liquidação; nulo quando não há o que mostrar (cartão, movimentação). */

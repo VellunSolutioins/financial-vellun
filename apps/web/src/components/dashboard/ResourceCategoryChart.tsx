@@ -26,8 +26,8 @@ interface Props {
 }
 
 const LABELS = {
-  accounts: { title: 'Saiu da conta', all: 'Todas as contas' },
-  cards: { title: 'Foi no cartão', all: 'Todos os cartões' },
+  accounts: { title: 'Gastos nas contas', all: 'Todas as contas' },
+  cards: { title: 'Gastos no cartão', all: 'Todos os cartões' },
 } as const;
 
 /**
@@ -50,7 +50,7 @@ export function ResourceCategoryChart({
     return (
       <CategoryBars
         title={labels.title}
-        subtitle="Por categoria"
+        subtitle="Realizados · data da compra"
         slices={resources ? [] : null}
         emptyText={emptyText}
       />
@@ -79,7 +79,9 @@ export function ResourceCategoryChart({
     <ResourceCategoryData
       title={labels.title}
       // Com um recurso só, o nome dele; com vários, o seletor já diz qual.
-      subtitle={resources.length === 1 ? `${resources[0].name} · por categoria` : 'Por categoria'}
+      subtitle={
+        resources.length === 1 ? `${resources[0].name} · realizados` : 'Realizados · data da compra'
+      }
       action={selector}
       query={{
         periodStart,
@@ -87,6 +89,7 @@ export function ResourceCategoryChart({
         // Mesma base dos gastos do dashboard: a compra parcelada conta no mês
         // da compra, não parcela a parcela (docs/adrs/0018).
         dateBasis: 'event',
+        realizedOnly: true,
         ...(kind === 'accounts' ? { accountIds: ids.join(',') } : { cardIds: ids.join(',') }),
       }}
     />
@@ -110,6 +113,7 @@ function ResourceCategoryData({
     periodStart: string;
     periodEnd: string;
     dateBasis: 'event';
+    realizedOnly: true;
     accountIds?: string;
     cardIds?: string;
   };

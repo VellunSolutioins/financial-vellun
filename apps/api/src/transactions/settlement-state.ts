@@ -79,6 +79,20 @@ export function withSettlementInfo<T extends StateInput>(t: T, today?: CalendarD
   return { ...t, ...settlementInfo(t, today) };
 }
 
+/**
+ * Gasto **realizado** (docs/adrs/0018): o fato já aconteceu (data do fato até
+ * `endOfToday`) e não é uma previsão de conta comum ainda não paga. Cartão é
+ * realizado na data do fato, inclusive assinatura. Mesmo critério do
+ * dashboard, dos gráficos por recurso e de `GET /transactions/summary` com
+ * `realizedOnly`.
+ */
+export function realizedWhere(endOfToday: Date): Prisma.TransactionWhereInput {
+  return {
+    eventDate: { lte: endOfToday },
+    NOT: { forecast: true, settledAmount: 0, account: { type: { not: 'credit_card' } } },
+  };
+}
+
 export type SettlementFilter = 'open' | 'partial' | 'settled' | 'overdue' | 'forecast';
 
 /**

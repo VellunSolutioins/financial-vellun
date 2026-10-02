@@ -235,6 +235,34 @@ integration('vencimento × pagamento (PostgreSQL)', () => {
     expect(await env.balance(accountId)).toBe(950);
   });
 
+  it('totais "só realizados" seguem o dashboard: conta futura e previsão não paga ficam de fora', async () => {
+    const userOnly = await env.createUser();
+    const accountId = await env.account(userOnly, 1000);
+    const create = (amount: number, date: string, extra = {}) =>
+      env.transactions.create(userOnly, {
+        accountId,
+        type: 'expense',
+        amount,
+        description: 'Gasto',
+        transactionDate: date,
+        ...extra,
+      });
+    await create(40, dayFromToday(0)); // à vista: realizado
+    await create(60, dayFromToday(-1), { settle: false }); // fato passado, em aberto: realizado
+    await create(500, dayFromToday(3)); // conta futura: prevista
+    await create(30, dayFromToday(-2), { recurrenceType: 'fixo', recurrenceMonths: 2 }); // previsão não paga
+    const period = {
+      periodStart: dayFromToday(-40),
+      periodEnd: dayFromToday(40),
+      dateBasis: 'event' as const,
+    };
+
+    const all = await env.transactions.summary(userOnly, period);
+    const realized = await env.transactions.summary(userOnly, { ...period, realizedOnly: true });
+    expect(all.expense).toBe(660);
+    expect(realized.expense).toBe(100);
+  });
+
   it('isolamento: outro usuário não paga nem vê o lançamento', async () => {
     const accountId = await env.account(userId, 100);
     const bill = await expense(accountId, 10, dayFromToday(-1), { settle: false });

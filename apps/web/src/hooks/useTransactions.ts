@@ -70,6 +70,8 @@ export interface TransactionFilters {
   settlement?: string;
   /** A que data o período se aplica: vencimento (`due`, padrão) ou fato (`event`). */
   dateBasis?: 'due' | 'event';
+  /** Só gastos realizados (mesmo critério do dashboard). */
+  realizedOnly?: boolean;
   sortBy?: string;
   order?: 'asc' | 'desc';
 }

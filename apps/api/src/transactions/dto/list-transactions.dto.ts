@@ -101,6 +101,16 @@ export class TransactionFiltersDto extends ResourceFilterDto {
   @IsOptional()
   @IsIn(['due', 'event'])
   dateBasis?: 'due' | 'event';
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Só gastos realizados (fato até hoje, sem previsão ainda não paga): o mesmo critério do dashboard.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
+  @IsBoolean()
+  realizedOnly?: boolean;
 }
 
 export class ListTransactionsDto extends TransactionFiltersDto {

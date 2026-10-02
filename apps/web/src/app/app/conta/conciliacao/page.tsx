@@ -121,7 +121,7 @@ export default function ConciliacaoPage() {
         <Card className="rounded-2xl">
           <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm">
-              {data.meta.total} item{data.meta.total === 1 ? '' : 's'} ·{' '}
+              {data.meta.total} {data.meta.total === 1 ? 'item' : 'itens'} ·{' '}
               {formatCurrency(data.meta.totalAmount)}
             </p>
             <Button size="sm" variant="outline" onClick={() => void confirmAll()}>

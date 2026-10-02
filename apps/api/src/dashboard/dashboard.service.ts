@@ -28,7 +28,7 @@ import { cents } from '../common/db';
 import { CardLedgerService, toDbDate } from '../credit-cards/card-ledger.service';
 import { cardNeedsSetup } from '../credit-cards/card-setup';
 import { cardPosition, cycleState } from '../credit-cards/invoice-cycle';
-import { settlementWhere } from '../transactions/settlement-state';
+import { realizedWhere, settlementWhere } from '../transactions/settlement-state';
 
 /** Itens da lista "Próximas contas a pagar" do dashboard pessoal. */
 const UPCOMING_BILLS_LIMIT = 5;
@@ -105,10 +105,11 @@ function realizedSpendingWhere(
   endOfToday: Date,
 ): Prisma.TransactionWhereInput {
   return {
-    status: 'confirmed',
-    type: { in: [...NET_EXPENSE_TYPES] },
-    eventDate: { gte: start, lte: end < endOfToday ? end : endOfToday },
-    NOT: { forecast: true, settledAmount: 0, account: { type: { not: 'credit_card' } } },
+    AND: [
+      realizedWhere(endOfToday),
+      { status: 'confirmed', type: { in: [...NET_EXPENSE_TYPES] } },
+      { eventDate: { gte: start, lte: end } },
+    ],
   };
 }
 
