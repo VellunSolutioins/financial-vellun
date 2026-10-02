@@ -296,7 +296,19 @@ def test_movement_between_own_accounts_is_not_registered():
         async def create_from_intent(self, *a, **k):
             raise AssertionError("não deveria criar lançamento")
 
-    originals = _patch({"messenger": FakeMessenger(), "transaction_creator": FakeCreator()})
+    class FakeAudit:
+        # A entrega registra a saída na auditoria: sem o dublê, o teste chamava
+        # a API de verdade (e deixava conexão aberta num loop já fechado).
+        async def log_message(self, *a, **k):
+            return "id"
+
+    originals = _patch(
+        {
+            "messenger": FakeMessenger(),
+            "transaction_creator": FakeCreator(),
+            "audit_service": FakeAudit(),
+        }
+    )
     try:
         reply = asyncio.run(
             mp.message_processor.handle_intent(
