@@ -1,8 +1,27 @@
 import { RecurrenceType } from '@prisma/client';
-import { IsDateString, IsEnum, IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsDateString,
+  IsEnum,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { TransactionSource, TransactionStatus } from '@prisma/client';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
+import { SettlementFilter } from '../settlement-state';
+
+const SETTLEMENT_FILTERS = [
+  'open',
+  'partial',
+  'settled',
+  'overdue',
+  'forecast',
+] as const satisfies readonly SettlementFilter[];
 import { ENTRY_TYPES, EntryType } from '../entry-types';
 import { ResourceFilterDto } from '../../common/resource-scope';
 
@@ -54,6 +73,34 @@ export class TransactionFiltersDto extends ResourceFilterDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @ApiProperty({
+    enum: SETTLEMENT_FILTERS,
+    required: false,
+    description:
+      'Estado de liquidação (conta comum): em aberto, parcial, liquidado, vencido (em aberto com vencimento passado) ou previsão.',
+  })
+  @IsOptional()
+  @IsIn(SETTLEMENT_FILTERS)
+  settlement?: SettlementFilter;
+
+  @ApiProperty({ required: false, description: 'Só previsões (true) ou só obrigações (false).' })
+  @IsOptional()
+  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
+  @IsBoolean()
+  forecast?: boolean;
+
+  @ApiProperty({
+    enum: ['due', 'event'],
+    default: 'due',
+    required: false,
+    description:
+      'A que data o período se aplica: `due` = vencimento/ocorrência (na parcela, a data dela); ' +
+      '`event` = data do fato (na parcela, a data da compra).',
+  })
+  @IsOptional()
+  @IsIn(['due', 'event'])
+  dateBasis?: 'due' | 'event';
 }
 
 export class ListTransactionsDto extends TransactionFiltersDto {

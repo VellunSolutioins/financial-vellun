@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsEnum,
   IsIn,
   IsInt,
@@ -48,6 +49,16 @@ export class CreateAiTransactionDto {
   @IsOptional()
   @IsEnum(TransactionStatus)
   status?: TransactionStatus;
+
+  /**
+   * Já foi pago/recebido ("gastei", "paguei", "recebi") ou fica em aberto
+   * ("vence dia 10", "vou receber"). Ausente: mesmo padrão do formulário —
+   * avulso em conta comum com data até hoje nasce pago. Ignorado no cartão
+   * (a compra é paga pela fatura) e em data futura (nada foi pago ainda).
+   */
+  @IsOptional()
+  @IsBoolean()
+  settle?: boolean;
 
   @IsOptional()
   @IsEnum(['ai', 'whatsapp'])

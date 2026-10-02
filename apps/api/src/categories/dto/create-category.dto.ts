@@ -1,5 +1,6 @@
-import { IsIn, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
+import { IsEnum, IsIn, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { CategoryNature } from '@prisma/client';
 import { ENTRY_TYPES, EntryType } from '../../transactions/entry-types';
 
 export class CreateCategoryDto {
@@ -26,4 +27,16 @@ export class CreateCategoryDto {
   @IsOptional()
   @IsString()
   costCenter?: string;
+
+  @ApiProperty({
+    enum: CategoryNature,
+    required: false,
+    default: CategoryNature.consumption,
+    description:
+      'Natureza do gasto (só em despesa): consumo, aquisição de bens ou juros e tarifas. ' +
+      'Os dois últimos aparecem à parte do consumo no dashboard.',
+  })
+  @IsOptional()
+  @IsEnum(CategoryNature)
+  nature?: CategoryNature;
 }

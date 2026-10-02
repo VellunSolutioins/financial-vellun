@@ -29,7 +29,11 @@ const parcel = (n: number, overrides: Partial<Parcel> = {}): Parcel =>
     invoiceId: null,
     cardPaymentId: null,
     advancedAt: null,
+    settledAmount: 0,
+    forecast: false,
+    eventDate: day(7),
     invoice: null,
+    purchase: null,
     account: { id: 'a1', name: 'Conta', type: 'checking' },
     category: { id: 'c1', name: 'Eletrônicos', color: null },
     ...overrides,
@@ -132,13 +136,17 @@ describe('groupInstallments', () => {
 
 describe('InstallmentsService.remove', () => {
   function createService(parcels: Parcel[], locked = new Map<string, string>(), refunded = []) {
-    const prisma = {
+    const prisma: any = {
       transaction: {
         findMany: jest.fn().mockResolvedValue(parcels),
         groupBy: jest.fn().mockResolvedValue(refunded),
         deleteMany: jest.fn(({ where }) => Promise.resolve({ count: where.id.in.length })),
       },
+      installmentPurchase: { deleteMany: jest.fn() },
+      $queryRaw: jest.fn(),
     };
+    // Transação interativa: o callback recebe o próprio dublê como `tx`.
+    prisma.$transaction = jest.fn((fn: (tx: unknown) => unknown) => fn(prisma));
     const accounts = { recalculateBalance: jest.fn() };
     const cardLedger = {
       lockReasons: jest.fn((txs: Parcel[]) =>
@@ -160,10 +168,13 @@ describe('InstallmentsService.remove', () => {
     const { prisma, accounts, service } = createService(fourParcels());
 
     await expect(service.remove('u1', 's1', 'all')).resolves.toEqual({ deleted: 4 });
+    // Parcela paga nunca sai junto (o filtro repete a trava dentro da transação).
     expect(prisma.transaction.deleteMany).toHaveBeenCalledWith({
-      where: { id: { in: ['p1', 'p2', 'p3', 'p4'] } },
+      where: { id: { in: ['p1', 'p2', 'p3', 'p4'] }, settledAmount: 0 },
     });
-    expect(accounts.recalculateBalance).toHaveBeenCalledWith('a1');
+    expect(accounts.recalculateBalance).toHaveBeenCalledWith('a1', prisma);
+    // Sem parcelas, a compra também sai.
+    expect(prisma.installmentPurchase.deleteMany).toHaveBeenCalled();
   });
 
   it('apaga só as parcelas de hoje em diante', async () => {
@@ -171,8 +182,17 @@ describe('InstallmentsService.remove', () => {
 
     await expect(service.remove('u1', 's1', 'future')).resolves.toEqual({ deleted: 2 });
     expect(prisma.transaction.deleteMany).toHaveBeenCalledWith({
-      where: { id: { in: ['p3', 'p4'] } },
+      where: { id: { in: ['p3', 'p4'] }, settledAmount: 0 },
     });
+  });
+
+  it('parcela com pagamento registrado bloqueia a exclusão', async () => {
+    const parcels = fourParcels();
+    (parcels[3] as any).settledAmount = 250;
+    const { prisma, service } = createService(parcels);
+
+    await expect(service.remove('u1', 's1', 'future')).rejects.toThrow('pagamento registrado');
+    expect(prisma.transaction.deleteMany).not.toHaveBeenCalled();
   });
 
   it('não apaga nada se uma parcela atingida está travada', async () => {
@@ -200,16 +220,26 @@ describe('InstallmentsService.remove', () => {
   });
 });
 
+/** Só as atualizações de adiantamento (o pagamento também atualiza o liquidado). */
+function advanceUpdates(prisma: any): any[] {
+  return prisma.transaction.update.mock.calls
+    .map(([args]: any[]) => args)
+    .filter((args: any) => args.data.advancedAt);
+}
+
 describe('InstallmentsService.advance', () => {
   function createService(parcels: Parcel[]) {
-    const prisma = {
+    const prisma: any = {
       transaction: {
         findMany: jest.fn().mockResolvedValue(parcels),
         groupBy: jest.fn().mockResolvedValue([]),
         update: jest.fn((args) => args),
       },
-      $transaction: jest.fn((ops: unknown[]) => Promise.resolve(ops)),
+      transactionSettlement: { create: jest.fn().mockResolvedValue({}) },
+      account: { findMany: jest.fn().mockResolvedValue([]) },
+      $queryRaw: jest.fn(),
     };
+    prisma.$transaction = jest.fn((fn: (tx: unknown) => unknown) => fn(prisma));
     const accounts = { recalculateBalance: jest.fn() };
     const cardLedger = {
       lockReasons: jest.fn().mockResolvedValue(new Map()),
@@ -230,20 +260,48 @@ describe('InstallmentsService.advance', () => {
     const { prisma, accounts, cardLedger, service } = createService(fourParcels());
 
     await service.advance('u1', 's1', { count: 1 });
-    expect(prisma.transaction.update).toHaveBeenCalledTimes(1);
-    expect(prisma.transaction.update).toHaveBeenCalledWith({
-      where: { id: 'p4' },
-      data: { transactionDate: TODAY, advancedAt: TODAY, advancedFromDate: day(10) },
-    });
-    expect(cardLedger.syncTransactions).toHaveBeenCalledWith(['p4']);
-    expect(accounts.recalculateBalance).toHaveBeenCalledWith('a1');
+    expect(advanceUpdates(prisma)).toEqual([
+      {
+        where: { id: 'p4' },
+        data: { transactionDate: TODAY, advancedAt: TODAY, advancedFromDate: day(10) },
+      },
+    ]);
+    expect(cardLedger.syncTransactions).toHaveBeenCalledWith(['p4'], prisma);
+    expect(accounts.recalculateBalance).toHaveBeenCalledWith('a1', prisma);
+  });
+
+  it('em conta comum, adiantar é pagar agora: grava o pagamento da parcela', async () => {
+    const { prisma, service } = createService(fourParcels());
+
+    await service.advance('u1', 's1', { count: 1 });
+    expect(prisma.transactionSettlement.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          transactionId: 'p4',
+          accountId: 'a1',
+          amount: 250,
+          settledOn: TODAY,
+          kind: 'payment',
+        }),
+      }),
+    );
+  });
+
+  it('no cartão, a parcela vai para a fatura aberta e não é paga na hora', async () => {
+    const card = fourParcels().map((p) =>
+      Object.assign(p, { account: { id: 'a1', name: 'Cartão', type: 'credit_card' } }),
+    );
+    const { prisma, service } = createService(card);
+
+    await service.advance('u1', 's1', { count: 1 });
+    expect(prisma.transactionSettlement.create).not.toHaveBeenCalled();
   });
 
   it('com desconto, rateia o total entre as parcelas adiantadas', async () => {
     const { prisma, service } = createService([...fourParcels(), parcel(5)]);
 
     await service.advance('u1', 's1', { count: 2, amount: 400 });
-    const data = prisma.transaction.update.mock.calls.map(([args]) => args.data);
+    const data = advanceUpdates(prisma).map((args) => args.data);
     expect(data.map((d) => [d.amount, d.amountBeforeAdvance])).toEqual([
       [200, 250],
       [200, 250],

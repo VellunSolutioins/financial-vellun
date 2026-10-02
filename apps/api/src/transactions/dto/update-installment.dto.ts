@@ -1,4 +1,5 @@
 import {
+  IsDateString,
   IsIn,
   IsInt,
   IsNumber,
@@ -23,6 +24,16 @@ export class UpdateInstallmentDto {
   @IsOptional()
   @IsString()
   categoryId?: string;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Data da compra (YYYY-MM-DD): a data do fato de todas as parcelas. No cartão, só enquanto ' +
+      'nenhuma parcela estiver em fatura fechada ou paga — ela decide as faturas.',
+  })
+  @IsOptional()
+  @IsDateString()
+  purchaseDate?: string;
 }
 
 export class DeleteInstallmentQueryDto {

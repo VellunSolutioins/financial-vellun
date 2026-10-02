@@ -20,7 +20,10 @@ integration('visões por conta, cartão, conjunto e consolidado (PostgreSQL)', (
   let foodId: string;
 
   // Mês corrente: o comparativo mensal do dashboard cobre só os últimos 12.
-  const month = competenceString(todaySaoPaulo());
+  // Mês anterior: as datas 10 e 12 já passaram em qualquer dia do mês atual,
+  // então as compras são gastos realizados (não previsões) — docs/adrs/0018.
+  const today = todaySaoPaulo();
+  const month = competenceString({ ...today, monthIndex: today.monthIndex - 1, day: 1 });
   const lastDay = new Date(Date.UTC(+month.slice(0, 4), +month.slice(5, 7), 0)).getUTCDate();
   const period = { periodStart: `${month}-01`, periodEnd: `${month}-${lastDay}` };
 
@@ -111,16 +114,18 @@ integration('visões por conta, cartão, conjunto e consolidado (PostgreSQL)', (
 
     const dash = (filter = {}) =>
       dashboard.getSummary(userId, period.periodStart, period.periodEnd, filter);
-    expect((await dash()).totalExpense).toBe(550);
+    expect((await dash()).spending.realized).toBe(550);
     expect((await dash()).lastEntryMonth).toBe(month);
-    expect((await dash({ accountIds: [accountId] })).totalExpense).toBe(200);
-    expect((await dash({ cardIds: [cardId] })).totalExpense).toBe(350);
+    expect((await dash({ accountIds: [accountId] })).spending.realized).toBe(200);
+    expect((await dash({ cardIds: [cardId] })).spending.realized).toBe(350);
     const onlyCard = await dash({ cardIds: [cardId] });
     expect(onlyCard.expensesByCategory).toEqual([
       expect.objectContaining({ categoryId: foodId, total: 350 }),
     ]);
-    // Cartão não tem saldo: o recorte só de cartão não soma conta nenhuma.
-    expect(onlyCard.totalBalance).toBe(0);
+    // Cartão não tem saldo: no recorte só de cartão, o saldo em contas não
+    // existe (nulo) — zero não seria uma medida útil daquele recurso.
+    expect(onlyCard.cashBalance).toBeNull();
+    expect(onlyCard.cards).toMatchObject({ cardCount: 1 });
     // O comparativo mensal (SQL cru) respeita o mesmo recorte.
     const ofMonth = (s: typeof onlyCard) => s.monthlyComparison.find((m) => m.month === month);
     expect(ofMonth(onlyCard)?.expense).toBe(350);

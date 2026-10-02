@@ -1,4 +1,13 @@
-import { IsInt, IsNumber, IsOptional, IsPositive, IsString, Max, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsPositive,
+  IsString,
+  Max,
+  Min,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 
@@ -38,4 +47,14 @@ export class UpdateRecurrenceDto {
   @Min(1)
   @Max(31)
   dueDay?: number;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Previsão (true, o padrão do fixo: cancelável, não é obrigação) ou compromisso firmado ' +
+      '(false: contrato que obriga as próximas ocorrências, ex.: aluguel).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  forecast?: boolean;
 }

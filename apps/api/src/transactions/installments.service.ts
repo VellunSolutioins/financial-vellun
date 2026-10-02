@@ -9,20 +9,31 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountsService } from '../accounts/accounts.service';
 import { CardLedgerService } from '../credit-cards/card-ledger.service';
+import { reconcileCard } from '../credit-cards/card-reconciliation';
 import { healthFromPercentage } from '../credit-cards/card-health';
-import { dateOnlyString, startOfDayUtc, todaySaoPaulo } from '../common/date.util';
+import {
+  dateOnlyString,
+  endOfDayUtc,
+  parseDateOnly,
+  startOfDayUtc,
+  todaySaoPaulo,
+} from '../common/date.util';
+import { FINANCIAL_TX_OPTIONS, cents as toCents, lockAccounts } from '../common/db';
+import { recordSettlement } from './settlements.service';
 import { TransactionsService } from './transactions.service';
 import { AdvanceInstallmentDto, UpdateInstallmentDto } from './dto/update-installment.dto';
 import { advanceState, distributeAdvance } from './installment-advance';
 
 /**
- * Compra parcelada não é uma entidade própria: é a série de lançamentos
- * `parcelado` com o mesmo `seriesId` (ver `buildSeries`). A tela de
- * Lançamentos mostra as parcelas; a de Parcelamentos, uma linha por compra.
+ * Compra parcelada: a operação original (`installment_purchases`, `id =
+ * seriesId`) com data e total próprios, e as parcelas — lançamentos
+ * `parcelado` com o mesmo `seriesId` — como calendário de cobrança
+ * (docs/adrs/0018). A tela de Lançamentos mostra as parcelas; a de
+ * Parcelamentos, uma linha por compra.
  *
  * Exclusão respeita as mesmas travas da parcela avulsa (docs/adrs/0015):
- * parcela em fatura fechada ou paga, ou com estorno, não sai — a compra se
- * desfaz por estorno.
+ * parcela em fatura fechada ou paga, com estorno ou com pagamento registrado
+ * não sai — a compra se desfaz por estorno.
  */
 
 const parcelInclude = {
@@ -30,6 +41,7 @@ const parcelInclude = {
   account: { select: { id: true, name: true, type: true } },
   // Fatura futura ou aberta: decide o que pode ser adiantado.
   invoice: { select: { periodStart: true } },
+  purchase: { select: { purchaseDate: true, totalAmount: true } },
 } satisfies Prisma.TransactionInclude;
 
 export type Parcel = Prisma.TransactionGetPayload<{ include: typeof parcelInclude }>;
@@ -42,12 +54,31 @@ export type BlockReasons = Map<string, string>;
 const REFUND_BLOCK =
   'Esta compra tem estornos. Para desfazê-la, estorne o valor restante em vez de excluir.';
 
+const SETTLED_BLOCK =
+  'Esta parcela já tem pagamento registrado. Reverta o pagamento antes, ou estorne a compra.';
+
+/**
+ * Quanto falta pagar de cada parcela, em centavos (docs/adrs/0018):
+ * - conta comum: valor − liquidado;
+ * - cartão, em fatura: a parte da parcela no restante conciliado da fatura,
+ *   pro rata (a fatura paga pela metade deixa metade de cada cobrança);
+ * - cartão sem fatura: pendente de configuração (vale a data) ou anterior ao
+ *   controle (coberta pela posição inicial — fica de fora).
+ * Compra com data futura é previsão: não entra no compromisso.
+ */
+export type RemainingByParcel = ReadonlyMap<string, number>;
+
 /**
  * Agrupa as parcelas (ordenadas por data) em compras. `today` é o início do
  * dia de hoje: parcelas a partir dele são "de hoje em diante", o mesmo corte
  * das recorrências.
  */
-export function groupInstallments(parcels: Parcel[], today: Date, blocked: BlockReasons) {
+export function groupInstallments(
+  parcels: Parcel[],
+  today: Date,
+  blocked: BlockReasons,
+  remainingByParcel: RemainingByParcel = new Map(),
+) {
   const bySeries = new Map<string, Parcel[]>();
   for (const parcel of parcels) {
     if (!parcel.seriesId) continue;
@@ -76,12 +107,22 @@ export function groupInstallments(parcels: Parcel[], today: Date, blocked: Block
     // Cancelada: todas as parcelas canceladas (ex.: estorno da compra inteira).
     const status: 'active' | 'finished' | 'cancelled' =
       confirmed.length === 0 ? 'cancelled' : next ? 'active' : 'finished';
+    const purchaseDate = first.purchase?.purchaseDate ?? first.eventDate;
 
     return {
       seriesId,
       description: first.description,
       type: first.type,
+      /** Data da compra: é nela que o gasto é reconhecido, não em cada parcela. */
+      purchaseDate,
+      /** Compra com data futura: previsão, ainda não é compromisso. */
+      isForecast: purchaseDate > today && !sameUtcDay(purchaseDate, today),
+      /** Valor contratado (antes de descontos de adiantamento e cancelamentos). */
+      contractAmount: Number(first.purchase?.totalAmount ?? 0) || null,
       totalAmount: list.reduce((sum, p) => sum + Math.round(Number(p.amount) * 100), 0) / 100,
+      /** O que ainda falta pagar da compra (parcelas não pagas, já sem o pago). */
+      remainingCommitment:
+        confirmed.reduce((sum, p) => sum + (remainingByParcel.get(p.id) ?? 0), 0) / 100,
       installmentAmount: Number(first.amountBeforeAdvance ?? first.amount),
       installmentTotal,
       /** Parcelas que ainda existem (menos que o total se as futuras foram excluídas). */
@@ -143,12 +184,22 @@ export function sortInstallments(list: Installment[]) {
   });
 }
 
+function sameUtcDay(a: Date, b: Date) {
+  return a.toISOString().slice(0, 10) === b.toISOString().slice(0, 10);
+}
+
 export interface SummaryInput {
-  /** Cartões ativos. */
-  cards: { accountId: string; name: string; color: string | null; creditLimit: number | null }[];
+  /** Cartões (os arquivados também: a compra continua sendo devida). */
+  cards: {
+    accountId: string;
+    name: string;
+    color: string | null;
+    creditLimit: number | null;
+    isActive?: boolean;
+  }[];
   /** Parcelas de cartão ainda não faturadas (fatura aberta ou futura). */
   unbilled: { accountId: string; amount: number }[];
-  /** Parcelas a pagar: de cartão ainda não faturadas; de conta, de hoje em diante. */
+  /** Compromisso restante por parcela (ver `RemainingByParcel`). */
   remaining: {
     categoryId: string | null;
     categoryName: string | null;
@@ -231,74 +282,79 @@ export class InstallmentsService {
       include: parcelInclude,
       orderBy: [{ transactionDate: 'asc' }, { installmentNumber: 'asc' }],
     });
-    const blocked = await this.blockReasons(parcels);
-    return sortInstallments(groupInstallments(parcels, this.today(), blocked));
+    const [blocked, remaining] = await Promise.all([
+      this.blockReasons(parcels),
+      this.remainingFor(parcels),
+    ]);
+    return sortInstallments(groupInstallments(parcels, this.today(), blocked, remaining));
+  }
+
+  /** Compromisso restante das parcelas de compras já feitas (as futuras são previsão). */
+  private async remainingFor(parcels: Parcel[]) {
+    const endOfToday = endOfDayUtc(dateOnlyString(todaySaoPaulo()));
+    const effective = parcels.filter((p) => p.eventDate <= endOfToday);
+    const accounts = await this.prisma.account.findMany({
+      where: { id: { in: [...new Set(effective.map((p) => p.accountId))] } },
+      select: { id: true, type: true, creditCard: { select: { invoiceTrackingStart: true } } },
+    });
+    const byId = new Map(accounts.map((a) => [a.id, a]));
+    return this.remainingByParcel(
+      effective.map((p) => ({ ...p, account: byId.get(p.accountId) ?? p.account })),
+    );
   }
 
   /**
-   * Limite comprometido por cartão e restante a pagar por categoria. No
-   * cartão, "a pagar" é o que ainda não foi faturado — inclusive parcela com
-   * data passada que está na fatura aberta; em conta, as de hoje em diante.
-   * Assim a rosca e as barras dos cartões contam as mesmas parcelas.
+   * Limite comprometido por cartão (parcelas ainda não faturadas, efetivas) e
+   * compromisso restante por categoria (o que falta pagar das compras já
+   * feitas, ver `RemainingByParcel`). Cartões arquivados entram: arquivar não
+   * apaga o que se deve.
    */
   async summary(userId: string) {
     const today = this.today();
-    const confirmedParcels = {
-      userId,
-      recurrenceType: 'parcelado' as const,
-      seriesId: { not: null },
-      status: 'confirmed' as const,
-      type: 'expense' as const,
-    };
     const category = { select: { id: true, name: true, color: true } };
 
-    const [cards, cardParcels, accountParcels] = await Promise.all([
+    const [cards, parcels] = await Promise.all([
       this.prisma.creditCard.findMany({
-        where: { account: { userId, isActive: true } },
+        where: { account: { userId } },
         select: {
           accountId: true,
           color: true,
           creditLimit: true,
-          account: { select: { name: true } },
-        },
-      }),
-      this.prisma.transaction.findMany({
-        where: { ...confirmedParcels, account: { type: 'credit_card' } },
-        select: {
-          id: true,
-          accountId: true,
-          amount: true,
-          transactionDate: true,
-          invoiceId: true,
-          cardPaymentId: true,
-          category,
+          account: { select: { name: true, isActive: true } },
         },
       }),
       this.prisma.transaction.findMany({
         where: {
-          ...confirmedParcels,
-          account: { type: { not: 'credit_card' } },
-          transactionDate: { gte: today },
+          userId,
+          recurrenceType: 'parcelado',
+          seriesId: { not: null },
+          status: 'confirmed',
+          type: 'expense',
+          eventDate: { lte: endOfDayUtc(dateOnlyString(todaySaoPaulo())) },
         },
-        select: { amount: true, category },
+        select: {
+          id: true,
+          accountId: true,
+          amount: true,
+          settledAmount: true,
+          transactionDate: true,
+          invoiceId: true,
+          cardPaymentId: true,
+          account: {
+            select: { type: true, creditCard: { select: { invoiceTrackingStart: true } } },
+          },
+          category,
+        },
       }),
     ]);
+    const remaining = await this.remainingByParcel(parcels);
+    const cardParcels = parcels.filter((p) => p.account.type === 'credit_card');
     // Fatura fechada ou paga = já faturada: vira dívida da fatura. Sem fatura
-    // (cartão ainda não configurado, ou compra anterior ao controle), vale a data.
+    // (cartão ainda não configurado), vale a data.
     const billed = await this.cardLedger.lockReasons(cardParcels);
     const unbilled = cardParcels.filter((p) =>
       p.invoiceId ? !billed.has(p.id) : p.transactionDate >= today,
     );
-
-    const toRemaining = (p: {
-      amount: Prisma.Decimal;
-      category: { id: string; name: string; color: string | null } | null;
-    }) => ({
-      categoryId: p.category?.id ?? null,
-      categoryName: p.category?.name ?? null,
-      color: p.category?.color ?? null,
-      amount: Number(p.amount),
-    });
 
     return buildInstallmentsSummary({
       cards: cards.map((c) => ({
@@ -306,10 +362,68 @@ export class InstallmentsService {
         name: c.account.name,
         color: c.color,
         creditLimit: c.creditLimit !== null ? Number(c.creditLimit) : null,
+        isActive: c.account.isActive,
       })),
       unbilled: unbilled.map((p) => ({ accountId: p.accountId, amount: Number(p.amount) })),
-      remaining: [...unbilled, ...accountParcels].map(toRemaining),
+      remaining: parcels
+        .filter((p) => (remaining.get(p.id) ?? 0) > 0)
+        .map((p) => ({
+          categoryId: p.category?.id ?? null,
+          categoryName: p.category?.name ?? null,
+          color: p.category?.color ?? null,
+          amount: (remaining.get(p.id) ?? 0) / 100,
+        })),
     });
+  }
+
+  /** Compromisso restante de cada parcela, em centavos (ver `RemainingByParcel`). */
+  private async remainingByParcel(
+    parcels: readonly {
+      id: string;
+      amount: Prisma.Decimal;
+      settledAmount: Prisma.Decimal;
+      status?: string;
+      transactionDate: Date;
+      invoiceId: string | null;
+      accountId: string;
+      account: { type: string; creditCard?: { invoiceTrackingStart: Date | null } | null };
+    }[],
+  ): Promise<Map<string, number>> {
+    const result = new Map<string, number>();
+    const today = this.today();
+    const invoiceIds = [...new Set(parcels.map((p) => p.invoiceId).filter(Boolean))] as string[];
+    const shareByInvoice = new Map<string, number>();
+    if (invoiceIds.length) {
+      const cardIds = (
+        await this.prisma.creditCardInvoice.findMany({
+          where: { id: { in: invoiceIds } },
+          select: { creditCardId: true },
+          distinct: ['creditCardId'],
+        })
+      ).map((i) => i.creditCardId);
+      const amounts = await this.cardLedger.invoicesWithAmounts(cardIds);
+      for (const invoices of amounts.values()) {
+        for (const row of reconcileCard(invoices).invoices) {
+          const total = row.debitCents;
+          shareByInvoice.set(row.invoice.span.id, total > 0 ? row.remainingCents / total : 0);
+        }
+      }
+    }
+    for (const p of parcels) {
+      if (p.status && p.status !== 'confirmed') continue;
+      const amount = toCents(p.amount);
+      if (p.account.type !== 'credit_card') {
+        result.set(p.id, Math.max(0, amount - toCents(p.settledAmount)));
+      } else if (p.invoiceId) {
+        result.set(p.id, Math.round(amount * (shareByInvoice.get(p.invoiceId) ?? 0)));
+      } else {
+        // Sem fatura: cartão sem configuração (vale a data) ou parcela anterior
+        // ao controle (coberta pela posição inicial).
+        const trackingStart = p.account.creditCard?.invoiceTrackingStart ?? null;
+        result.set(p.id, trackingStart === null && p.transactionDate >= today ? amount : 0);
+      }
+    }
+    return result;
   }
 
   async findOne(userId: string, seriesId: string) {
@@ -318,11 +432,36 @@ export class InstallmentsService {
       parcels,
       this.today(),
       await this.blockReasons(parcels),
+      await this.remainingFor(parcels),
     );
-    return installment;
+    return {
+      ...installment,
+      /**
+       * Calendário de cobrança: cada parcela com vencimento, fatura e o que
+       * falta pagar dela. É uma visão de compromissos, não de gastos — o gasto
+       * é a compra, na data dela.
+       */
+      schedule: parcels
+        .slice()
+        .sort((a, b) => (a.installmentNumber ?? 0) - (b.installmentNumber ?? 0))
+        .map((p) => ({
+          id: p.id,
+          installmentNumber: p.installmentNumber,
+          dueDate: p.transactionDate.toISOString().slice(0, 10),
+          amount: Number(p.amount),
+          status: p.status,
+          invoiceId: p.invoiceId,
+          settledAmount: Number(p.settledAmount),
+          advancedAt: p.advancedAt,
+        })),
+    };
   }
 
-  /** Descrição e categoria valem para todas as parcelas, inclusive as faturadas. */
+  /**
+   * Descrição e categoria valem para todas as parcelas, inclusive as
+   * faturadas. A data da compra muda a data do fato de todas; no cartão, ela
+   * decide as faturas, por isso só muda enquanto nada estiver travado.
+   */
   async update(userId: string, seriesId: string, dto: UpdateInstallmentDto) {
     const parcels = await this.findSeries(userId, seriesId);
     if (dto.categoryId) {
@@ -333,13 +472,40 @@ export class InstallmentsService {
         parcels[0].type,
       );
     }
-    await this.prisma.transaction.updateMany({
-      where: { id: { in: parcels.map((p) => p.id) } },
-      data: {
-        ...(dto.description !== undefined && { description: dto.description }),
-        ...(dto.categoryId !== undefined && { categoryId: dto.categoryId || null }),
-      },
-    });
+    const purchaseDate = dto.purchaseDate
+      ? parseDateOnly(dto.purchaseDate.slice(0, 10))
+      : undefined;
+    const isCard = parcels[0].account.type === 'credit_card';
+    if (purchaseDate && isCard) {
+      const [reason] = (await this.cardLedger.lockReasons(parcels)).values();
+      if (reason) throw new ConflictException(reason);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.transaction.updateMany({
+        where: { id: { in: parcels.map((p) => p.id) } },
+        data: {
+          ...(dto.description !== undefined && { description: dto.description }),
+          ...(dto.categoryId !== undefined && { categoryId: dto.categoryId || null }),
+          ...(purchaseDate && { eventDate: purchaseDate }),
+        },
+      });
+      await tx.installmentPurchase.updateMany({
+        where: { id: seriesId, userId },
+        data: {
+          ...(dto.description !== undefined && { description: dto.description }),
+          ...(dto.categoryId !== undefined && { categoryId: dto.categoryId || null }),
+          ...(purchaseDate && { purchaseDate }),
+        },
+      });
+      if (purchaseDate && isCard) {
+        await this.cardLedger.syncTransactions(
+          parcels.map((p) => p.id),
+          tx,
+        );
+        await this.accountsService.recalculateBalance(parcels[0].accountId, tx);
+      }
+    }, FINANCIAL_TX_OPTIONS);
     return this.findOne(userId, seriesId);
   }
 
@@ -365,14 +531,22 @@ export class InstallmentsService {
       );
     }
 
-    const { count } = await this.prisma.transaction.deleteMany({
-      where: { id: { in: targets.map((p) => p.id) } },
-    });
-
-    for (const accountId of new Set(targets.map((p) => p.accountId))) {
-      await this.accountsService.recalculateBalance(accountId);
-      await this.cardLedger.pruneForAccount(accountId);
-    }
+    const count = await this.prisma.$transaction(async (tx) => {
+      const accountIds = [...new Set(targets.map((p) => p.accountId))];
+      await lockAccounts(tx, accountIds);
+      const { count: deleted } = await tx.transaction.deleteMany({
+        where: { id: { in: targets.map((p) => p.id) }, settledAmount: 0 },
+      });
+      // Sem parcela nenhuma, a compra não tem mais o que representar.
+      await tx.installmentPurchase.deleteMany({
+        where: { id: seriesId, userId, installments: { none: {} } },
+      });
+      for (const accountId of accountIds) {
+        await this.accountsService.recalculateBalance(accountId, tx);
+        await this.cardLedger.pruneForAccount(accountId, tx);
+      }
+      return deleted;
+    }, FINANCIAL_TX_OPTIONS);
     return { deleted: count };
   }
 
@@ -423,10 +597,13 @@ export class InstallmentsService {
       }
     }
     const discounted = dto.amount !== undefined && newCents.some((c, i) => c !== currentCents[i]);
+    const isCard = targets[0].account.type === 'credit_card';
 
-    await this.prisma.$transaction(
-      targets.map((p, i) =>
-        this.prisma.transaction.update({
+    await this.prisma.$transaction(async (tx) => {
+      const accountIds = [...new Set(targets.map((p) => p.accountId))];
+      await lockAccounts(tx, accountIds);
+      for (const [i, p] of targets.entries()) {
+        await tx.transaction.update({
           where: { id: p.id },
           data: {
             transactionDate: today,
@@ -434,15 +611,29 @@ export class InstallmentsService {
             advancedFromDate: p.transactionDate,
             ...(discounted && { amount: newCents[i] / 100, amountBeforeAdvance: p.amount }),
           },
-        }),
-      ),
-    );
-
-    await this.cardLedger.syncTransactions(targets.map((p) => p.id));
-    for (const accountId of new Set(targets.map((p) => p.accountId))) {
-      await this.accountsService.recalculateBalance(accountId);
-      await this.cardLedger.pruneForAccount(accountId);
-    }
+        });
+        // Em conta comum, adiantar é pagar agora: o dinheiro sai hoje. No
+        // cartão, a parcela vai para a fatura aberta e é paga com ela.
+        if (!isCard) {
+          await recordSettlement(tx, {
+            userId,
+            transactionId: p.id,
+            accountId: p.accountId,
+            amountCents: newCents[i],
+            date: today,
+            origin: 'user',
+          });
+        }
+      }
+      await this.cardLedger.syncTransactions(
+        targets.map((p) => p.id),
+        tx,
+      );
+      for (const accountId of accountIds) {
+        await this.accountsService.recalculateBalance(accountId, tx);
+        await this.cardLedger.pruneForAccount(accountId, tx);
+      }
+    }, FINANCIAL_TX_OPTIONS);
     return this.findOne(userId, seriesId);
   }
 
@@ -456,10 +647,13 @@ export class InstallmentsService {
     return parcels;
   }
 
-  /** Trava de fatura (fechada/paga) e estornos, por parcela. */
+  /** Trava de fatura (fechada/paga), pagamento registrado e estornos, por parcela. */
   private async blockReasons(parcels: Parcel[]): Promise<BlockReasons> {
     const reasons: BlockReasons = await this.cardLedger.lockReasons(parcels);
     if (parcels.length === 0) return reasons;
+    for (const p of parcels) {
+      if (toCents(p.settledAmount) > 0 && !reasons.has(p.id)) reasons.set(p.id, SETTLED_BLOCK);
+    }
     const refunded = await this.prisma.transaction.groupBy({
       by: ['refundOfId'],
       where: { refundOfId: { in: parcels.map((p) => p.id) }, status: 'confirmed' },

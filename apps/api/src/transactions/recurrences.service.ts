@@ -4,6 +4,7 @@ import { Prisma, RecurrenceFrequency } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountsService } from '../accounts/accounts.service';
 import { dateOnlyString, startOfDayUtc, todaySaoPaulo } from '../common/date.util';
+import { Db, FINANCIAL_TX_OPTIONS, lockAccounts } from '../common/db';
 import { TransactionsService } from './transactions.service';
 import { CardLedgerService } from '../credit-cards/card-ledger.service';
 import { FREQUENCY_STEP_MONTHS } from './recurrence-frequency';
@@ -13,8 +14,13 @@ import { UpdateRecurrenceDto } from './dto/update-recurrence.dto';
  * Recorrência não é uma entidade própria: é a série de lançamentos fixos com o
  * mesmo `seriesId`. A tela de Lançamentos mostra as ocorrências; a de
  * Recorrências mostra uma linha por série. Toda ação aqui (editar, pausar,
- * excluir) atua nas ocorrências de hoje em diante — as passadas ficam como
- * estão, porque já aconteceram.
+ * excluir) atua nas ocorrências de hoje em diante **ainda não pagas** — as
+ * passadas e as já pagas ficam como estão, porque já aconteceram: cancelar a
+ * assinatura não apaga o que foi gasto nem pago (docs/adrs/0018).
+ *
+ * As ocorrências nascem como previsão (`forecast`): não são obrigação nem
+ * dívida. "Compromisso firmado" (`forecast: false`) marca a série inteira como
+ * obrigação constituída — escolha do usuário, nunca inferida da recorrência.
  */
 
 const occurrenceInclude = {
@@ -67,6 +73,8 @@ export function groupRecurrences(occurrences: Occurrence[]) {
       frequency: next.recurrenceFrequency ?? 'monthly',
       dueDay: Math.max(...list.map((o) => o.transactionDate.getUTCDate())),
       isActive: confirmed.length > 0,
+      /** Previsão (cancelável) ou compromisso firmado. */
+      forecast: next.forecast,
       nextDate: next.transactionDate,
       remaining: confirmed.length,
       accountId: next.accountId,
@@ -200,51 +208,70 @@ export class RecurrencesService {
       ...(dto.amount !== undefined && { amount: dto.amount }),
       ...(dto.accountId !== undefined && { accountId: dto.accountId }),
       ...(dto.categoryId !== undefined && { categoryId: dto.categoryId || null }),
+      ...(dto.forecast !== undefined && { forecast: dto.forecast }),
     };
 
-    await this.prisma.$transaction(
-      future.map((occurrence) =>
-        this.prisma.transaction.update({
+    await this.prisma.$transaction(async (tx) => {
+      await lockAccounts(tx, [...future.map((o) => o.accountId), dto.accountId]);
+      for (const occurrence of future) {
+        // No fixo, o fato é a própria ocorrência: muda junto com o dia.
+        const transactionDate =
+          dto.dueDay !== undefined ? withDay(occurrence.transactionDate, dto.dueDay) : undefined;
+        await tx.transaction.update({
           where: { id: occurrence.id },
           data: {
             ...data,
-            ...(dto.dueDay !== undefined && {
-              transactionDate: withDay(occurrence.transactionDate, dto.dueDay),
-            }),
+            ...(transactionDate && { transactionDate, eventDate: transactionDate }),
           },
-        }),
-      ),
-    );
-
-    await this.recalculate(future, dto.accountId);
+        });
+      }
+      await this.recalculate(tx, future, dto.accountId);
+    }, FINANCIAL_TX_OPTIONS);
     return this.findOneOrFail(userId, seriesId);
   }
 
-  /** Pausar cancela as ocorrências de hoje em diante; reativar as confirma de novo. */
+  /**
+   * Pausar cancela as ocorrências de hoje em diante ainda não pagas; reativar
+   * as confirma de novo.
+   */
   async setActive(userId: string, seriesId: string, active: boolean) {
     const future = await this.findFuture(userId, seriesId);
     await this.assertUnlocked(future);
-    await this.prisma.transaction.updateMany({
-      where: {
-        userId,
-        seriesId,
-        transactionDate: this.fromToday(),
-        status: active ? 'cancelled' : 'confirmed',
-      },
-      data: { status: active ? 'confirmed' : 'cancelled' },
-    });
-    await this.recalculate(future);
+    await this.prisma.$transaction(async (tx) => {
+      await lockAccounts(
+        tx,
+        future.map((o) => o.accountId),
+      );
+      await tx.transaction.updateMany({
+        where: {
+          id: { in: future.map((o) => o.id) },
+          settledAmount: 0,
+          status: active ? 'cancelled' : 'confirmed',
+        },
+        data: { status: active ? 'confirmed' : 'cancelled' },
+      });
+      await this.recalculate(tx, future);
+    }, FINANCIAL_TX_OPTIONS);
     return this.findOneOrFail(userId, seriesId);
   }
 
-  /** Exclui as ocorrências de hoje em diante. As passadas não são afetadas. */
+  /**
+   * Exclui as ocorrências de hoje em diante ainda não pagas. As passadas e as
+   * já pagas não são afetadas.
+   */
   async remove(userId: string, seriesId: string) {
     const future = await this.findFuture(userId, seriesId);
     await this.assertUnlocked(future);
-    await this.prisma.transaction.deleteMany({
-      where: { userId, seriesId, transactionDate: this.fromToday() },
-    });
-    await this.recalculate(future);
+    await this.prisma.$transaction(async (tx) => {
+      await lockAccounts(
+        tx,
+        future.map((o) => o.accountId),
+      );
+      await tx.transaction.deleteMany({
+        where: { id: { in: future.map((o) => o.id) }, settledAmount: 0 },
+      });
+      await this.recalculate(tx, future);
+    }, FINANCIAL_TX_OPTIONS);
     return { message: 'Recorrência excluída' };
   }
 
@@ -263,6 +290,7 @@ export class RecurrencesService {
     }
   }
 
+  /** Ocorrências de hoje em diante que ainda não foram pagas: as que se pode mudar. */
   private async findFuture(userId: string, seriesId: string) {
     const future = await this.prisma.transaction.findMany({
       where: {
@@ -270,6 +298,7 @@ export class RecurrencesService {
         seriesId,
         recurrenceType: 'fixo',
         transactionDate: this.fromToday(),
+        settledAmount: 0,
       },
       orderBy: { transactionDate: 'asc' },
     });
@@ -289,19 +318,23 @@ export class RecurrencesService {
   }
 
   /**
-   * Recalcula o saldo das contas tocadas (a de hoje entra no saldo) e a fatura
-   * das ocorrências que continuam existindo, se estiverem num cartão.
+   * Recalcula, na mesma transação, o saldo das contas tocadas e a fatura das
+   * ocorrências que continuam existindo, se estiverem num cartão.
    */
   private async recalculate(
+    tx: Db,
     occurrences: { id: string; accountId: string }[],
     newAccountId?: string,
   ) {
     const accountIds = new Set(occurrences.map((o) => o.accountId));
     if (newAccountId) accountIds.add(newAccountId);
-    await this.cardLedger.syncTransactions(occurrences.map((o) => o.id));
+    await this.cardLedger.syncTransactions(
+      occurrences.map((o) => o.id),
+      tx,
+    );
     for (const accountId of accountIds) {
-      await this.accountsService.recalculateBalance(accountId);
-      await this.cardLedger.pruneForAccount(accountId);
+      await this.accountsService.recalculateBalance(accountId, tx);
+      await this.cardLedger.pruneForAccount(accountId, tx);
     }
   }
 }
