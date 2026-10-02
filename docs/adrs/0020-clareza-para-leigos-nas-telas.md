@@ -55,6 +55,22 @@ quando o tipo é Receita. No WhatsApp, o agente pergunta "Registro como receita 
 R$ X?". Receitas parceladas gravadas antes continuam funcionando, e o
 `db:verify:financial-model` as conta.
 
+### Abas "Até hoje" e "Próximos" em Lançamentos
+
+Recorrências e parcelas gravam as ocorrências do mês com data futura. Com a ordem "mais
+recentes" pelo vencimento, o topo da lista era o fim do mês. No mês atual, a lista passa
+a ter duas abas (`timing=past|upcoming` na listagem, vencimento comparado com hoje em São
+Paulo):
+
+- **Até hoje:** do mais recente para o mais antigo;
+- **Próximos:** de amanhã ao fim do mês, do que vence primeiro, com "amanhã" ou
+  "em N dias" ao lado da data.
+
+Mês passado só tem "Até hoje", e mês futuro só "Próximos", então nesses casos as abas não
+aparecem. As contagens (`pastCount`, `upcomingCount`) e o aviso de contas vencidas e não
+pagas (`overdueCount`, `overdueAmount`) vêm do resumo, com os mesmos filtros da lista.
+Os blocos de dinheiro continuam valendo para o mês inteiro.
+
 ### Tela Faturas
 
 `/app/pessoal/faturas` concentra as faturas, uma por mês de vencimento, para o cartão

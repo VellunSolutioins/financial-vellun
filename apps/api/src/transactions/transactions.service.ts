@@ -11,7 +11,11 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AccountsService } from '../accounts/accounts.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
-import { ListTransactionsDto, TransactionFiltersDto } from './dto/list-transactions.dto';
+import {
+  ListTransactionsDto,
+  TransactionFiltersDto,
+  TransactionTiming,
+} from './dto/list-transactions.dto';
 import { RefundTransactionDto } from './dto/refund-transaction.dto';
 import { ResourceScope, scopeWhere } from '../common/resource-scope';
 import { CardLedgerService } from '../credit-cards/card-ledger.service';
@@ -76,6 +80,7 @@ export class TransactionsService {
       forecast,
       realizedOnly,
       dateBasis = 'due',
+      timing,
     } = filters;
     const scoped = await this.resourceScope.resolve(userId, filters);
     const dateColumn = dateBasis === 'event' ? 'eventDate' : 'transactionDate';
@@ -98,6 +103,7 @@ export class TransactionsService {
               periodEnd ? endOfDayUtc(periodEnd) : new Date('9999-12-31'),
             )
           : {},
+        timing ? timingWhere(timing, dateColumn) : {},
       ],
       ...(status && { status }),
       ...(source && { source }),
@@ -168,9 +174,12 @@ export class TransactionsService {
    * (dispensa não é dinheiro) — `paid` inclui as faturas pagas e desconta
    * estornos recebidos —; `onCard` é o que foi comprado no cartão e só vira
    * `paid` quando a fatura é paga; `leftover` = recebido − pago.
+   * `pastCount`/`upcomingCount` contam as abas "Até hoje"/"Próximos";
+   * `overdueCount`/`overdueAmount`, as contas vencidas e não pagas.
    */
   async summary(userId: string, filters: TransactionFiltersDto) {
     const base = await this.buildWhere(userId, filters);
+    const dateColumn = filters.dateBasis === 'event' ? 'eventDate' : 'transactionDate';
     const where: Prisma.TransactionWhereInput = {
       AND: [base, { status: 'confirmed', type: { in: ['income', ...NET_EXPENSE_TYPES] } }],
     };
@@ -194,6 +203,9 @@ export class TransactionsService {
       settledRefund,
       invoicePayments,
       onCardByType,
+      pastCount,
+      upcomingCount,
+      overdue,
     ] = await Promise.all([
       this.prisma.transaction.groupBy({
         by: ['type'],
@@ -236,6 +248,19 @@ export class TransactionsService {
         where: { AND: [where, { account: { type: 'credit_card' } }] },
         _sum: { amount: true },
       }),
+      // Abas "Até hoje" / "Próximos": mesmas linhas da listagem, todos os tipos.
+      this.prisma.transaction.count({ where: { AND: [base, timingWhere('past', dateColumn)] } }),
+      this.prisma.transaction.count({
+        where: { AND: [base, timingWhere('upcoming', dateColumn)] },
+      }),
+      // Aviso de contas vencidas e não pagas.
+      this.prisma.transaction.aggregate({
+        where: {
+          AND: [base, settlementWhere('overdue', this.prisma.transaction.fields.amount)],
+        },
+        _sum: { amount: true, settledAmount: true },
+        _count: { _all: true },
+      }),
     ]);
 
     const income = Number(byType.find((row) => row.type === 'income')?._sum.amount ?? 0);
@@ -272,6 +297,10 @@ export class TransactionsService {
       toPay: openOf('expense'),
       onCard: roundCents(netExpenseOf(onCardByType)),
       leftover: (receivedCents - paidCents) / 100,
+      pastCount,
+      upcomingCount,
+      overdueCount: overdue._count._all,
+      overdueAmount: (cents(overdue._sum.amount) - cents(overdue._sum.settledAmount)) / 100,
       count: byType.reduce((sum, row) => sum + row._count._all, 0),
       byCategory: [
         ...byCategory
@@ -784,6 +813,18 @@ export class TransactionsService {
     }
     return validated;
   }
+}
+
+/**
+ * Abas da listagem (docs/adrs/0020): "Até hoje" (data até o fim de hoje em São
+ * Paulo) e "Próximos" (de amanhã em diante).
+ */
+function timingWhere(
+  timing: TransactionTiming,
+  dateColumn: 'transactionDate' | 'eventDate',
+): Prisma.TransactionWhereInput {
+  const endOfToday = endOfDayUtc(dateOnlyString(todaySaoPaulo()));
+  return { [dateColumn]: timing === 'past' ? { lte: endOfToday } : { gt: endOfToday } };
 }
 
 /** Lançamento com pagamento ativo não é excluído nem cancelado: reverta antes. */

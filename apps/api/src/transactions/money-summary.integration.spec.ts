@@ -148,4 +148,41 @@ integration('resumo de Lançamentos: recebido, pago e no cartão (PostgreSQL)', 
       leftover: 4700,
     });
   });
+
+  it('abas "Até hoje" e "Próximos" e o aviso de contas vencidas', async () => {
+    const otherUser = await env.createUser();
+    const checking = await env.account(otherUser, 0);
+    const bill = (description: string, days: number, settle = false) =>
+      env.transactions.create(otherUser, {
+        accountId: checking,
+        type: 'expense',
+        amount: 100,
+        description,
+        transactionDate: dayFromToday(days),
+        settle,
+      });
+    await bill('vencida', -3);
+    await bill('paga', -2, true);
+    await bill('hoje', 0);
+    await bill('amanhã', 1);
+    await bill('mês que vem', 30);
+    // Janela larga: o teste não depende do dia do mês em que roda.
+    const window = { periodStart: dayFromToday(-40), periodEnd: dayFromToday(40) };
+
+    expect(await env.transactions.summary(otherUser, window)).toMatchObject({
+      pastCount: 3,
+      upcomingCount: 2,
+      overdueCount: 1,
+      overdueAmount: 100,
+    });
+
+    const list = async (timing: 'past' | 'upcoming', order: 'asc' | 'desc') =>
+      (await env.transactions.findAll(otherUser, { ...window, timing, order })).data.map(
+        (t) => t.description,
+      );
+    // "Até hoje": do mais recente para o mais antigo.
+    expect(await list('past', 'desc')).toEqual(['hoje', 'paga', 'vencida']);
+    // "Próximos": do mais próximo para o mais distante.
+    expect(await list('upcoming', 'asc')).toEqual(['amanhã', 'mês que vem']);
+  });
 });

@@ -25,6 +25,9 @@ const SETTLEMENT_FILTERS = [
 import { ENTRY_TYPES, EntryType } from '../entry-types';
 import { ResourceFilterDto } from '../../common/resource-scope';
 
+export const TRANSACTION_TIMINGS = ['past', 'upcoming'] as const;
+export type TransactionTiming = (typeof TRANSACTION_TIMINGS)[number];
+
 /**
  * Filtros de lançamentos, sem paginação. A listagem e os totais
  * (`GET /transactions/summary`) usam exatamente os mesmos.
@@ -112,6 +115,17 @@ export class TransactionFiltersDto extends ResourceFilterDto {
   @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
   @IsBoolean()
   realizedOnly?: boolean;
+
+  @ApiProperty({
+    enum: TRANSACTION_TIMINGS,
+    required: false,
+    description:
+      'Abas da listagem (docs/adrs/0020): `past` = vencimento até hoje; `upcoming` = de amanhã em ' +
+      'diante. Hoje é o dia em São Paulo.',
+  })
+  @IsOptional()
+  @IsIn(TRANSACTION_TIMINGS)
+  timing?: TransactionTiming;
 }
 
 export class ListTransactionsDto extends TransactionFiltersDto {
