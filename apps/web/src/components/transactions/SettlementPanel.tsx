@@ -66,16 +66,19 @@ export function SettlementPanel({
   transaction,
   accounts,
   onChanged,
+  startOpen = false,
 }: {
   transaction: Transaction;
   /** Contas comuns ativas: de onde sai (ou para onde entra) o dinheiro. */
   accounts: ResourceAccount[];
   onChanged: () => void;
+  /** Abre já com o formulário de pagamento (atalho "Pagar" da lista). */
+  startOpen?: boolean;
 }) {
   const toast = useToast();
   const confirm = useConfirm();
   const [settlements, setSettlements] = useState<Settlement[]>([]);
-  const [formOpen, setFormOpen] = useState(false);
+  const [formOpen, setFormOpen] = useState(startOpen && canSettle(transaction));
   const [idempotencyKey, setIdempotencyKey] = useState(newIdempotencyKey);
   const [submitting, setSubmitting] = useState(false);
   const isIncome = transaction.type === 'income';

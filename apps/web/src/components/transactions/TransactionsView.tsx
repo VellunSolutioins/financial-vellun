@@ -38,6 +38,7 @@ import { AdvanceInstallmentDialog } from '@/components/transactions/AdvanceInsta
 import { SettlementPanel } from '@/components/transactions/SettlementPanel';
 import { TransferForm } from '@/components/transactions/TransferForm';
 import {
+  canSettle,
   isEditableEntry,
   isInflow,
   isMovement,
@@ -216,6 +217,8 @@ function TransacoesContent() {
   const [deletingParcel, setDeletingParcel] = useState<Transaction | undefined>();
   const [advancingSeriesId, setAdvancingSeriesId] = useState<string | undefined>();
   const [transferOpen, setTransferOpen] = useState(false);
+  // Atalho "Pagar"/"Receber" da lista: abre direto o registro do pagamento.
+  const [settlingTx, setSettlingTx] = useState<Transaction | undefined>();
   // Pagamentos inferidos na migração (entraram no saldo só porque a data chegou).
   const [toReview, setToReview] = useState(0);
   useEffect(() => {
@@ -275,6 +278,17 @@ function TransacoesContent() {
     refetchTotals();
     void refetch();
   };
+  /** Depois de pagar ou reverter na edição: recarrega a lista e o lançamento editado. */
+  const refreshEditing = async () => {
+    refetchTotals();
+    void refetch();
+    if (!editingTx) return;
+    try {
+      setEditingTx(await apiClient.get<Transaction>(`/transactions/${editingTx.id}`));
+    } catch {
+      // A lista recarregada já mostra o estado novo.
+    }
+  };
   /** Depois de pagar ou reverter: recarrega a lista e o lançamento aberto nos detalhes. */
   const refreshViewing = async () => {
     refetchTotals();
@@ -311,6 +325,19 @@ function TransacoesContent() {
   // Linha/card inteiro abre o lançamento; os botões não podem propagar o clique.
   const actions = (tx: Transaction) => (
     <>
+      {tx.status === 'confirmed' && canSettle(tx) && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 px-2"
+          onClick={(e) => {
+            e.stopPropagation();
+            setSettlingTx(tx);
+          }}
+        >
+          {tx.type === 'income' ? 'Receber' : 'Pagar'}
+        </Button>
+      )}
       <Button
         size="sm"
         variant="ghost"
@@ -610,7 +637,23 @@ function TransacoesContent() {
         onClose={closeModal}
         title={editingTx ? 'Editar lançamento' : 'Novo lançamento'}
       >
-        <TransactionForm transaction={editingTx} onSuccess={handleSuccess} onCancel={closeModal} />
+        <TransactionForm
+          key={editingTx?.id ?? 'novo'}
+          transaction={editingTx}
+          onSuccess={handleSuccess}
+          onCancel={closeModal}
+        />
+        {editingTx &&
+          editingTx.status === 'confirmed' &&
+          editingTx.state &&
+          ['open', 'partial', 'forecast', 'settled'].includes(editingTx.state) && (
+            <SettlementPanel
+              key={`${editingTx.id}-${editingTx.settledAmount}`}
+              transaction={editingTx}
+              accounts={resources?.accounts ?? []}
+              onChanged={() => void refreshEditing()}
+            />
+          )}
         {editingTx && (
           <div className="mt-2 flex justify-end">
             <Button
@@ -779,6 +822,36 @@ function TransacoesContent() {
             }}
             onCancel={() => setRefundingTx(undefined)}
           />
+        )}
+      </Dialog>
+
+      <Dialog
+        open={!!settlingTx}
+        onClose={() => setSettlingTx(undefined)}
+        title={settlingTx?.type === 'income' ? 'Registrar recebimento' : 'Registrar pagamento'}
+      >
+        {settlingTx && (
+          <>
+            <p className="text-sm">
+              <span className="font-medium">{settlingTx.description}</span>
+              <span className="text-muted-foreground">
+                {' '}
+                · vence {formatDateBR(settlingTx.transactionDate)} · falta{' '}
+                {formatCurrency(settlingTx.remaining ?? Number(settlingTx.amount))}
+              </span>
+            </p>
+            <SettlementPanel
+              key={settlingTx.id}
+              transaction={settlingTx}
+              accounts={resources?.accounts ?? []}
+              startOpen
+              onChanged={() => {
+                setSettlingTx(undefined);
+                refetchTotals();
+                void refetch();
+              }}
+            />
+          </>
         )}
       </Dialog>
 

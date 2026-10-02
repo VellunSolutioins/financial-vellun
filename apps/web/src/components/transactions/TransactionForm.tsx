@@ -202,6 +202,12 @@ export function TransactionForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resources, transaction, setValue, getValues]);
 
+  // Mesma coisa para a categoria: sem isto, na edição o select ficava em "Sem
+  // categoria" (as opções chegam depois) e salvar apagava a categoria.
+  useEffect(() => {
+    if (transaction && categories.length) setValue('categoryId', transaction.categoryId ?? '');
+  }, [categories, transaction, setValue]);
+
   const onSubmit = async (data: FormData) => {
     setSubmitting(true);
     const {
