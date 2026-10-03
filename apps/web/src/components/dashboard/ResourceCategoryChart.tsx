@@ -26,8 +26,8 @@ interface Props {
 }
 
 const LABELS = {
-  accounts: { title: 'Saiu da conta', all: 'Todas as contas' },
-  cards: { title: 'Foi no cartão', all: 'Todos os cartões' },
+  accounts: { title: 'Gastos nas contas', all: 'Todas as contas' },
+  cards: { title: 'Gastos no cartão', all: 'Todos os cartões' },
 } as const;
 
 /**
@@ -50,7 +50,7 @@ export function ResourceCategoryChart({
     return (
       <CategoryBars
         title={labels.title}
-        subtitle="Por categoria"
+        subtitle="Gastos do mês · parcela no mês dela"
         slices={resources ? [] : null}
         emptyText={emptyText}
       />
@@ -79,11 +79,19 @@ export function ResourceCategoryChart({
     <ResourceCategoryData
       title={labels.title}
       // Com um recurso só, o nome dele; com vários, o seletor já diz qual.
-      subtitle={resources.length === 1 ? `${resources[0].name} · por categoria` : 'Por categoria'}
+      subtitle={
+        resources.length === 1
+          ? `${resources[0].name} · gastos do mês`
+          : 'Gastos do mês · parcela no mês dela'
+      }
       action={selector}
       query={{
         periodStart,
         periodEnd,
+        // Mesma base dos gastos do dashboard: a parcela no mês dela, o resto
+        // na data do fato (docs/adrs/0019).
+        dateBasis: 'spending',
+        realizedOnly: true,
         ...(kind === 'accounts' ? { accountIds: ids.join(',') } : { cardIds: ids.join(',') }),
       }}
     />
@@ -103,7 +111,14 @@ function ResourceCategoryData({
   title: string;
   subtitle: string;
   action: React.ReactNode;
-  query: { periodStart: string; periodEnd: string; accountIds?: string; cardIds?: string };
+  query: {
+    periodStart: string;
+    periodEnd: string;
+    dateBasis: 'spending';
+    realizedOnly: true;
+    accountIds?: string;
+    cardIds?: string;
+  };
 }) {
   const { data, loading } = useTransactionSummary(query);
   const slices = loading

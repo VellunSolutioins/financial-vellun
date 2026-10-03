@@ -32,6 +32,8 @@ se estiver ilegível.
 - `recurrence_type`: "parcelado" se o comprovante mostrar parcelamento (ex.: \
 "3x", "parcela 1/3"), com `installments` e `amount_basis` ("total" se o valor \
 lido for o total da compra, "installment" se for o de uma parcela); senão "avulso".
+- `settled`: true para comprovante de pagamento já feito; false para boleto ou \
+fatura ainda não paga; nulo se não der para saber.
 - `confidence`: 0.0 a 1.0, sua confiança na leitura da imagem.
 """
 
@@ -45,10 +47,19 @@ Regras:
 - `intent`: classifique a intenção. Use "create_transaction" para registrar \
 gastos/receitas; "query_summary" para consultas de resumo; "correct_last"/\
 "cancel_last" para corrigir/cancelar o último lançamento; "help" para pedidos \
-de ajuda; "unknown" quando não souber.
+de ajuda; "unsupported_movement" para dinheiro que só muda de lugar entre \
+contas do próprio usuário — transferência entre as contas dele, empréstimo \
+recebido ou pagamento do principal de um empréstimo/financiamento, aporte ou \
+resgate de investimento (isso não é receita nem despesa); "unknown" quando \
+não souber.
 - `transaction_type`: "expense" para gastos/pagamentos/compras, "income" para \
-recebimentos/receitas/vendas (ex.: "venda", "vendi"). Transferência ou Pix \
-enviado é "expense"; recebido é "income".
+recebimentos/receitas/vendas (ex.: "venda", "vendi"). Pix ou transferência \
+para outra pessoa ou empresa é "expense"; recebido de outra pessoa é \
+"income". Rendimento de investimento é "income"; juros pagos, "expense".
+- `settled`: true quando o lançamento já aconteceu e foi pago/recebido \
+("gastei", "paguei", "comprei", "recebi", "caiu"); false quando ainda vai \
+ser pago/recebido ("vence dia 10", "vou pagar", "conta a pagar", "a \
+receber", "boleto para"); nulo quando não der para saber.
 - `amount`: valor numérico (use ponto decimal). Interprete vírgula como \
 separador decimal brasileiro (ex.: "47,50" -> 47.5).
 - `description`: descrição curta do lançamento.
@@ -75,7 +86,8 @@ mensagem, use a data atual.
 - `recurrence_type`: "avulso" (padrão, uma única vez); "parcelado" para compra \
 parcelada ("parcelado", "parcelei", "em 10x", "em 10 vezes", "10 parcelas"); \
 "fixo" para lançamento que se repete ("todo mês", "mensal", "mensalidade", \
-"assinatura", "recorrente", "fixo", "anual"). "1x" ou "à vista" é "avulso".
+"assinatura", "recorrente", "fixo", "anual"). "1x" ou "à vista" é "avulso". \
+Parcelado só existe para despesa: nunca use "parcelado" numa receita.
 - `installments`: no parcelado, o número de parcelas, se informado; senão nulo.
 - `amount_basis`: no parcelado, "installment" se `amount` for o valor de cada \
 parcela, "total" se for o valor da compra inteira. Decide o que liga o valor \

@@ -1,4 +1,4 @@
-import { IsInt, Max, Min } from 'class-validator';
+import { IsBoolean, IsInt, Length, Max, Min } from 'class-validator';
 import { RecurrenceFrequency, RecurrenceType } from '@prisma/client';
 import {
   IsDateString,
@@ -37,9 +37,52 @@ export class CreateTransactionDto {
   @IsString()
   categoryId?: string;
 
-  @ApiProperty()
+  @ApiProperty({
+    description:
+      'Data da (primeira) ocorrência: vencimento ou previsão. No parcelado, a data da compra e da parcela 1.',
+  })
   @IsDateString()
   transactionDate!: string;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Data do fato, quando difere do vencimento (ex.: consumo de setembro que vence em outubro). ' +
+      'Padrão: a própria data do lançamento. Ignorada no cartão e no fixo.',
+  })
+  @IsOptional()
+  @IsDateString()
+  eventDate?: string;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Já foi pago/recebido: grava a liquidação junto. Padrão: avulso em conta comum com data até hoje. ' +
+      'Ignorado no cartão (a compra é paga pela fatura). Não vale para data futura.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  settle?: boolean;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Previsão (não é obrigação constituída). Padrão: verdadeiro no fixo, falso no resto. ' +
+      'No fixo, `false` marca um compromisso firmado (ex.: aluguel com contrato).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  forecast?: boolean;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Chave única por tentativa (a tela gera uma por abertura do formulário). Repetir devolve o lançamento já criado.',
+  })
+  @IsOptional()
+  @IsString()
+  @Length(8, 100)
+  idempotencyKey?: string;
 
   @ApiProperty({
     enum: RecurrenceType,

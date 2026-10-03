@@ -22,8 +22,10 @@ function createPrismaMock() {
     user: { findUnique: jest.fn() },
     account: { findMany: jest.fn(), findUnique: jest.fn() },
     category: { findMany: jest.fn(), findUnique: jest.fn() },
-    transaction: { create: jest.fn(), findUnique: jest.fn() },
+    transaction: { create: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
     aiExtractedTransaction: { update: jest.fn(), create: jest.fn(), findUnique: jest.fn() },
+    installmentPurchase: { create: jest.fn() },
+    transactionSettlement: { create: jest.fn().mockResolvedValue({}) },
   };
   // `$transaction(fn)` executa o callback com o próprio mock como client.
   mock.$transaction = jest.fn(async (fn: any) => fn(mock));
@@ -202,6 +204,26 @@ describe('InternalService', () => {
       await expect(
         service.createTransactionFromAi({ userId: 'u1', accountId: 'a1' } as any),
       ).rejects.toThrow('Conta inválida para o usuário');
+      expect(prisma.transaction.create).not.toHaveBeenCalled();
+    });
+
+    it('createTransactionFromAi recusa receita parcelada', async () => {
+      prisma.account.findUnique.mockResolvedValue({
+        id: 'a1',
+        userId: 'u1',
+        type: 'checking',
+        isActive: true,
+      });
+
+      await expect(
+        service.createTransactionFromAi({
+          userId: 'u1',
+          accountId: 'a1',
+          type: 'income',
+          recurrenceType: 'parcelado',
+          installments: 3,
+        } as any),
+      ).rejects.toThrow('Parcelamento só existe para despesas.');
       expect(prisma.transaction.create).not.toHaveBeenCalled();
     });
 
@@ -395,6 +417,45 @@ describe('InternalService', () => {
       expect(rows[0].seriesId).toEqual(expect.any(String));
       expect(dates(rows)).toEqual(['2026-09-27', '2026-10-27', '2026-11-27']);
       expect(ledger.syncTransactions).toHaveBeenCalledWith(['t1', 't2', 't3']);
+    });
+
+    it('parcelado grava a compra com data e total próprios, e as parcelas apontam para ela', async () => {
+      await service.createTransactionFromAi({
+        ...base,
+        amount: 100,
+        recurrenceType: 'parcelado',
+        installments: 3,
+      });
+
+      const [purchase] = prisma.installmentPurchase.create.mock.calls.map(([arg]: any) => arg.data);
+      const rows = created();
+      expect(purchase).toMatchObject({ totalAmount: 100, installmentCount: 3 });
+      expect(purchase.id).toBe(rows[0].seriesId);
+      expect(rows.every((r: any) => r.purchaseId === purchase.id)).toBe(true);
+      // O fato de todas as parcelas é a compra, não a data de cada uma.
+      expect(rows.map((r: any) => r.eventDate.toISOString().slice(0, 10))).toEqual([
+        '2026-09-27',
+        '2026-09-27',
+        '2026-09-27',
+      ]);
+    });
+
+    it('"gastei" à vista em conta comum nasce pago; "vence" fica em aberto', async () => {
+      await service.createTransactionFromAi({ ...base, amount: 50, settle: true });
+      expect(prisma.transactionSettlement.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ amount: 50, origin: 'whatsapp', kind: 'payment' }),
+        }),
+      );
+
+      prisma.transactionSettlement.create.mockClear();
+      await service.createTransactionFromAi({
+        ...base,
+        idempotencyKey: 'job-10',
+        amount: 50,
+        settle: false,
+      });
+      expect(prisma.transactionSettlement.create).not.toHaveBeenCalled();
     });
 
     it('fixo repete o valor na frequência pedida', async () => {

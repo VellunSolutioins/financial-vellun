@@ -176,6 +176,15 @@ export function InstallmentsView() {
       <span className="block text-xs text-muted-foreground">
         {i.installmentTotal}x de {formatCurrency(i.installmentAmount)}
       </span>
+      {i.status !== 'cancelled' && (
+        <span className="block text-xs text-muted-foreground">
+          {i.isForecast
+            ? 'compra prevista'
+            : i.remainingCommitment > 0
+              ? `falta pagar ${formatCurrency(i.remainingCommitment)}`
+              : 'tudo pago'}
+        </span>
+      )}
     </>
   );
 
@@ -184,7 +193,9 @@ export function InstallmentsView() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold sm:text-2xl">Parcelamentos</h1>
-          <p className="text-sm text-muted-foreground">Compras parceladas e suas parcelas.</p>
+          <p className="text-sm text-muted-foreground">
+            O gasto é a compra, na data dela; as parcelas são o calendário de cobrança.
+          </p>
         </div>
         <Button size="sm" onClick={() => setCreating(true)}>
           <Plus className="mr-1 h-4 w-4" />
@@ -248,6 +259,9 @@ export function InstallmentsView() {
                           <AccountLabel i={i} />
                           {i.category && <span className="truncate">· {i.category.name}</span>}
                         </div>
+                        <p className="text-xs text-muted-foreground">
+                          Compra em {formatDateBR(i.purchaseDate)}
+                        </p>
                       </div>
                       <div className="shrink-0 text-right">{amounts(i)}</div>
                     </div>
@@ -278,8 +292,8 @@ export function InstallmentsView() {
                         <td className="p-3">
                           <p className="font-medium">{i.description}</p>
                           <p className="text-xs text-muted-foreground">
-                            {i.category?.name ?? 'Sem categoria'} · desde{' '}
-                            {formatDateBR(i.firstDate)}
+                            {i.category?.name ?? 'Sem categoria'} · compra em{' '}
+                            {formatDateBR(i.purchaseDate)}
                           </p>
                         </td>
                         <td className="max-w-[12rem] p-3 text-muted-foreground">

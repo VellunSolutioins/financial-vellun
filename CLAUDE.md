@@ -79,6 +79,7 @@ pnpm --filter @financial-vellun/api db:seed                      # categorias pa
 pnpm --filter @financial-vellun/api db:audit:cards               # relatório (só leitura) de dados de cartão legados
 pnpm --filter @financial-vellun/api db:backfill:invoices         # atribui faturas de cartões configurados (idempotente)
 pnpm --filter @financial-vellun/api db:verify:restore            # confere (só leitura) um banco restaurado de backup
+pnpm --filter @financial-vellun/api db:verify:financial-model    # confere (só leitura) a migração do modelo financeiro (ADR 0018)
 ```
 
 | Serviço            | URL                                                         |

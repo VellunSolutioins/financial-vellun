@@ -282,3 +282,44 @@ def test_category_reply_matching_ignores_accents_and_allows_partial_match():
         )
         == "Serviços"
     )
+
+
+def test_movement_between_own_accounts_is_not_registered():
+    """Transferência própria, empréstimo, aporte: orienta o app, não cria nada."""
+    sent: list[str] = []
+
+    class FakeMessenger:
+        async def send(self, phone, text):
+            sent.append(text)
+
+    class FakeCreator:
+        async def create_from_intent(self, *a, **k):
+            raise AssertionError("não deveria criar lançamento")
+
+    class FakeAudit:
+        # A entrega registra a saída na auditoria: sem o dublê, o teste chamava
+        # a API de verdade (e deixava conexão aberta num loop já fechado).
+        async def log_message(self, *a, **k):
+            return "id"
+
+    originals = _patch(
+        {
+            "messenger": FakeMessenger(),
+            "transaction_creator": FakeCreator(),
+            "audit_service": FakeAudit(),
+        }
+    )
+    try:
+        reply = asyncio.run(
+            mp.message_processor.handle_intent(
+                "+5511",
+                "u1",
+                FinancialIntent(intent=IntentType.unsupported_movement, amount=500),
+                "transferi 500 entre minhas contas",
+            )
+        )
+    finally:
+        _restore(originals)
+
+    assert reply == mp.UNSUPPORTED_MOVEMENT_MESSAGE
+    assert sent == [mp.UNSUPPORTED_MOVEMENT_MESSAGE]

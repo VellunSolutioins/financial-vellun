@@ -17,6 +17,14 @@ export interface CreditCard {
   paymentAccountId: string | null;
   /** Cartão legado sem fechamento/vencimento/início do controle. */
   needsSetup: boolean;
+  /** `false`: sem configuração, a dívida é desconhecida (não é zero). */
+  debtKnown: boolean;
+  /** Fatura anterior não paga e crédito no início do controle. */
+  openingPosition: {
+    previousInvoiceAmount: number;
+    previousInvoiceDueDate: string | null;
+    credit: number;
+  } | null;
   isActive: boolean;
   /** Pré-selecionado em novos lançamentos (um só entre contas e cartões). */
   isPreferred: boolean;
@@ -27,22 +35,40 @@ export interface CreditCard {
   currentInvoiceId: string | null;
   currentClosingDate: string | null;
   currentDueDate: string | null;
-  /** Cobranças em faturas que fecham depois da atual. */
+  /** Cobranças efetivas em faturas futuras (bruto). */
+  futureCharges: number | null;
+  /** O que ainda falta pagar das faturas futuras (sem o pago antecipado). */
   futureInstallments: number | null;
   /** Restante de faturas já fechadas. */
   closedUnpaid: number | null;
+  /** Restante de faturas vencidas. */
+  overdue: number | null;
+  /** Assinaturas e compras futuras previstas: não são dívida. */
+  forecast: number | null;
+  /** Soma dos restantes antes dos créditos entre faturas. */
+  grossDebt: number | null;
+  /** Créditos aplicados entre faturas. */
+  appliedCredit: number | null;
+  /** Dívida efetiva (depois de pagamentos e créditos). */
   totalDebt: number | null;
-  /** Limite comprometido (= dívida total). */
+  /** Limite comprometido (= dívida efetiva). */
   committed: number | null;
-  /** Limite disponível para novas compras. */
+  /** Limite disponível estimado para novas compras. */
   available: number | null;
-  /** Pago acima do cobrado. */
+  /** Saldo credor: crédito sem cobrança onde ser aplicado. */
   credit: number | null;
   percentage: number | null;
   health: { key: string; emoji: string; label: string; message: string } | null;
 }
 
 export type InvoicePaymentStatus = 'unpaid' | 'partial' | 'paid' | 'credit';
+
+/** Crédito aplicado entre faturas do mesmo cartão (origem ou destino). */
+export interface CreditApplication {
+  invoiceId: string;
+  referenceMonth: string;
+  amount: number;
+}
 
 export interface CardInvoice {
   id: string;
@@ -53,18 +79,36 @@ export interface CardInvoice {
   state: 'open' | 'closed';
   isCurrent: boolean;
   isFuture: boolean;
+  /** Fatura anterior ao início do controle (posição inicial). */
+  isOpening: boolean;
+  isOverdue: boolean;
   charges: number;
   refunds: number;
   payments: number;
+  openingDebt: number;
+  openingCredit: number;
+  /** Cobranças previstas (fora do total e da dívida). */
+  forecast: number;
   total: number;
+  /** Restante antes de créditos de outras faturas. */
+  grossRemaining: number;
+  /** Créditos de outras faturas aplicados aqui, com a origem. */
+  creditsApplied: CreditApplication[];
+  /** O que falta pagar (nunca negativo). */
   remaining: number;
+  /** Crédito que esta fatura gerou e para onde foi. */
+  surplus: number;
+  surplusAppliedTo: CreditApplication[];
+  unappliedSurplus: number;
   paymentStatus: InvoicePaymentStatus;
 }
 
 export interface InvoiceItem {
   id: string;
-  /** Compra/parcela ou estorno. */
-  type: 'expense' | 'refund';
+  /** Compra/parcela, estorno ou posição inicial. */
+  type: 'expense' | 'refund' | 'opening_debt' | 'opening_credit';
+  /** Data do fato ainda não chegou: previsão, não cobrança efetiva. */
+  isForecast?: boolean;
   description: string;
   amount: number;
   transactionDate: string;
@@ -90,35 +134,18 @@ export interface CardInvoiceDetail extends CardInvoice {
   paymentRecords: InvoicePayment[];
 }
 
-export interface CreditCardSummary {
-  /** Dívida total dos cartões configurados. */
-  totalCommitted: number;
-  /** Soma das faturas abertas hoje. */
-  totalCurrentInvoices: number;
-  totalLimit: number;
-  cardCount: number;
-  pendingSetupCount: number;
-  monthlyIncome: number;
-  incomePercentage: number | null;
-  incomeHealth: { key: string; emoji: string; label: string } | null;
-}
-
+/** Cartões ativos e arquivados. O limite de cada um fica na tela Faturas (docs/adrs/0020). */
 export function useCreditCards() {
   const [data, setData] = useState<CreditCard[]>([]);
   const [archived, setArchived] = useState<CreditCard[]>([]);
-  const [summary, setSummary] = useState<CreditCardSummary | null>(null);
   const [loading, setLoading] = useState(true);
 
   const refetch = useCallback(async () => {
     setLoading(true);
     try {
-      const [cards, summaryData] = await Promise.all([
-        apiClient.get<CreditCard[]>('/credit-cards?includeArchived=true'),
-        apiClient.get<CreditCardSummary>('/credit-cards/summary'),
-      ]);
+      const cards = await apiClient.get<CreditCard[]>('/credit-cards?includeArchived=true');
       setData(cards.filter((c) => c.isActive));
       setArchived(cards.filter((c) => !c.isActive));
-      setSummary(summaryData);
     } finally {
       setLoading(false);
     }
@@ -128,5 +155,5 @@ export function useCreditCards() {
     void refetch();
   }, [refetch]);
 
-  return { data, archived, summary, loading, refetch };
+  return { data, archived, loading, refetch };
 }

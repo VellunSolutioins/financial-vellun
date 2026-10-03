@@ -9,30 +9,19 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
 import { CreditCardForm } from '@/components/credit-cards/CreditCardForm';
 import { CardSetupForm } from '@/components/credit-cards/CardSetupForm';
+import { CardLimitDetails } from '@/components/credit-cards/CardLimitCard';
 import { useCreditCards, type CreditCard } from '@/hooks/useCreditCards';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
-import { cn, formatDateBR } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 
 function formatCurrency(v: number) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 }
 
-const shortDate = (iso: string) => formatDateBR(iso, { day: '2-digit', month: '2-digit' });
-
-/** Cores da barra por faixa de comprometimento do limite (ver credit-cards.service.ts). */
-const healthBarStyles: Record<string, string> = {
-  tranquilo: 'bg-emerald-500',
-  saudavel: 'bg-blue-500',
-  atencao: 'bg-amber-500',
-  apertado: 'bg-orange-500',
-  no_limite: 'bg-rose-500',
-  limite_atingido: 'bg-rose-600',
-};
-
 export default function CartoesPage() {
-  const { data, archived, summary, loading, refetch } = useCreditCards();
+  const { data, archived, loading, refetch } = useCreditCards();
   const [formOpen, setFormOpen] = useState(false);
   const [editingCard, setEditingCard] = useState<CreditCard | undefined>();
   const [settingUp, setSettingUp] = useState<CreditCard | null>(null);
@@ -88,68 +77,24 @@ export default function CartoesPage() {
     }
   };
 
-  const summaryBarWidth =
-    summary && summary.totalLimit > 0
-      ? Math.max(0, Math.min(100, (summary.totalCommitted / summary.totalLimit) * 100))
-      : 0;
-
   return (
     <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold sm:text-2xl">Cartões</h1>
-          <p className="text-sm text-muted-foreground">Faturas e limites dos seus cartões.</p>
+          <p className="text-sm text-muted-foreground">
+            Seus cartões. Para ver e pagar as faturas, use{' '}
+            <Link href="/app/pessoal/faturas" className="font-medium text-foreground underline">
+              Faturas
+            </Link>
+            .
+          </p>
         </div>
         <Button size="sm" onClick={openNew}>
           <Plus className="mr-1 h-4 w-4" />
           Novo cartão
         </Button>
       </div>
-
-      {summary && summary.cardCount > 0 && (
-        <Card className="rounded-2xl">
-          <CardContent className="space-y-3 p-4 sm:p-5">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-sm text-muted-foreground">
-                Limite comprometido em todos os cartões
-              </span>
-              {summary.incomeHealth && (
-                <Badge className="shrink-0 bg-muted text-foreground">
-                  {summary.incomeHealth.emoji} {summary.incomeHealth.label}
-                </Badge>
-              )}
-            </div>
-            <div className="flex items-baseline gap-2">
-              <span className="text-2xl font-bold">{formatCurrency(summary.totalCommitted)}</span>
-              {summary.totalLimit > 0 && (
-                <span className="text-sm text-muted-foreground">
-                  / {formatCurrency(summary.totalLimit)}
-                </span>
-              )}
-            </div>
-            {summary.totalLimit > 0 && (
-              <div className="h-2.5 w-full overflow-hidden rounded-full bg-muted">
-                <div
-                  className="h-full rounded-full bg-primary transition-all"
-                  style={{ width: `${summaryBarWidth}%` }}
-                />
-              </div>
-            )}
-            <p className="text-xs text-muted-foreground">
-              Faturas abertas agora: {formatCurrency(summary.totalCurrentInvoices)}
-              {summary.incomePercentage !== null &&
-                ` · ${summary.incomePercentage.toFixed(0)}% da renda fixa do mês`}
-            </p>
-            {summary.pendingSetupCount > 0 && (
-              <p className="text-xs text-amber-700">
-                {summary.pendingSetupCount === 1
-                  ? '1 cartão sem fechamento configurado fica fora destes totais.'
-                  : `${summary.pendingSetupCount} cartões sem fechamento configurado ficam fora destes totais.`}
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      )}
 
       {loading ? (
         <div className="p-10 text-center text-sm text-muted-foreground">Carregando...</div>
@@ -162,8 +107,6 @@ export default function CartoesPage() {
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {data.map((card) => {
-            const barWidth =
-              card.percentage !== null ? Math.max(0, Math.min(100, card.percentage)) : 0;
             return (
               <Card key={card.id} className="rounded-2xl">
                 <CardContent className="space-y-3 p-4">
@@ -213,86 +156,20 @@ export default function CartoesPage() {
                       </Button>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="min-w-0">
-                        <p className="text-xs text-muted-foreground">
-                          Fatura atual · fecha {shortDate(card.currentClosingDate!)}
-                        </p>
-                        <p className="truncate text-xl font-bold">
-                          {formatCurrency(card.currentInvoice ?? 0)}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          vence {shortDate(card.currentDueDate!)}
-                        </p>
-                      </div>
-                      <div className="min-w-0 space-y-0.5 text-right text-xs text-muted-foreground">
-                        <p>
-                          Parcelas futuras{' '}
-                          <span className="font-semibold text-foreground">
-                            {formatCurrency(card.futureInstallments ?? 0)}
-                          </span>
-                        </p>
-                        {(card.closedUnpaid ?? 0) > 0 && (
-                          <p className="text-rose-600">
-                            Fechadas em aberto{' '}
-                            <span className="font-semibold">
-                              {formatCurrency(card.closedUnpaid ?? 0)}
-                            </span>
-                          </p>
-                        )}
-                        <p>
-                          Dívida total{' '}
-                          <span className="font-semibold text-foreground">
-                            {formatCurrency(card.totalDebt ?? 0)}
-                          </span>
-                        </p>
-                        {(card.credit ?? 0) > 0 && (
-                          <p className="text-emerald-700">
-                            Crédito {formatCurrency(card.credit ?? 0)}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {card.creditLimit !== null && !card.needsSetup && (
                     <>
-                      <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                        <div
-                          className={cn(
-                            'h-full rounded-full transition-all',
-                            card.health ? healthBarStyles[card.health.key] : 'bg-primary',
-                          )}
-                          style={{ width: `${barWidth}%` }}
-                        />
-                      </div>
-                      {card.health && (
-                        <p className="text-xs italic text-muted-foreground">
-                          {card.health.message}
-                        </p>
-                      )}
+                      {/* O limite, não a fatura: a fatura fica na tela Faturas (docs/adrs/0020). */}
+                      <CardLimitDetails card={card} />
+                      <p className="text-xs text-muted-foreground">
+                        Fecha dia {card.closingDay} · vence dia {card.dueDay}
+                      </p>
                     </>
                   )}
 
-                  <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                    {card.available !== null ? (
-                      <span>
-                        Limite disponível{' '}
-                        <span className="font-semibold text-foreground">
-                          {formatCurrency(card.available)}
-                        </span>
-                      </span>
-                    ) : (
-                      <span>
-                        {card.creditLimit === null ? 'Sem limite definido' : 'Limite a calcular'}
-                      </span>
-                    )}
-                    {!card.needsSetup && (
-                      <span className="shrink-0">
-                        Fecha dia {card.closingDay} · vence dia {card.dueDay}
-                      </span>
-                    )}
-                  </div>
+                  {!card.needsSetup && (
+                    <Button asChild size="sm" variant="outline" className="h-8 w-full">
+                      <Link href={`/app/pessoal/faturas?cartao=${card.id}`}>Ver faturas</Link>
+                    </Button>
+                  )}
 
                   <div className="flex items-center justify-between gap-1">
                     <Button
@@ -363,9 +240,16 @@ export default function CartoesPage() {
                     <CreditCardIcon className="h-4 w-4" />
                   </span>
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{card.name}</p>
+                    <Link
+                      href={`/app/pessoal/cartoes/${card.id}`}
+                      className="block truncate text-sm font-medium hover:underline"
+                    >
+                      {card.name}
+                    </Link>
                     <p className="text-xs text-muted-foreground">
-                      Não recebe compras; o histórico continua disponível.
+                      {(card.totalDebt ?? 0) > 0
+                        ? `Ainda deve ${formatCurrency(card.totalDebt ?? 0)}: continua pagável e entra nos totais.`
+                        : 'Não recebe compras; o histórico continua disponível.'}
                     </p>
                   </div>
                 </div>

@@ -19,22 +19,17 @@ interface Props {
   title: string;
 }
 
-function todayLocal() {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
-    now.getDate(),
-  ).padStart(2, '0')}`;
-}
-
 /**
- * Contas a pagar/receber: lançamentos com data de hoje em diante. Não existe
- * status pendente — o que ainda vai acontecer é definido pela data.
+ * Contas a pagar/receber: lançamentos **em aberto** (não pagos, ou pagos em
+ * parte), inclusive os vencidos — vencer não paga nada (docs/adrs/0018). Para
+ * registrar o pagamento, abra o lançamento em Lançamentos.
  */
 export function PendingTransactionsView({ type, title }: Props) {
   const [categories, setCategories] = useState<{ id: string; name: string; type: string }[]>([]);
   const { data: resources } = useFinancialResources();
 
-  const [periodStart, setPeriodStart] = useState(todayLocal);
+  // Sem data inicial: o vencido e não pago também aparece.
+  const [periodStart, setPeriodStart] = useState('');
   const [periodEnd, setPeriodEnd] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [accountId, setAccountId] = useState('');
@@ -43,6 +38,7 @@ export function PendingTransactionsView({ type, title }: Props) {
     () => ({
       type,
       status: 'confirmed',
+      settlement: 'open',
       limit: 500,
       order: 'asc' as const,
       periodStart: periodStart || undefined,
@@ -62,14 +58,20 @@ export function PendingTransactionsView({ type, title }: Props) {
       .catch(console.error);
   }, [type]);
 
-  const total = data.reduce((sum, t) => sum + Number(t.amount), 0);
+  const total = data.reduce((sum, t) => sum + Number(t.remaining ?? t.amount), 0);
+  const overdueCount = data.filter((t) => t.isOverdue).length;
 
   const columns: DataTableColumn<Transaction>[] = [
     {
       key: 'transactionDate',
       header: 'Vencimento',
       cellClassName: 'text-muted-foreground',
-      cell: (tx) => formatDateBR(tx.transactionDate),
+      cell: (tx) => (
+        <span className={tx.isOverdue ? 'font-medium text-red-600' : undefined}>
+          {formatDateBR(tx.transactionDate)}
+          {tx.isOverdue && ' · vencido'}
+        </span>
+      ),
     },
     {
       key: 'description',
@@ -91,10 +93,10 @@ export function PendingTransactionsView({ type, title }: Props) {
     },
     {
       key: 'amount',
-      header: 'Valor',
+      header: 'Em aberto',
       align: 'right',
       cellClassName: `font-semibold ${type === 'income' ? 'text-green-600' : 'text-red-600'}`,
-      cell: (tx) => formatCurrency(Number(tx.amount)),
+      cell: (tx) => formatCurrency(Number(tx.remaining ?? tx.amount)),
     },
   ];
 
@@ -104,12 +106,19 @@ export function PendingTransactionsView({ type, title }: Props) {
 
       {/* Total em destaque */}
       <div className="bg-white rounded-lg border p-6">
-        <p className="text-sm text-muted-foreground">Total a vencer</p>
+        <p className="text-sm text-muted-foreground">Total em aberto</p>
         <p
           className={`text-3xl font-bold ${type === 'income' ? 'text-green-600' : 'text-red-600'}`}
         >
           {formatCurrency(total)}
         </p>
+        {overdueCount > 0 && (
+          <p className="mt-1 text-xs text-red-600">
+            {overdueCount} vencido{overdueCount === 1 ? '' : 's'} e ainda não{' '}
+            {type === 'income' ? 'recebido' : 'pago'}
+            {overdueCount === 1 ? '' : 's'}
+          </p>
+        )}
       </div>
 
       {/* Filtros */}
@@ -141,7 +150,7 @@ export function PendingTransactionsView({ type, title }: Props) {
         rowKey={(tx) => tx.id}
         loading={loading}
         minWidth={640}
-        empty="Nada a vencer no período."
+        empty="Nada em aberto no período."
       />
     </div>
   );

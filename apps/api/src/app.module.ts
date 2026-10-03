@@ -26,6 +26,7 @@ import { CategoriesModule } from './categories/categories.module';
 import { AccountsModule } from './accounts/accounts.module';
 import { ContactsModule } from './contacts/contacts.module';
 import { TransactionsModule } from './transactions/transactions.module';
+import { TransfersModule } from './transfers/transfers.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { InternalModule } from './internal/internal.module';
 import { BillingModule } from './billing/billing.module';
@@ -68,6 +69,7 @@ import { OpsModule } from './ops/ops.module';
     AccountsModule,
     ContactsModule,
     TransactionsModule,
+    TransfersModule,
     DashboardModule,
     InternalModule,
     BillingModule,

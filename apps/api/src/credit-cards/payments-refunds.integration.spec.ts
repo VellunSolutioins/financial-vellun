@@ -195,7 +195,14 @@ integration('pagamentos de fatura e estornos (PostgreSQL)', () => {
 
     const over = await pay(card.id, invoiceId, a, 80);
     let invoice = await invoiceView(card.id, invoiceId);
-    expect(invoice).toMatchObject({ paymentStatus: 'credit', remaining: -30 });
+    // O restante nunca fica negativo: o excedente é crédito (`surplus`), e sem
+    // outra fatura onde aplicá-lo, fica como saldo credor (docs/adrs/0018).
+    expect(invoice).toMatchObject({
+      paymentStatus: 'credit',
+      remaining: 0,
+      surplus: 30,
+      unappliedSurplus: 30,
+    });
     let view = await cards.findOne(userId, card.id);
     expect(view).toMatchObject({ totalDebt: 0, credit: 30 });
 
@@ -284,7 +291,7 @@ integration('pagamentos de fatura e estornos (PostgreSQL)', () => {
     const dash = await dashboard.getSummary(userId, '2026-05-01', '2026-05-31', {
       accountIds: [checking],
     });
-    expect(dash).toMatchObject({ totalIncome: 0, totalExpense: 50 });
+    expect(dash).toMatchObject({ income: { received: 0 }, spending: { realized: 50 } });
   });
 
   it('estorno de parcelado: cancela as não faturadas e estorna as faturadas', async () => {

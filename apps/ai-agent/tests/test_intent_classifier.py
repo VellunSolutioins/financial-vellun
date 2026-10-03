@@ -118,3 +118,39 @@ def test_categoria_de_receita_nao_e_sugerida_para_despesa():
     assert classify("recebi 5000 de salário", catalogo).category_name == "Salário"
     # Despesa: "salário" aponta para uma categoria de receita, que não serve.
     assert classify("paguei 900 de salário da diarista", catalogo).category_name is None
+
+
+# ── Modelo financeiro (docs/adrs/0018) ─────────────────────────────────────
+# Pago na hora × em aberto, e movimentações que não são receita nem despesa.
+
+
+def test_gastei_e_pago_na_hora():
+    assert classify("gastei 50 no mercado").settled is True
+
+
+def test_conta_que_vence_fica_em_aberto():
+    result = classify("conta de luz de 180 vence dia 10")
+    assert result.intent == IntentType.create_transaction
+    assert result.settled is False
+
+
+def test_sem_indicacao_deixa_a_api_decidir():
+    assert classify("mercado 50").settled is None
+
+
+def test_transferencia_entre_contas_proprias_nao_vira_despesa():
+    result = classify("transferi 500 entre minhas contas")
+    assert result.intent == IntentType.unsupported_movement
+    assert result.transaction_type is None
+
+
+def test_emprestimo_e_aporte_nao_viram_receita_nem_despesa():
+    assert classify("recebi 10000 de empréstimo").intent == IntentType.unsupported_movement
+    assert classify("aportei 2000 no CDB").intent == IntentType.unsupported_movement
+    assert classify("resgatei 500 da aplicação").intent == IntentType.unsupported_movement
+
+
+def test_juros_do_emprestimo_continuam_sendo_gasto():
+    result = classify("paguei 150 de juros do empréstimo")
+    assert result.intent == IntentType.create_transaction
+    assert result.transaction_type == TransactionTypeEnum.expense

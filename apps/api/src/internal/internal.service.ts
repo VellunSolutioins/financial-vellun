@@ -13,14 +13,16 @@ import { SubscriptionRequiredException } from '../billing/subscription-required.
 import { CreateAiTransactionDto } from './dto/create-ai-transaction.dto';
 import { AiEventDto } from './dto/ai-event.dto';
 import { normalizePhone } from '../common/phone.util';
-import { parseDateOnly } from '../common/date.util';
+import { isFutureDay, parseDateOnly } from '../common/date.util';
+import { FINANCIAL_TX_OPTIONS, lockAccounts } from '../common/db';
 import {
   assertAccountAcceptsEntries,
   assertAccountAcceptsType,
+  assertInstallmentIsExpense,
 } from '../transactions/transactions.service';
 import { CardLedgerService } from '../credit-cards/card-ledger.service';
 import { cardNeedsSetup } from '../credit-cards/card-setup';
-import { buildSeries } from '../transactions/recurrence-series';
+import { writeEntrySeries } from '../transactions/entry-writer';
 
 /** Vínculo que identifica o usuário: verificado e não revogado. */
 function isLinked(contact: { userId: string | null; isVerified: boolean; revokedAt: Date | null }) {
@@ -199,6 +201,7 @@ export class InternalService {
     }
     assertAccountAcceptsEntries(account);
     assertAccountAcceptsType(account, dto.type);
+    assertInstallmentIsExpense(dto.type, dto.recurrenceType);
 
     if (dto.categoryId) {
       const category = await this.prisma.category.findUnique({ where: { id: dto.categoryId } });
@@ -221,7 +224,7 @@ export class InternalService {
 
     let transaction: Awaited<ReturnType<typeof this.persistAiTransaction>>;
     try {
-      transaction = await this.persistAiTransaction(dto);
+      transaction = await this.persistAiTransaction(dto, account);
     } catch (err) {
       // Corrida no unique de idempotencyKey: outro worker criou primeiro.
       if (
@@ -239,15 +242,13 @@ export class InternalService {
   }
 
   /**
-   * Recalcula o saldo da conta quando o lançamento está confirmado.
+   * Recalcula o saldo da conta e a fatura do lançamento.
    *
-   * Vale **também** para o lançamento devolvido pela idempotência. O cenário que
-   * ela existe para cobrir é justamente o processo morrer depois do commit e
-   * antes do recálculo: sem isto, a reentrega caía no retorno antecipado e o
-   * saldo ficava defasado até outro lançamento tocar a mesma conta.
-   *
-   * Recalcular de novo é seguro: `recalculateBalance` recompõe o saldo do zero a
-   * partir dos agregados, sem somar em cima do valor anterior.
+   * Lançamento, liquidação à vista, saldo e fatura já são gravados no mesmo
+   * commit (`persistAiTransaction`). Repetir aqui — inclusive no lançamento
+   * devolvido pela idempotência — é uma garantia barata para registros
+   * gravados antes disso: `recalculateBalance` recompõe o saldo do zero, e a
+   * sincronização da fatura é idempotente.
    */
   private async comSaldoGarantido<
     T extends { id: string; status: string; accountId: string; seriesId?: string | null },
@@ -271,44 +272,45 @@ export class InternalService {
   }
 
   /**
-   * Grava o lançamento — ou a série inteira, no fixo e no parcelado — e a
-   * rastreabilidade da extração na **mesma** transação de banco: ou tudo
-   * existe, ou nada.
+   * Grava o lançamento — ou a série inteira, no fixo e no parcelado, com a
+   * compra parcelada —, a liquidação à vista, a rastreabilidade da extração,
+   * o saldo e a fatura na **mesma** transação de banco: ou tudo existe, ou
+   * nada. Usa o mesmo gravador do formulário (`writeEntrySeries`).
    *
    * A chave de idempotência e a extração ficam só na 1ª ocorrência (a chave é
    * única no banco): a reentrega encontra a 1ª e devolve a série já criada.
    */
-  private persistAiTransaction(dto: CreateAiTransactionDto) {
-    const series = buildSeries({
-      recurrenceType: dto.recurrenceType,
-      recurrenceFrequency: dto.recurrenceFrequency,
-      installments: dto.installments,
-      recurrenceMonths: dto.recurrenceMonths,
-      amount: dto.amount,
-      firstDate: parseDateOnly(dto.transactionDate),
-    });
-
+  private persistAiTransaction(dto: CreateAiTransactionDto, account: { id: string; type: string }) {
+    const firstDate = parseDateOnly(dto.transactionDate);
     return this.prisma.$transaction(async (tx) => {
-      const [first, ...rest] = series.rows;
-      const baseData = {
+      await lockAccounts(tx, [account.id]);
+      const { rows } = await writeEntrySeries(tx, {
         userId: dto.userId,
-        accountId: dto.accountId,
-        categoryId: dto.categoryId,
+        account,
+        categoryId: dto.categoryId ?? null,
         type: dto.type,
         description: dto.description,
-        status: dto.status ?? ('confirmed' as const),
-        source: dto.source ?? ('ai' as const),
+        status: dto.status ?? 'confirmed',
+        source: dto.source ?? 'ai',
         rawInput: dto.rawInput,
-        recurrenceType: series.recurrenceType,
-        recurrenceFrequency: series.recurrenceFrequency,
-      };
-      const transaction = await tx.transaction.create({
-        data: { ...baseData, ...first, idempotencyKey: dto.idempotencyKey },
-        include: { category: true, account: true },
+        recurrenceType: dto.recurrenceType,
+        recurrenceFrequency: dto.recurrenceFrequency,
+        installments: dto.installments,
+        recurrenceMonths: dto.recurrenceMonths,
+        amount: dto.amount,
+        firstDate,
+        // O modelo pode dizer "pago" para algo com data futura: nada foi pago
+        // ainda, então fica em aberto em vez de recusar a mensagem.
+        settle: dto.settle === undefined ? undefined : dto.settle && !isFutureDay(firstDate),
+        settlementOrigin: dto.source === 'whatsapp' ? 'whatsapp' : 'at_sight',
+        idempotencyKey: dto.idempotencyKey,
       });
-      for (const row of rest) {
-        await tx.transaction.create({ data: { ...baseData, ...row } });
-      }
+      const transaction = rows[0];
+      await this.accountsService.recalculateBalance(account.id, tx);
+      await this.cardLedger.syncTransactions(
+        rows.map((t) => t.id),
+        tx,
+      );
 
       if (dto.aiExtractedTransactionId) {
         await tx.aiExtractedTransaction.update({
@@ -318,7 +320,7 @@ export class InternalService {
       }
 
       return transaction;
-    });
+    }, FINANCIAL_TX_OPTIONS);
   }
 
   /** Lançamento já criado para uma chave de idempotência, marcado como tal. */

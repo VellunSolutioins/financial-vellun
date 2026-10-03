@@ -11,6 +11,8 @@ import {
   ArrowDownRight,
   Scale,
   CreditCard as CreditCardIcon,
+  CalendarClock,
+  ArrowLeftRight,
 } from 'lucide-react';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -26,28 +28,79 @@ import { apiClient } from '@/lib/api-client';
 import { cn } from '@/lib/utils';
 
 /**
- * Item de "Próximas contas a pagar": uma despesa de conta (só a próxima
- * ocorrência de cada série) ou uma fatura de cartão com saldo a pagar.
+ * Item de "Contas a pagar": uma despesa de conta em aberto (só a mais antiga
+ * de cada série, inclusive vencida) ou uma fatura com restante conciliado.
  */
 interface UpcomingBill {
   kind: 'transaction' | 'invoice';
   id: string;
   description: string;
-  /** Na fatura, o restante a pagar. */
   amount: number;
-  /** Na fatura, o vencimento. */
+  /** O que falta pagar. */
+  remaining: number;
+  /** Vencimento (na fatura, o dela). */
   transactionDate: string;
+  isOverdue: boolean;
   category: { name: string } | null;
   cardId?: string;
   /** `open`: fatura ainda aberta, o valor pode crescer até o fechamento. */
   invoiceState?: 'open' | 'closed';
 }
 
+/** Indicadores do dashboard pessoal (docs/adrs/0018): cada um com nome, fórmula e base. */
 interface DashboardSummary {
-  totalBalance: number;
-  totalIncome: number;
-  totalExpense: number;
-  netResult: number;
+  /** Saldo atual das contas de caixa; nulo quando o filtro não tem conta (só cartão). */
+  cashBalance: number | null;
+  investmentsBalance: number;
+  loansDebt: number;
+  /** Gastos do mês (parcela no mês dela): realizados e previstos no período. */
+  spending: {
+    realized: number;
+    forecast: number;
+    byNature: { consumption: number; asset_acquisition: number; financial_cost: number };
+  };
+  /** Receitas: recebidas e a receber no período. */
+  income: { received: number; pending: number };
+  /** Receitas recebidas − gastos realizados. */
+  result: { value: number; percentOfIncome: number | null };
+  cashFlow: {
+    inflow: number;
+    outflow: number;
+    invoicePayments: number;
+    transfersNet: number;
+    net: number;
+  };
+  commitments: {
+    horizon: string;
+    overdueBills: number;
+    overdueForecast: number;
+    billsToHorizon: number;
+    forecastToHorizon: number;
+    receivableToHorizon: number;
+    invoicesOverdue: number;
+    invoicesToHorizon: number;
+  };
+  cards: {
+    totalDebt: number;
+    overdue: number;
+    futureInstallments: number;
+    creditBalance: number;
+    forecast: number;
+    incompleteCards: number;
+    cardCount: number;
+  } | null;
+  projected: {
+    horizon: string;
+    value: number;
+    components: {
+      cashBalance: number;
+      receivable: number;
+      overdueBills: number;
+      bills: number;
+      forecastBills: number;
+      invoices: number;
+    };
+  } | null;
   expensesByCategory: {
     categoryId: string | null;
     categoryName: string;
@@ -87,7 +140,7 @@ function monthLabelFull(ym: string) {
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
-/** Classifica a saúde financeira do mês a partir da taxa de economia (Economia / Receitas). */
+/** Classifica a saúde do mês pelo resultado ÷ receitas recebidas. */
 function financialHealth(savingsRate: number, hasIncome: boolean) {
   if (!hasIncome) {
     return {
@@ -180,13 +233,6 @@ function lastMonthWithMovement(months: DashboardSummary['monthlyComparison']) {
 function formatDueDate(iso: string) {
   const d = new Date(`${iso.slice(0, 10)}T00:00:00`);
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-}
-
-function isOverdue(iso: string) {
-  const due = new Date(`${iso.slice(0, 10)}T00:00:00`);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return due < today;
 }
 
 function pctChange(current: number, previous: number): number | null {
@@ -309,44 +355,88 @@ function DashboardContent() {
   if (loading && !data) return <div className="text-muted-foreground">Carregando...</div>;
   if (!data) return <div className="text-destructive">Erro ao carregar dashboard.</div>;
 
-  const savingsRate = data.totalIncome > 0 ? (data.netResult / data.totalIncome) * 100 : 0;
+  const savingsRate = data.result.percentOfIncome ?? 0;
+  const hasIncome = data.income.received > 0;
+  const horizonLabel = formatDueDate(data.commitments.horizon);
+
+  // Com o filtro só em cartões, saldo bancário não é medida daquele recurso:
+  // o primeiro número vira a dívida do cartão.
+  const firstCard =
+    data.cashBalance === null && data.cards
+      ? {
+          label: 'Dívida no cartão',
+          value: data.cards.totalDebt,
+          icon: CreditCardIcon,
+          tone: 'text-violet-600 bg-violet-50',
+          hint: (
+            <span className="text-xs text-muted-foreground">
+              efetiva hoje, depois de pagamentos e créditos
+            </span>
+          ),
+        }
+      : {
+          label: 'Saldo atual em contas',
+          value: data.cashBalance ?? 0,
+          icon: Wallet,
+          tone: 'text-blue-600 bg-blue-50',
+          hint: (
+            <span className="text-xs text-muted-foreground">
+              hoje · sem investimentos nem cartões
+            </span>
+          ),
+        };
 
   const cards = [
+    firstCard,
     {
-      label: 'Saldo Total',
-      value: data.totalBalance,
-      icon: Wallet,
-      tone: 'text-blue-600 bg-blue-50',
-      hint: <span className="text-xs text-muted-foreground">saldo atual em contas</span>,
-    },
-    {
-      label: 'Receitas',
-      value: data.totalIncome,
+      label: 'Receitas recebidas',
+      value: data.income.received,
       icon: TrendingUp,
       tone: 'text-emerald-600 bg-emerald-50',
-      hint: <TrendBadge value={incomeChange} />,
+      hint: (
+        <div className="space-y-0.5">
+          <TrendBadge value={incomeChange} />
+          {data.income.pending > 0 && (
+            <p className="text-xs text-muted-foreground">
+              a receber: {formatCurrency(data.income.pending)}
+            </p>
+          )}
+        </div>
+      ),
     },
     {
-      label: 'Despesas',
-      value: data.totalExpense,
+      label: 'Gastos do mês',
+      value: data.spending.realized,
       icon: TrendingDown,
       tone: 'text-rose-600 bg-rose-50',
-      hint: <TrendBadge value={expenseChange} invert />,
+      hint: (
+        <div className="space-y-0.5">
+          <TrendBadge value={expenseChange} invert />
+          {data.spending.forecast > 0 && (
+            <p className="text-xs text-muted-foreground">
+              previstos: {formatCurrency(data.spending.forecast)}
+            </p>
+          )}
+        </div>
+      ),
     },
     {
-      label: 'Economia',
-      value: data.netResult,
+      label: 'Resultado do período',
+      value: data.result.value,
       icon: PiggyBank,
       tone: 'text-violet-600 bg-violet-50',
       hint: (
         <span className="text-xs text-muted-foreground">
-          {data.totalIncome > 0
-            ? `${savingsRate.toFixed(0)}% da receita`
-            : 'sem receita no período'}
+          {hasIncome
+            ? `${savingsRate.toFixed(0)}% das receitas recebidas`
+            : 'recebidas − gastos do mês; sem receita recebida'}
         </span>
       ),
     },
   ];
+
+  const overdueTotal = data.commitments.overdueBills + data.commitments.invoicesOverdue;
+  const dueTotal = data.commitments.billsToHorizon + data.commitments.invoicesToHorizon;
 
   // Gráficos por contas × cartões: mesmo período da tela e, se houver filtro,
   // só os recursos dele (um tipo fora do filtro mostra o aviso de vazio).
@@ -361,7 +451,7 @@ function DashboardContent() {
       .filter((c) => !filterActive || selection.cardIds.includes(c.id))
       .map((c) => ({ id: c.id, name: c.name, archived: !c.isActive })) ?? null;
 
-  const health = financialHealth(savingsRate, data.totalIncome > 0);
+  const health = financialHealth(savingsRate, hasIncome);
   const healthBarWidth = Math.max(0, Math.min(100, ((savingsRate + 20) / 60) * 100));
 
   return (
@@ -369,7 +459,9 @@ function DashboardContent() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold sm:text-2xl">Dashboard</h1>
-          <p className="text-sm text-muted-foreground">Visão geral das suas finanças neste mês.</p>
+          <p className="text-sm text-muted-foreground">
+            O que entrou, o que foi gasto e o que ainda vence.
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <ResourceFilter resources={resources} value={selection} onChange={setSelection} />
@@ -382,11 +474,11 @@ function DashboardContent() {
           </Select>
         </div>
       </div>
-      <DateBasisNote />
+      <DateBasisNote variant="spending" />
       {isFutureMonth && (
         <p className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900">
-          Mês futuro: receitas, despesas e categorias são previstas pelos lançamentos já agendados
-          (recorrências e parcelas). O saldo total é o de hoje.
+          Mês futuro: nada foi realizado ainda. Veja os valores previstos em cada indicador; o saldo
+          em contas é o de hoje.
         </p>
       )}
 
@@ -410,6 +502,147 @@ function DashboardContent() {
         ))}
       </div>
 
+      {/* Compromissos, cartões e projeção — por vencimento, a partir de hoje */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
+        <Card className="rounded-2xl">
+          <CardContent className="space-y-1 p-4">
+            <p className="text-xs font-medium text-muted-foreground">Vencidas e não pagas</p>
+            <p className={cn('text-lg font-bold', overdueTotal > 0 ? 'text-rose-600' : undefined)}>
+              {formatCurrency(overdueTotal)}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              contas {formatCurrency(data.commitments.overdueBills)} · faturas{' '}
+              {formatCurrency(data.commitments.invoicesOverdue)}
+            </p>
+            {data.commitments.overdueForecast > 0 && (
+              <p className="text-xs text-amber-700">
+                + {formatCurrency(data.commitments.overdueForecast)} em previsões vencidas: confirme
+                ou cancele
+              </p>
+            )}
+          </CardContent>
+        </Card>
+        <Card className="rounded-2xl">
+          <CardContent className="space-y-1 p-4">
+            <p className="text-xs font-medium text-muted-foreground">A vencer até {horizonLabel}</p>
+            <p className="text-lg font-bold">{formatCurrency(dueTotal)}</p>
+            <p className="text-xs text-muted-foreground">
+              contas {formatCurrency(data.commitments.billsToHorizon)} · faturas{' '}
+              {formatCurrency(data.commitments.invoicesToHorizon)}
+            </p>
+            {data.commitments.forecastToHorizon > 0 && (
+              <p className="text-xs text-muted-foreground">
+                previsto: {formatCurrency(data.commitments.forecastToHorizon)}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+        <Card className="rounded-2xl">
+          <CardContent className="space-y-1 p-4">
+            <p className="text-xs font-medium text-muted-foreground">Dívida efetiva no cartão</p>
+            {data.cards ? (
+              <>
+                <p className="text-lg font-bold">{formatCurrency(data.cards.totalDebt)}</p>
+                <p className="text-xs text-muted-foreground">
+                  parcelas futuras a pagar {formatCurrency(data.cards.futureInstallments)}
+                </p>
+                {data.cards.creditBalance > 0 && (
+                  <p className="text-xs text-emerald-700">
+                    saldo credor {formatCurrency(data.cards.creditBalance)}
+                  </p>
+                )}
+                {data.cards.forecast > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    assinaturas/compras previstas {formatCurrency(data.cards.forecast)} (fora da
+                    dívida)
+                  </p>
+                )}
+                {data.cards.incompleteCards > 0 && (
+                  <p className="text-xs text-amber-700">
+                    {data.cards.incompleteCards} cartão(ões) sem configuração: dívida desconhecida
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">Nenhum cartão no filtro.</p>
+            )}
+          </CardContent>
+        </Card>
+        <Card className="rounded-2xl">
+          <CardContent className="space-y-1 p-4">
+            <p className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
+              <CalendarClock className="h-3.5 w-3.5" />
+              Saldo projetado até {horizonLabel}
+            </p>
+            {data.projected ? (
+              <>
+                <p
+                  className={cn(
+                    'text-lg font-bold',
+                    data.projected.value < 0 ? 'text-rose-600' : undefined,
+                  )}
+                >
+                  {formatCurrency(data.projected.value)}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  saldo em contas + a receber (
+                  {formatCurrency(data.projected.components.receivable)}) − contas vencidas e a
+                  vencer, previsões e faturas até {horizonLabel}. Não é saldo bancário nem
+                  patrimônio.
+                </p>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">Sem conta no filtro.</p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Fluxo de caixa realizado e outras posições */}
+      <Card className="rounded-2xl">
+        <CardContent className="space-y-2 p-4 sm:p-5">
+          <div className="flex items-center gap-2">
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-foreground">
+              <ArrowLeftRight className="h-4 w-4" />
+            </span>
+            <div>
+              <CardTitle className="text-base">Fluxo de caixa realizado</CardTitle>
+              <p className="text-xs text-muted-foreground">
+                O que de fato entrou e saiu das contas no período, pela data do pagamento.
+              </p>
+            </div>
+          </div>
+          <dl className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-5">
+            {[
+              ['Entradas', data.cashFlow.inflow],
+              ['Pagamentos', -data.cashFlow.outflow],
+              ['Faturas pagas', -data.cashFlow.invoicePayments],
+              ['Aportes, resgates e empréstimos', data.cashFlow.transfersNet],
+              ['Variação do caixa', data.cashFlow.net],
+            ].map(([label, value]) => (
+              <div key={label as string} className="rounded-lg bg-muted/40 p-2">
+                <dt className="text-xs text-muted-foreground">{label}</dt>
+                <dd className="font-semibold">{formatCurrency(value as number)}</dd>
+              </div>
+            ))}
+          </dl>
+          {(data.investmentsBalance !== 0 || data.loansDebt > 0) && (
+            <p className="text-xs text-muted-foreground">
+              Fora do saldo em contas: investimentos {formatCurrency(data.investmentsBalance)} ·
+              empréstimos a pagar {formatCurrency(data.loansDebt)}.
+            </p>
+          )}
+          {(data.spending.byNature.asset_acquisition > 0 ||
+            data.spending.byNature.financial_cost > 0) && (
+            <p className="text-xs text-muted-foreground">
+              Nos gastos do período: aquisição de bens{' '}
+              {formatCurrency(data.spending.byNature.asset_acquisition)} · juros e tarifas{' '}
+              {formatCurrency(data.spending.byNature.financial_cost)}.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Saúde financeira */}
       <Card className="rounded-2xl">
         <CardContent className="space-y-3 p-4 sm:p-5">
@@ -429,11 +662,9 @@ function DashboardContent() {
             />
           </div>
           <p className="text-xs text-muted-foreground">
-            {data.totalIncome > 0
-              ? isFutureMonth
-                ? `Previsão: economia de ${savingsRate.toFixed(0)}% da receita neste mês.`
-                : `Você está economizando ${savingsRate.toFixed(0)}% da sua receita neste mês.`
-              : 'Ainda sem receita registrada neste mês para calcular.'}
+            {hasIncome
+              ? `O resultado do período (receitas recebidas − gastos do mês) é ${savingsRate.toFixed(0)}% das receitas recebidas.`
+              : 'Ainda sem receita recebida neste período para calcular.'}
           </p>
         </CardContent>
       </Card>
@@ -444,8 +675,8 @@ function DashboardContent() {
           title={'Para onde foi\nseu dinheiro'}
           subtitle={
             filterActive
-              ? 'Contas e cartões do filtro · por categoria'
-              : 'Contas e cartões · por categoria'
+              ? 'Gastos do mês no filtro · parcela no mês dela'
+              : 'Gastos do mês · parcela no mês dela'
           }
           slices={data.expensesByCategory}
         />
@@ -470,8 +701,10 @@ function DashboardContent() {
         <Card className="rounded-2xl">
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
             <div>
-              <CardTitle className="text-base">Receitas x Despesas</CardTitle>
-              <p className="text-xs text-muted-foreground">Comparativo mensal</p>
+              <CardTitle className="text-base">Receitas x Gastos</CardTitle>
+              <p className="text-xs text-muted-foreground">
+                Receitas recebidas e gastos do mês (parcela no mês dela)
+              </p>
             </div>
             <Select
               value={evolutionMonths}
@@ -490,15 +723,15 @@ function DashboardContent() {
                 <YAxis tick={{ fontSize: 11 }} width={48} axisLine={false} tickLine={false} />
                 <Tooltip formatter={tooltipCurrency} cursor={{ fill: 'hsl(var(--muted))' }} />
                 <Bar dataKey="income" name="Receitas" fill="#10b981" radius={[6, 6, 0, 0]} />
-                <Bar dataKey="expense" name="Despesas" fill="#f43f5e" radius={[6, 6, 0, 0]} />
+                <Bar dataKey="expense" name="Gastos" fill="#f43f5e" radius={[6, 6, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
             <div className="mt-2 flex items-center justify-center gap-6 text-xs text-muted-foreground">
               <span className="flex items-center gap-1.5">
-                <span className="h-2.5 w-2.5 rounded-full bg-[#10b981]" /> Receitas
+                <span className="h-2.5 w-2.5 rounded-full bg-[#10b981]" /> Receitas recebidas
               </span>
               <span className="flex items-center gap-1.5">
-                <span className="h-2.5 w-2.5 rounded-full bg-[#f43f5e]" /> Despesas
+                <span className="h-2.5 w-2.5 rounded-full bg-[#f43f5e]" /> Gastos
               </span>
             </div>
           </CardContent>
@@ -506,7 +739,7 @@ function DashboardContent() {
 
         <Card className="rounded-2xl">
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
-            <CardTitle className="text-base">Lançamentos Diários</CardTitle>
+            <CardTitle className="text-base">Gastos e receitas por dia</CardTitle>
             <Select
               value={selectedMonth}
               onChange={(e) => setSelectedMonth(e.target.value)}
@@ -542,7 +775,7 @@ function DashboardContent() {
                     labelFormatter={(d) => `Dia ${d}`}
                   />
                   <Bar dataKey="income" name="Receitas" fill="#10b981" radius={[3, 3, 0, 0]} />
-                  <Bar dataKey="expense" name="Despesas" fill="#f43f5e" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="expense" name="Gastos" fill="#f43f5e" radius={[3, 3, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             )}
@@ -553,20 +786,25 @@ function DashboardContent() {
       {/* Próximas contas a pagar */}
       <Card className="rounded-2xl">
         <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
-          <CardTitle className="text-base">Próximas Contas a Pagar</CardTitle>
+          <div>
+            <CardTitle className="text-base">Contas a pagar</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Em aberto, vencidas primeiro — vencer não paga nada
+            </p>
+          </div>
           {data.upcomingBills.length > 0 && (
-            <Badge variant="secondary">{data.upcomingBills.length} a vencer</Badge>
+            <Badge variant="secondary">{data.upcomingBills.length} em aberto</Badge>
           )}
         </CardHeader>
         <CardContent>
           {data.upcomingBills.length === 0 ? (
             <div className="flex h-[120px] items-center justify-center text-sm text-muted-foreground">
-              Nenhuma conta a vencer 🎉
+              Nenhuma conta em aberto 🎉
             </div>
           ) : (
             <ul className="divide-y divide-border">
               {data.upcomingBills.map((bill) => {
-                const overdue = isOverdue(bill.transactionDate);
+                const overdue = bill.isOverdue;
                 const isInvoice = bill.kind === 'invoice';
                 const Icon = isInvoice ? CreditCardIcon : Receipt;
                 const content = (
@@ -598,7 +836,7 @@ function DashboardContent() {
                       </div>
                     </div>
                     <span className="shrink-0 text-sm font-semibold">
-                      {formatCurrency(bill.amount)}
+                      {formatCurrency(bill.remaining)}
                     </span>
                   </>
                 );
@@ -606,9 +844,10 @@ function DashboardContent() {
                   <li key={`${bill.kind}-${bill.id}`} className="py-3 first:pt-0 last:pb-0">
                     {isInvoice && bill.cardId ? (
                       <Link
-                        href={`/app/pessoal/cartoes/${bill.cardId}`}
+                        // A fatura é identificada pelo mês do vencimento.
+                        href={`/app/pessoal/faturas?cartao=${bill.cardId}&mes=${bill.transactionDate.slice(0, 7)}`}
                         className="-mx-2 flex items-center justify-between gap-3 rounded-lg px-2 transition-colors hover:bg-muted/40"
-                        aria-label={`${bill.description}, ${formatCurrency(bill.amount)}, vence em ${formatDueDate(bill.transactionDate)}`}
+                        aria-label={`${bill.description}, ${formatCurrency(bill.remaining)}, vence em ${formatDueDate(bill.transactionDate)}`}
                       >
                         {content}
                       </Link>

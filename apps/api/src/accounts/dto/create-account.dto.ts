@@ -22,6 +22,17 @@ export class CreateAccountDto {
   @Min(0)
   initialBalance?: number;
 
+  @ApiProperty({
+    required: false,
+    description:
+      'Só em conta de empréstimo (`loan`): dívida já existente ao cadastrar. Vira saldo inicial negativo.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  initialDebt?: number;
+
   @ApiProperty({ default: 'BRL', required: false })
   @IsOptional()
   @IsString()

@@ -20,6 +20,7 @@ import { CreditCardsService } from './credit-cards.service';
 import { CreateCreditCardDto } from './dto/create-credit-card.dto';
 import { ListCreditCardsDto } from './dto/list-credit-cards.dto';
 import { SetupCreditCardDto } from './dto/setup-credit-card.dto';
+import { OpeningPositionDto } from './dto/opening-position.dto';
 import { CreateCardPaymentDto } from './dto/create-card-payment.dto';
 import { CardPaymentsService } from './card-payments.service';
 import { UpdateCreditCardDto } from './dto/update-credit-card.dto';
@@ -92,6 +93,20 @@ export class CreditCardsController {
   setup(@Req() req: Request, @Param('id') id: string, @Body() dto: SetupCreditCardDto) {
     const user = req.user as any;
     return this.creditCardsService.setup(user.id, id, dto);
+  }
+
+  /**
+   * Posição no início do controle: fatura anterior ainda não paga e crédito.
+   * Substitui a posição anterior; zero nos dois a remove. Não é despesa.
+   */
+  @Post(':id/opening-position')
+  setOpeningPosition(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: OpeningPositionDto,
+  ) {
+    const user = req.user as any;
+    return this.creditCardsService.setOpeningPosition(user.id, id, dto);
   }
 
   @Post()

@@ -211,6 +211,7 @@ integration('contas e cartões separados (PostgreSQL)', () => {
         amount: 80,
         description: 'Compra antiga',
         transactionDate: new Date('2025-03-10T12:00:00Z'),
+        eventDate: new Date('2025-03-10T12:00:00Z'),
       },
     });
     const pjOrphan = await prisma.account.create({

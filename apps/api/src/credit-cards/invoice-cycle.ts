@@ -11,6 +11,7 @@
  * - identidade da fatura = `referenceMonth`, o `YYYY-MM` do vencimento.
  */
 import { CalendarDay, compareCalendarDays } from '../common/date.util';
+import { CardReconciliation, reconcileCard } from './card-reconciliation';
 
 export interface CycleConfig {
   closingDay: number;
@@ -144,44 +145,73 @@ export function cycleState(span: InvoiceSpan, today: CalendarDay): 'open' | 'clo
 
 export type PaymentStatus = 'unpaid' | 'partial' | 'paid' | 'credit';
 
-/** Situação de pagamento derivada dos valores (em centavos para não acumular erro). */
-export function paymentStatus(totalCents: number, paidCents: number): PaymentStatus {
-  const remaining = totalCents - paidCents;
-  if (remaining < 0) return 'credit';
-  if (remaining === 0) return 'paid';
-  return paidCents > 0 ? 'partial' : 'unpaid';
+/**
+ * Situação de pagamento derivada dos valores (em centavos para não acumular
+ * erro). `remaining` é o restante já conciliado; `surplus`, o crédito que a
+ * fatura gerou.
+ */
+export function paymentStatus(
+  totalCents: number,
+  paidCents: number,
+  remainingCents = totalCents - paidCents,
+  surplusCents = Math.max(0, paidCents - totalCents),
+): PaymentStatus {
+  if (surplusCents > 0) return 'credit';
+  if (remainingCents <= 0) return 'paid';
+  return remainingCents < totalCents ? 'partial' : 'unpaid';
 }
 
 export interface InvoiceAmounts<S extends InvoiceSpan = InvoiceSpan> {
   span: S;
-  /** Compras e parcelas confirmadas. */
+  /** Compras e parcelas efetivas (data do fato até hoje). */
   chargesCents: number;
-  /** Estornos (fase 4). */
+  /** Estornos. */
   refundsCents: number;
-  /** Pagamentos ativos (fase 4). */
+  /** Pagamentos ativos. */
   paymentsCents: number;
+  /** Dívida da posição inicial (só na fatura anterior ao controle). */
+  openingDebtCents?: number;
+  /** Crédito da posição inicial. */
+  openingCreditCents?: number;
+  /** Cobranças previstas: assinatura ou compra com data do fato futura. */
+  forecastCents?: number;
 }
 
 export interface CardPosition {
   /** Fatura aberta hoje (gravada ou só calculada, se ainda sem lançamento). */
   current: InvoiceSpan;
+  /** Cobranças efetivas da fatura aberta, menos estornos. */
   currentTotalCents: number;
+  /** O que falta pagar da fatura aberta, depois de pagamentos e créditos. */
   currentRemainingCents: number;
-  /** Cobranças em faturas que fecham depois da atual. */
-  futureInstallmentsCents: number;
+  /** Cobranças efetivas em faturas que fecham depois da atual (bruto). */
+  futureChargesCents: number;
+  /** O que falta pagar dessas faturas futuras, depois de pagamentos e créditos. */
+  futureRemainingCents: number;
   /** Restante das faturas já fechadas e não quitadas. */
   closedUnpaidCents: number;
-  /** Dívida total: tudo que foi cobrado desde o início do controle, menos estornos e pagamentos. */
+  /** Restante das faturas fechadas com vencimento já passado. */
+  overdueCents: number;
+  /** Cobranças previstas, fora da dívida. */
+  forecastCents: number;
+  /** Soma dos restantes, antes de aplicar créditos entre faturas. */
+  grossDebtCents: number;
+  /** Créditos aplicados entre faturas. */
+  appliedCreditCents: number;
+  /** Dívida líquida: o que falta pagar no cartão. */
   totalDebtCents: number;
-  /** Pago acima do cobrado. */
+  /** Saldo credor: crédito sem cobrança onde ser aplicado. */
   creditCents: number;
+  reconciliation: CardReconciliation<InvoiceSpan & { id?: string }>;
 }
 
 /**
- * Posição do cartão a partir das faturas com valores. `current` é a fatura que
- * contém hoje: a gravada, se existir, senão a que a configuração calcula.
+ * Posição do cartão a partir das faturas com valores, conciliadas por
+ * `reconcileCard`: dívida, restante por fatura, futuras e vencidas saem todos
+ * da mesma base. `current` é a fatura que contém hoje: a gravada, se existir,
+ * senão a que a configuração calcula.
  */
-export function cardPosition<S extends InvoiceSpan>(
+export function cardPosition<S extends InvoiceSpan & { id?: string }>(
   invoices: readonly InvoiceAmounts<S>[],
   config: CycleConfig,
   today: CalendarDay,
@@ -191,32 +221,45 @@ export function cardPosition<S extends InvoiceSpan>(
     config,
     invoices.map((i) => i.span),
   ).span;
-  const net = (i: InvoiceAmounts<S>) => i.chargesCents - i.refundsCents - i.paymentsCents;
+  const reconciliation = reconcileCard(invoices);
 
   let currentTotalCents = 0;
   let currentRemainingCents = 0;
-  let futureInstallmentsCents = 0;
+  let futureChargesCents = 0;
+  let futureRemainingCents = 0;
   let closedUnpaidCents = 0;
-  let rawDebtCents = 0;
-  for (const invoice of invoices) {
-    rawDebtCents += net(invoice);
-    if (invoice.span.referenceMonth === current.referenceMonth) {
-      currentTotalCents = invoice.chargesCents - invoice.refundsCents;
-      currentRemainingCents = net(invoice);
-    } else if (cmp(invoice.span.closingDate, current.closingDate) > 0) {
-      futureInstallmentsCents += invoice.chargesCents - invoice.refundsCents;
-    } else if (cycleState(invoice.span, today) === 'closed') {
-      closedUnpaidCents += Math.max(0, net(invoice));
+  let overdueCents = 0;
+  let forecastCents = 0;
+  for (const row of reconciliation.invoices) {
+    const { span } = row.invoice;
+    forecastCents += row.invoice.forecastCents ?? 0;
+    const totalCents =
+      row.debitCents - row.invoice.refundsCents - (row.invoice.openingCreditCents ?? 0);
+    if (span.referenceMonth === current.referenceMonth) {
+      currentTotalCents = totalCents;
+      currentRemainingCents = row.remainingCents;
+    } else if (cmp(span.closingDate, current.closingDate) > 0) {
+      futureChargesCents += totalCents;
+      futureRemainingCents += row.remainingCents;
+    } else if (cycleState(span, today) === 'closed') {
+      closedUnpaidCents += row.remainingCents;
+      if (cmp(span.dueDate, today) < 0) overdueCents += row.remainingCents;
     }
   }
   return {
     current,
     currentTotalCents,
     currentRemainingCents,
-    futureInstallmentsCents,
+    futureChargesCents,
+    futureRemainingCents,
     closedUnpaidCents,
-    totalDebtCents: Math.max(0, rawDebtCents),
-    creditCents: Math.max(0, -rawDebtCents),
+    overdueCents,
+    forecastCents,
+    grossDebtCents: reconciliation.grossDebtCents,
+    appliedCreditCents: reconciliation.appliedCreditCents,
+    totalDebtCents: reconciliation.netDebtCents,
+    creditCents: reconciliation.unappliedCreditCents,
+    reconciliation,
   };
 }
 

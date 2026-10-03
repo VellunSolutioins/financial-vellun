@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsIn,
@@ -44,6 +45,22 @@ export class UpdateTransactionDto {
   @IsOptional()
   @IsDateString()
   transactionDate?: string;
+
+  @ApiProperty({
+    required: false,
+    description: 'Data do fato. Na parcela, só muda pela compra (Parcelamentos).',
+  })
+  @IsOptional()
+  @IsDateString()
+  eventDate?: string;
+
+  @ApiProperty({
+    required: false,
+    description: 'Previsão (verdadeiro) ou obrigação firmada (falso).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  forecast?: boolean;
 
   @ApiProperty({ enum: TransactionStatus, required: false })
   @IsOptional()

@@ -4,13 +4,21 @@ import { useCallback, useEffect, useState } from 'react';
 import { apiClient } from '@/lib/api-client';
 
 /**
- * Uma compra parcelada é a série de lançamentos `parcelado` com o mesmo
- * `seriesId` — não existe registro próprio.
+ * Uma compra parcelada: a compra (data e total próprios, `seriesId`) e as
+ * parcelas como calendário de cobrança (docs/adrs/0018).
  */
 export interface Installment {
   seriesId: string;
   description: string;
   type: 'income' | 'expense';
+  /** Data da compra: é nela que o gasto conta, não em cada parcela. */
+  purchaseDate: string;
+  /** Compra cadastrada com data futura: previsão, ainda não é compromisso. */
+  isForecast: boolean;
+  /** Valor contratado (antes de descontos e cancelamentos). */
+  contractAmount: number | null;
+  /** O que ainda falta pagar das parcelas (já sem o pago). */
+  remainingCommitment: number;
   totalAmount: number;
   installmentAmount: number;
   installmentTotal: number;

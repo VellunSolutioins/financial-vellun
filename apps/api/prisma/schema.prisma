@@ -28,15 +28,20 @@ enum ProfileType {
 }
 
 /// `income`/`expense` são os tipos que o usuário lança.
-/// `transfer` só existe nas duas pernas de um pagamento de fatura
-/// (`cardPaymentId` + `transferDirection`); registros antigos sem direção são
-/// ignorados nos saldos. `refund` é o estorno de uma despesa (`refundOfId`):
-/// reduz a despesa da categoria e nunca é receita. Ver docs/adrs/0015.
+/// `transfer` só existe em pernas com direção: as duas de um pagamento de
+/// fatura (`cardPaymentId`) ou de uma transferência entre contas próprias
+/// (`accountTransferId`); registros antigos sem direção são ignorados nos
+/// saldos. `refund` é o estorno de uma despesa (`refundOfId`): reduz a despesa
+/// da categoria e nunca é receita. `opening_debt`/`opening_credit` são a
+/// posição inicial de um cartão: entram na fatura, nunca em receitas ou
+/// despesas. Ver docs/adrs/0015 e 0018.
 enum TransactionType {
   income
   expense
   transfer
   refund
+  opening_debt
+  opening_credit
 }
 
 /// Lado de uma perna de transferência: `out` sai da conta de origem, `in`
@@ -51,8 +56,9 @@ enum CardPaymentStatus {
   reversed
 }
 
-/// Não existe "pendente": o que ainda vai acontecer é definido pela data do
-/// lançamento (futuro = data depois de hoje), não por um status.
+/// Validade do registro: `cancelled` tira o lançamento de tudo. Se ele já foi
+/// pago ou recebido não é status: sai das liquidações (`settledAmount`), e a
+/// passagem do tempo nunca liquida nada (docs/adrs/0018).
 enum TransactionStatus {
   confirmed
   cancelled
@@ -73,7 +79,42 @@ enum AccountType {
   credit_card
   digital_wallet
   investment
+  /// Empréstimo ou financiamento: conta de passivo. Saldo negativo = dívida.
+  loan
   other
+}
+
+/// Natureza do gasto de uma categoria de despesa. Juros e tarifas e aquisições
+/// de bens aparecem à parte do consumo; nada disso é contabilidade.
+enum CategoryNature {
+  consumption
+  asset_acquisition
+  financial_cost
+}
+
+/// Liquidação de um lançamento: pagamento/recebimento (move dinheiro) ou
+/// dispensa do restante (`write_off`, não move dinheiro).
+enum SettlementKind {
+  payment
+  write_off
+}
+
+/// Reverter marca `reversed`: o histórico fica.
+enum MovementStatus {
+  active
+  reversed
+}
+
+/// De onde veio a liquidação. `legacy_*` foram criadas na migração para
+/// preservar o saldo de quando ele era calculado pela data; `legacy_matured`
+/// é o lançamento que entrou no saldo só porque a data chegou, e fica
+/// marcado para revisão.
+enum SettlementOrigin {
+  user
+  at_sight
+  whatsapp
+  legacy_recorded
+  legacy_matured
 }
 
 enum ContactType {
@@ -228,9 +269,12 @@ model User {
   creditCardInvoices      CreditCardInvoice[]
   /// Conta ou cartão (pelo `accountId` da conta interna) pré-selecionado ao
   /// criar um lançamento. Um só por usuário; nulo = sem preferência.
-  preferredAccountId      String?  @map("preferred_account_id")
-  preferredAccount        Account? @relation("UserPreferredAccount", fields: [preferredAccountId], references: [id], onDelete: SetNull)
+  preferredAccountId      String?                  @map("preferred_account_id")
+  preferredAccount        Account?                 @relation("UserPreferredAccount", fields: [preferredAccountId], references: [id], onDelete: SetNull)
   cardPayments            CardPayment[]
+  settlements             TransactionSettlement[]
+  accountTransfers        AccountTransfer[]
+  installmentPurchases    InstallmentPurchase[]
 
   @@index([preferredAccountId])
   @@map("users")
@@ -338,21 +382,25 @@ model BusinessProfile {
 model Account {
   creditCard      CreditCard?
   /// Cartões que sugerem esta conta para pagar a fatura.
-  paymentForCards CreditCard[]  @relation("CreditCardPaymentAccount")
+  paymentForCards CreditCard[]            @relation("CreditCardPaymentAccount")
   /// Usuários que têm esta conta (ou o cartão dela) como preferencial.
-  preferredBy     User[]        @relation("UserPreferredAccount")
+  preferredBy     User[]                  @relation("UserPreferredAccount")
   /// Pagamentos de fatura que saíram desta conta.
-  cardPayments    CardPayment[] @relation("CardPaymentSource")
-  id              String        @id @default(uuid())
-  userId          String        @map("user_id")
+  cardPayments    CardPayment[]           @relation("CardPaymentSource")
+  settlements     TransactionSettlement[]
+  transfersOut    AccountTransfer[]       @relation("TransferFrom")
+  transfersIn     AccountTransfer[]       @relation("TransferTo")
+  purchases       InstallmentPurchase[]
+  id              String                  @id @default(uuid())
+  userId          String                  @map("user_id")
   name            String
   type            AccountType
-  initialBalance  Decimal       @default(0) @map("initial_balance") @db.Decimal(15, 2)
-  currentBalance  Decimal       @default(0) @map("current_balance") @db.Decimal(15, 2)
-  currency        String        @default("BRL")
-  isActive        Boolean       @default(true) @map("is_active")
-  createdAt       DateTime      @default(now()) @map("created_at")
-  updatedAt       DateTime      @updatedAt @map("updated_at")
+  initialBalance  Decimal                 @default(0) @map("initial_balance") @db.Decimal(15, 2)
+  currentBalance  Decimal                 @default(0) @map("current_balance") @db.Decimal(15, 2)
+  currency        String                  @default("BRL")
+  isActive        Boolean                 @default(true) @map("is_active")
+  createdAt       DateTime                @default(now()) @map("created_at")
+  updatedAt       DateTime                @updatedAt @map("updated_at")
 
   user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   transactions Transaction[]
@@ -370,13 +418,16 @@ model Category {
   color         String?
   icon          String?
   costCenter    String?         @map("cost_center")
+  /// Só faz sentido em categoria de despesa.
+  nature        CategoryNature  @default(consumption)
   profileType   ProfileType     @map("profile_type")
   isDefault     Boolean         @default(false) @map("is_default")
   createdAt     DateTime        @default(now()) @map("created_at")
   updatedAt     DateTime        @updatedAt @map("updated_at")
 
-  user         User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         User?                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   transactions Transaction[]
+  purchases    InstallmentPurchase[]
 
   @@index([userId])
   @@map("categories")
@@ -397,7 +448,22 @@ model Transaction {
   type                TransactionType
   amount              Decimal              @db.Decimal(15, 2)
   description         String
+  /// Data da ocorrência: vencimento ou previsão (na parcela, a data dela; no
+  /// cartão, a cobrança). Não é a data do pagamento — essa é a da liquidação.
   transactionDate     DateTime             @map("transaction_date") @db.Date
+  /// Data do fato econômico: a da compra, inclusive em todas as parcelas dela.
+  /// É a base de "Gastos por data da compra" (docs/adrs/0018).
+  eventDate           DateTime             @map("event_date") @db.Date
+  /// Previsão (ex.: assinatura cancelável): não é obrigação constituída e não
+  /// vira dívida. Pagar a ocorrência a torna realizada.
+  forecast            Boolean              @default(false)
+  /// Soma das liquidações ativas (pagamento + dispensa). Cache gravado na
+  /// mesma transação de banco que as liquidações; o banco recusa passar do valor.
+  settledAmount       Decimal              @default(0) @map("settled_amount") @db.Decimal(15, 2)
+  /// Compra parcelada a que a parcela pertence (= `seriesId` no parcelado).
+  purchaseId          String?              @map("purchase_id")
+  /// Transferência entre contas próprias (pernas `transfer`).
+  accountTransferId   String?              @map("account_transfer_id")
   status              TransactionStatus    @default(confirmed)
   source              TransactionSource    @default(manual)
   rawInput            String?              @map("raw_input")
@@ -423,13 +489,17 @@ model Transaction {
   // Valor antes do desconto do adiantamento; nulo quando não houve desconto.
   amountBeforeAdvance Decimal?           @map("amount_before_advance") @db.Decimal(15, 2)
 
-  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  account     Account            @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  category    Category?          @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  invoice     CreditCardInvoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
-  cardPayment CardPayment?       @relation(fields: [cardPaymentId], references: [id], onDelete: NoAction)
-  refundOf    Transaction?       @relation("TransactionRefunds", fields: [refundOfId], references: [id], onDelete: NoAction)
-  refunds     Transaction[]      @relation("TransactionRefunds")
+  user            User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account         Account                 @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  category        Category?               @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  invoice         CreditCardInvoice?      @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  cardPayment     CardPayment?            @relation(fields: [cardPaymentId], references: [id], onDelete: NoAction)
+  refundOf        Transaction?            @relation("TransactionRefunds", fields: [refundOfId], references: [id], onDelete: NoAction)
+  refunds         Transaction[]           @relation("TransactionRefunds")
+  purchase        InstallmentPurchase?    @relation(fields: [purchaseId], references: [id], onDelete: SetNull)
+  accountTransfer AccountTransfer?        @relation("TransferLegs", fields: [accountTransferId], references: [id], onDelete: NoAction)
+  feeOfTransfer   AccountTransfer?        @relation("TransferFee")
+  settlements     TransactionSettlement[]
 
   aiExtractedTransactions AiExtractedTransaction[]
 
@@ -458,6 +528,10 @@ model Transaction {
   @@index([invoiceId])
   @@index([cardPaymentId])
   @@index([refundOfId])
+  // "Gastos por data da compra" no dashboard e nas categorias.
+  @@index([userId, eventDate])
+  @@index([purchaseId])
+  @@index([accountTransferId])
   @@map("transactions")
 }
 
@@ -1007,4 +1081,98 @@ model SpendingGoal {
   @@unique([userId, categoryId])
   @@index([userId])
   @@map("spending_goals")
+}
+
+/// Compra parcelada: a operação original, com data e valor total próprios. As
+/// parcelas são lançamentos (`purchaseId`) e formam o calendário de cobrança;
+/// o gasto é reconhecido na data da compra, não na de cada parcela. O `id` é o
+/// `seriesId` das parcelas (docs/adrs/0018).
+model InstallmentPurchase {
+  id               String          @id
+  userId           String          @map("user_id")
+  accountId        String          @map("account_id")
+  categoryId       String?         @map("category_id")
+  type             TransactionType
+  description      String
+  purchaseDate     DateTime        @map("purchase_date") @db.Date
+  /// Valor contratado (soma das parcelas na criação, antes de descontos).
+  totalAmount      Decimal         @map("total_amount") @db.Decimal(15, 2)
+  installmentCount Int             @map("installment_count")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  account      Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  category     Category?     @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  installments Transaction[]
+
+  @@index([userId, purchaseDate])
+  @@index([accountId])
+  @@index([categoryId])
+  @@map("installment_purchases")
+}
+
+/// Pagamento, recebimento ou dispensa de um lançamento de conta comum. O saldo
+/// da conta é a soma das liquidações `payment` ativas (mais transferências):
+/// nada entra no saldo porque uma data chegou. No cartão, a liquidação é o
+/// pagamento da fatura (`CardPayment`).
+model TransactionSettlement {
+  id             String           @id @default(uuid())
+  userId         String           @map("user_id")
+  transactionId  String           @map("transaction_id")
+  /// Conta comum de onde o dinheiro saiu ou para onde entrou. Nula na dispensa.
+  accountId      String?          @map("account_id")
+  amount         Decimal          @db.Decimal(15, 2)
+  settledOn      DateTime         @map("settled_on") @db.Date
+  kind           SettlementKind   @default(payment)
+  status         MovementStatus   @default(active)
+  origin         SettlementOrigin @default(user)
+  /// Inferida na migração: o usuário confirma ou desfaz na conciliação.
+  needsReview    Boolean          @default(false) @map("needs_review")
+  reviewedAt     DateTime?        @map("reviewed_at")
+  idempotencyKey String?          @unique @map("idempotency_key")
+  reversedAt     DateTime?        @map("reversed_at")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  account     Account?    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([transactionId])
+  @@index([accountId, status])
+  @@index([userId, settledOn])
+  @@index([userId, needsReview])
+  @@map("transaction_settlements")
+}
+
+/// Transferência entre contas próprias: aporte, resgate, empréstimo recebido e
+/// amortização também passam por aqui (o tipo das contas diz qual é). Gera duas
+/// pernas `transfer` com direção, como o pagamento de fatura; nunca é receita
+/// nem despesa. Juros ou tarifa vão em `feeTransaction`, uma despesa à parte.
+model AccountTransfer {
+  id               String         @id @default(uuid())
+  userId           String         @map("user_id")
+  fromAccountId    String         @map("from_account_id")
+  toAccountId      String         @map("to_account_id")
+  amount           Decimal        @db.Decimal(15, 2)
+  transferDate     DateTime       @map("transfer_date") @db.Date
+  description      String
+  feeTransactionId String?        @unique @map("fee_transaction_id")
+  status           MovementStatus @default(active)
+  idempotencyKey   String         @unique @map("idempotency_key")
+  reversedAt       DateTime?      @map("reversed_at")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fromAccount    Account       @relation("TransferFrom", fields: [fromAccountId], references: [id], onDelete: Cascade)
+  toAccount      Account       @relation("TransferTo", fields: [toAccountId], references: [id], onDelete: Cascade)
+  feeTransaction Transaction?  @relation("TransferFee", fields: [feeTransactionId], references: [id], onDelete: SetNull)
+  legs           Transaction[] @relation("TransferLegs")
+
+  @@index([userId, transferDate])
+  @@index([fromAccountId])
+  @@index([toAccountId])
+  @@map("account_transfers")
 }

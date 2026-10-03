@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { dateOnlyString, endOfDayUtc, todaySaoPaulo } from '../common/date.util';
+import { Db, cents, lockAccounts } from '../common/db';
 import { REGULAR_ACCOUNT_WHERE } from './account-types';
 import { clearPreferredAccount } from '../financial-resources/preferred-account';
 import { CreateAccountDto } from './dto/create-account.dto';
@@ -41,7 +42,9 @@ export class AccountsService {
     // O DTO já recusa `credit_card`; a checagem repete a regra para quem
     // chamar o serviço direto.
     assertRegular(dto);
-    const initialBalance = dto.initialBalance ?? 0;
+    // Dívida de um empréstimo que já existia: saldo inicial negativo.
+    const initialBalance =
+      dto.type === 'loan' && dto.initialDebt ? -dto.initialDebt : (dto.initialBalance ?? 0);
     return this.prisma.account.create({
       data: {
         userId,
@@ -89,40 +92,100 @@ export class AccountsService {
   }
 
   /**
-   * Saldo = inicial + receitas − despesas + estornos − transferências que
-   * saíram + transferências que entraram, confirmados com data até hoje.
-   * Transferência antiga, sem direção, fica de fora como sempre ficou.
-   * Lançamento futuro (parcela ou mensalidade dos próximos meses) não entra:
-   * ele ainda não aconteceu. Por depender do dia, o saldo também é recomposto
-   * pelo `AccountBalanceScheduler` quando um lançamento futuro chega à sua data.
+   * Recompõe o saldo gravado (`currentBalance`) do zero. Idempotente.
+   *
+   * **Conta comum:** inicial + liquidações de pagamento ativas (receita e
+   * estorno entram, despesa sai) + pernas de transferência (entrada − saída).
+   * Nenhuma data entra na conta: só o que de fato se moveu. Uma despesa
+   * vencida e não paga não mexe no saldo; uma receita prevista também não
+   * (docs/adrs/0018). Transferência antiga, sem direção, fica de fora.
+   *
+   * **Conta interna de cartão:** não é saldo, é a posição do cartão — usada só
+   * internamente (a interface lê as faturas). Cobranças efetivas (data do fato
+   * até hoje) saem, estornos e pagamentos entram.
+   *
+   * Com `db` = o `tx` de uma transação, roda nela e trava a conta antes de
+   * ler: duas escritas na mesma conta não se sobrepõem.
    */
-  async recalculateBalance(accountId: string) {
-    const account = await this.prisma.account.findUnique({ where: { id: accountId } });
+  async recalculateBalance(accountId: string, db: Db = this.prisma) {
+    await lockAccounts(db, [accountId]);
+    const account = await db.account.findUnique({ where: { id: accountId } });
     if (!account) return;
 
-    const upToToday = { lte: endOfDayUtc(dateOnlyString(todaySaoPaulo())) };
-    const sums = await this.prisma.transaction.groupBy({
-      by: ['type', 'transferDirection'],
-      where: { accountId, status: 'confirmed', transactionDate: upToToday },
+    const movementCents =
+      account.type === 'credit_card'
+        ? await this.cardPositionCents(db, accountId)
+        : (await this.settledCents(db, accountId)) + (await this.transferCents(db, accountId));
+    const currentBalance = (cents(account.initialBalance) + movementCents) / 100;
+
+    await db.account.update({ where: { id: accountId }, data: { currentBalance } });
+    return currentBalance;
+  }
+
+  /**
+   * Saldo que a regra atual daria, sem gravar. Usado pela verificação de
+   * consistência e pelo `db:verify:financial-model`.
+   */
+  async computeBalance(accountId: string, db: Db = this.prisma): Promise<number | null> {
+    const account = await db.account.findUnique({ where: { id: accountId } });
+    if (!account) return null;
+    const movementCents =
+      account.type === 'credit_card'
+        ? await this.cardPositionCents(db, accountId)
+        : (await this.settledCents(db, accountId)) + (await this.transferCents(db, accountId));
+    return (cents(account.initialBalance) + movementCents) / 100;
+  }
+
+  /** Liquidações de pagamento ativas que passaram por esta conta, com sinal. */
+  private async settledCents(db: Db, accountId: string): Promise<number> {
+    const [row] = await db.$queryRaw<{ total: string | null }[]>`
+      SELECT SUM(CASE WHEN t."type" = 'expense' THEN -s."amount" ELSE s."amount" END)::text AS total
+        FROM "transaction_settlements" s
+        JOIN "transactions" t ON t."id" = s."transaction_id"
+       WHERE s."account_id" = ${accountId}
+         AND s."status" = 'active'
+         AND s."kind" = 'payment'
+         AND t."status" = 'confirmed'
+         AND t."type" IN ('income', 'expense', 'refund')
+    `;
+    return cents(row?.total ?? 0);
+  }
+
+  /** Pernas de transferência (pagamento de fatura e entre contas próprias). */
+  private async transferCents(db: Db, accountId: string): Promise<number> {
+    const legs = await db.transaction.groupBy({
+      by: ['transferDirection'],
+      where: { accountId, type: 'transfer', status: 'confirmed', transferDirection: { not: null } },
       _sum: { amount: true },
     });
-    const sign = (row: (typeof sums)[number]) => {
-      if (row.type === 'income' || row.type === 'refund') return 1;
-      if (row.type === 'expense') return -1;
-      if (row.type === 'transfer' && row.transferDirection === 'in') return 1;
-      if (row.type === 'transfer' && row.transferDirection === 'out') return -1;
-      return 0;
-    };
-    const movementCents = sums.reduce(
-      (total, row) => total + sign(row) * Math.round(Number(row._sum.amount ?? 0) * 100),
+    return legs.reduce(
+      (total, leg) => total + (leg.transferDirection === 'in' ? 1 : -1) * cents(leg._sum.amount),
       0,
     );
-    const currentBalance = Number(account.initialBalance) + movementCents / 100;
+  }
 
-    await this.prisma.account.update({
-      where: { id: accountId },
-      data: { currentBalance },
-    });
+  /** Posição da conta interna do cartão: só cobranças efetivas (fato até hoje). */
+  private async cardPositionCents(db: Db, accountId: string): Promise<number> {
+    const upToToday = { lte: endOfDayUtc(dateOnlyString(todaySaoPaulo())) };
+    const [entries, legs] = await Promise.all([
+      db.transaction.groupBy({
+        by: ['type'],
+        where: {
+          accountId,
+          status: 'confirmed',
+          type: { in: ['expense', 'refund', 'opening_debt', 'opening_credit'] },
+          eventDate: upToToday,
+        },
+        _sum: { amount: true },
+      }),
+      this.transferCents(db, accountId),
+    ]);
+    return entries.reduce(
+      (total, row) =>
+        total +
+        (row.type === 'expense' || row.type === 'opening_debt' ? -1 : 1) * cents(row._sum.amount),
+      legs,
+    );
   }
 }
 

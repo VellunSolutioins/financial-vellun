@@ -1,6 +1,6 @@
 # 0015 — Pagamento de fatura e estorno
 
-- **Status:** Aceito
+- **Status:** Aceito — substituído em parte pela [0018](0018-gasto-obrigacao-liquidacao.md) quanto a o saldo (só liquidações e transferências)
 - **Data:** 2026-09-24
 - **Plano:** [`plan/contas-cartoes-faturas.md`](../../plan/contas-cartoes-faturas.md), fase 4
 

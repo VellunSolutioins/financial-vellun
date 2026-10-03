@@ -10,6 +10,7 @@ import { CardPayment, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountsService } from '../accounts/accounts.service';
 import { isFutureDay, parseDateOnly } from '../common/date.util';
+import { FINANCIAL_TX_OPTIONS, lockAccounts, lockCreditCard } from '../common/db';
 import { CreateCardPaymentDto } from './dto/create-card-payment.dto';
 
 type PaymentWithSource = CardPayment & { sourceAccount: { id: string; name: string } };
@@ -35,7 +36,12 @@ const includeSource = { sourceAccount: { select: { id: true, name: true } } } as
  * Pagamento de fatura: uma saída da conta comum e uma entrada no cartão, as
  * duas `transfer` — nunca receita nem despesa, então não mexe em categorias.
  * Parcial, múltiplo e de contas diferentes são permitidos; acima do restante,
- * o excedente vira crédito no cartão.
+ * o excedente vira crédito no cartão, aplicado às faturas seguintes pela
+ * conciliação (`reconcileCard`). Cartão arquivado continua pagável.
+ *
+ * Pagamento, pernas e saldos das duas contas são gravados no mesmo commit, com
+ * o cartão e as contas travados: dois pagamentos simultâneos do mesmo cartão
+ * são serializados.
  */
 @Injectable()
 export class CardPaymentsService {
@@ -91,6 +97,8 @@ export class CardPaymentsService {
     let payment: PaymentWithSource;
     try {
       payment = await this.prisma.$transaction(async (tx) => {
+        await lockCreditCard(tx, card.id);
+        await lockAccounts(tx, [source.id, card.accountId]);
         const created = await tx.cardPayment.create({
           data: {
             userId,
@@ -109,6 +117,7 @@ export class CardPaymentsService {
           amount: dto.amount,
           description,
           transactionDate: paymentDate,
+          eventDate: paymentDate,
           status: 'confirmed' as const,
           source: 'manual' as const,
           cardPaymentId: created.id,
@@ -119,8 +128,10 @@ export class CardPaymentsService {
             { ...leg, accountId: card.accountId, transferDirection: 'in' },
           ],
         });
+        await this.accountsService.recalculateBalance(source.id, tx);
+        await this.accountsService.recalculateBalance(card.accountId, tx);
         return created;
-      });
+      }, FINANCIAL_TX_OPTIONS);
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
         const raced = await this.findByKey(dto.idempotencyKey, userId);
@@ -129,8 +140,6 @@ export class CardPaymentsService {
       throw err;
     }
 
-    await this.accountsService.recalculateBalance(source.id);
-    await this.accountsService.recalculateBalance(card.accountId);
     return paymentView(payment);
   }
 
@@ -143,19 +152,30 @@ export class CardPaymentsService {
     if (!payment) throw new NotFoundException('Pagamento não encontrado');
     if (payment.status === 'reversed') return paymentView(payment);
 
-    const [reversed] = await this.prisma.$transaction([
-      this.prisma.cardPayment.update({
+    // Reverter devolve o valor à fatura e desfaz, junto, os créditos que o
+    // pagamento gerou e que a conciliação aplicava a outras faturas: eles são
+    // derivados dos pagamentos ativos, não ficam gravados.
+    const reversed = await this.prisma.$transaction(async (tx) => {
+      await lockCreditCard(tx, cardId);
+      await lockAccounts(tx, [payment.sourceAccountId, payment.creditCard.accountId]);
+      const current = await tx.cardPayment.findUniqueOrThrow({
+        where: { id: payment.id },
+        include: includeSource,
+      });
+      if (current.status === 'reversed') return current;
+      const updated = await tx.cardPayment.update({
         where: { id: payment.id },
         data: { status: 'reversed', reversedAt: new Date() },
         include: includeSource,
-      }),
-      this.prisma.transaction.updateMany({
+      });
+      await tx.transaction.updateMany({
         where: { cardPaymentId: payment.id },
         data: { status: 'cancelled' },
-      }),
-    ]);
-    await this.accountsService.recalculateBalance(payment.sourceAccountId);
-    await this.accountsService.recalculateBalance(payment.creditCard.accountId);
+      });
+      await this.accountsService.recalculateBalance(payment.sourceAccountId, tx);
+      await this.accountsService.recalculateBalance(payment.creditCard.accountId, tx);
+      return updated;
+    }, FINANCIAL_TX_OPTIONS);
     return paymentView(reversed);
   }
 

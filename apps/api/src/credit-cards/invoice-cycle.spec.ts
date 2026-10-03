@@ -187,7 +187,9 @@ describe('posição do cartão', () => {
     );
     expect(position.current.referenceMonth).toBe(current.referenceMonth);
     expect(position.currentTotalCents).toBe(10000);
-    expect(position.futureInstallmentsCents).toBe(20001);
+    // Bruto e a pagar coincidem: nenhuma fatura futura tem pagamento.
+    expect(position.futureChargesCents).toBe(20001);
+    expect(position.futureRemainingCents).toBe(20001);
     expect(position.closedUnpaidCents).toBe(15000);
     expect(position.totalDebtCents).toBe(20000 - 5000 + 10000 + 10000 + 10001);
     expect(position.creditCents).toBe(0);
@@ -197,7 +199,7 @@ describe('posição do cartão', () => {
     const position = cardPosition([amounts(future1, 3000)], config, today);
     expect(iso(position.current.closingDate)).toBe('2026-04-05');
     expect(position.currentTotalCents).toBe(0);
-    expect(position.futureInstallmentsCents).toBe(3000);
+    expect(position.futureChargesCents).toBe(3000);
   });
 
   it('pago acima do cobrado vira crédito, não dívida negativa', () => {

@@ -152,7 +152,9 @@ class TransactionCreator:
             "source": "whatsapp",
             "rawInput": source_text,
         }
-        if intent.recurrence_type == RecurrenceTypeEnum.parcelado:
+        # Parcelado só existe para despesa: a pergunta de receita única vem antes,
+        # e a API recusa a combinação.
+        if intent.recurrence_type == RecurrenceTypeEnum.parcelado and tx_type == "expense":
             payload["recurrenceType"] = "parcelado"
             payload["installments"] = intent.installments
         elif intent.recurrence_type == RecurrenceTypeEnum.fixo:
@@ -161,6 +163,11 @@ class TransactionCreator:
                 intent.recurrence_frequency or RecurrenceFrequencyEnum.monthly
             ).value
             payload["recurrenceMonths"] = intent.occurrences
+        # Pago na hora ("gastei") ou em aberto ("vence dia 10"). Sem indicação,
+        # a API decide: avulso em conta com data até hoje nasce pago. No cartão
+        # a API ignora — quem paga a compra é a fatura.
+        if intent.settled is not None:
+            payload["settle"] = intent.settled
         if ai_extracted_transaction_id:
             payload["aiExtractedTransactionId"] = ai_extracted_transaction_id
         if idempotency_key:
@@ -219,9 +226,16 @@ class TransactionCreator:
                 f"em {category_label}, {destination}, {payload['recurrenceMonths']} vezes "
                 f"a partir de {when}."
             )
+        pending = ""
+        if not is_card(account) and payload.get("settle") is False:
+            pending = (
+                " Ficou em aberto: quando "
+                + ("receber" if payload["type"] == "income" else "pagar")
+                + ", registre no app."
+            )
         return (
             f"Lançamento criado! {type_label} de {format_brl(total)} "
-            f"em {category_label}, {destination}, em {when}."
+            f"em {category_label}, {destination}, em {when}.{pending}"
         )
 
     async def _resolve_account(

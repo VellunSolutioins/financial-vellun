@@ -1,10 +1,32 @@
 import { RecurrenceType } from '@prisma/client';
-import { IsDateString, IsEnum, IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import {
+  IsBoolean,
+  IsDateString,
+  IsEnum,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { TransactionSource, TransactionStatus } from '@prisma/client';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
+import { SettlementFilter } from '../settlement-state';
+
+const SETTLEMENT_FILTERS = [
+  'open',
+  'partial',
+  'settled',
+  'overdue',
+  'forecast',
+] as const satisfies readonly SettlementFilter[];
 import { ENTRY_TYPES, EntryType } from '../entry-types';
 import { ResourceFilterDto } from '../../common/resource-scope';
+
+export const TRANSACTION_TIMINGS = ['past', 'upcoming'] as const;
+export type TransactionTiming = (typeof TRANSACTION_TIMINGS)[number];
 
 /**
  * Filtros de lançamentos, sem paginação. A listagem e os totais
@@ -54,6 +76,56 @@ export class TransactionFiltersDto extends ResourceFilterDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @ApiProperty({
+    enum: SETTLEMENT_FILTERS,
+    required: false,
+    description:
+      'Estado de liquidação (conta comum): em aberto, parcial, liquidado, vencido (em aberto com vencimento passado) ou previsão.',
+  })
+  @IsOptional()
+  @IsIn(SETTLEMENT_FILTERS)
+  settlement?: SettlementFilter;
+
+  @ApiProperty({ required: false, description: 'Só previsões (true) ou só obrigações (false).' })
+  @IsOptional()
+  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
+  @IsBoolean()
+  forecast?: boolean;
+
+  @ApiProperty({
+    enum: ['due', 'event', 'spending'],
+    default: 'due',
+    required: false,
+    description:
+      'A que data o período se aplica: `due` = vencimento/ocorrência (na parcela, a data dela); ' +
+      '`event` = data do fato (na parcela, a data da compra); `spending` = mês do gasto, como no ' +
+      'dashboard (a parcela no mês dela, o resto na data do fato).',
+  })
+  @IsOptional()
+  @IsIn(['due', 'event', 'spending'])
+  dateBasis?: 'due' | 'event' | 'spending';
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Só gastos realizados (fato até hoje, sem previsão ainda não paga): o mesmo critério do dashboard.',
+  })
+  @IsOptional()
+  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
+  @IsBoolean()
+  realizedOnly?: boolean;
+
+  @ApiProperty({
+    enum: TRANSACTION_TIMINGS,
+    required: false,
+    description:
+      'Abas da listagem (docs/adrs/0020): `past` = vencimento até hoje; `upcoming` = de amanhã em ' +
+      'diante. Hoje é o dia em São Paulo.',
+  })
+  @IsOptional()
+  @IsIn(TRANSACTION_TIMINGS)
+  timing?: TransactionTiming;
 }
 
 export class ListTransactionsDto extends TransactionFiltersDto {

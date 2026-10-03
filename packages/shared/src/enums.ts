@@ -32,9 +32,34 @@ export const AccountType = {
   CREDIT_CARD: 'credit_card',
   DIGITAL_WALLET: 'digital_wallet',
   INVESTMENT: 'investment',
+  /** Empréstimo/financiamento: passivo; saldo negativo = dívida. */
+  LOAN: 'loan',
   OTHER: 'other',
 } as const;
 export type AccountType = (typeof AccountType)[keyof typeof AccountType];
+
+/**
+ * Situação de liquidação de um lançamento, calculada pela API
+ * (docs/adrs/0018). Vencido é à parte (`isOverdue`): vencer não paga nada.
+ */
+export const SettlementState = {
+  FORECAST: 'forecast',
+  OPEN: 'open',
+  PARTIAL: 'partial',
+  SETTLED: 'settled',
+  ON_CARD: 'on_card',
+  MOVEMENT: 'movement',
+  CANCELLED: 'cancelled',
+} as const;
+export type SettlementState = (typeof SettlementState)[keyof typeof SettlementState];
+
+/** Natureza do gasto de uma categoria de despesa. */
+export const CategoryNature = {
+  CONSUMPTION: 'consumption',
+  ASSET_ACQUISITION: 'asset_acquisition',
+  FINANCIAL_COST: 'financial_cost',
+} as const;
+export type CategoryNature = (typeof CategoryNature)[keyof typeof CategoryNature];
 
 // ── Billing ───────────────────────────────────────────────────────────────
 
