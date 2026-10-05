@@ -121,21 +121,14 @@ def test_categoria_de_receita_nao_e_sugerida_para_despesa():
 
 
 # ── Modelo financeiro (docs/adrs/0018) ─────────────────────────────────────
-# Pago na hora × em aberto, e movimentações que não são receita nem despesa.
+# Movimentações que não são receita nem despesa. Pago ou a pagar é regra da
+# API (docs/adrs/0020): o agente não opina.
 
 
-def test_gastei_e_pago_na_hora():
-    assert classify("gastei 50 no mercado").settled is True
-
-
-def test_conta_que_vence_fica_em_aberto():
+def test_conta_que_vence_continua_sendo_lancamento():
     result = classify("conta de luz de 180 vence dia 10")
     assert result.intent == IntentType.create_transaction
-    assert result.settled is False
-
-
-def test_sem_indicacao_deixa_a_api_decidir():
-    assert classify("mercado 50").settled is None
+    assert not hasattr(result, "settled")
 
 
 def test_transferencia_entre_contas_proprias_nao_vira_despesa():

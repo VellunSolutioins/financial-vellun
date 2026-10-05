@@ -80,6 +80,14 @@ def _format_date(iso: str) -> str:
         return iso
 
 
+def _is_future(iso: str) -> bool:
+    """A data ainda não chegou (no dia local): o lançamento nasce em aberto."""
+    try:
+        return date.fromisoformat(iso[:10]) > today_local()
+    except ValueError:
+        return False
+
+
 def _split_account_name(account_name: str) -> tuple[str, bool]:
     """Tira o sufixo de cartão do nome; diz se ele estava lá."""
     name = account_name.strip()
@@ -163,11 +171,9 @@ class TransactionCreator:
                 intent.recurrence_frequency or RecurrenceFrequencyEnum.monthly
             ).value
             payload["recurrenceMonths"] = intent.occurrences
-        # Pago na hora ("gastei") ou em aberto ("vence dia 10"). Sem indicação,
-        # a API decide: avulso em conta com data até hoje nasce pago. No cartão
-        # a API ignora — quem paga a compra é a fatura.
-        if intent.settled is not None:
-            payload["settle"] = intent.settled
+        # Pago ou a pagar é regra da API, não pergunta (docs/adrs/0020): único,
+        # em conta, com data até hoje nasce pago; data futura, parcela e fixo
+        # nascem em aberto; no cartão, quem paga é a fatura.
         if ai_extracted_transaction_id:
             payload["aiExtractedTransactionId"] = ai_extracted_transaction_id
         if idempotency_key:
@@ -227,7 +233,8 @@ class TransactionCreator:
                 f"a partir de {when}."
             )
         pending = ""
-        if not is_card(account) and payload.get("settle") is False:
+        # Mesma regra da API: único em conta só fica em aberto com data futura.
+        if not is_card(account) and _is_future(payload["transactionDate"]):
             pending = (
                 " Ficou em aberto: quando "
                 + ("receber" if payload["type"] == "income" else "pagar")

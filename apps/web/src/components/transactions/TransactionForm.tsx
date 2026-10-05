@@ -32,16 +32,10 @@ const schema = z
     recurrenceFrequency: z.enum(['monthly', 'bimonthly', 'semiannual', 'annual']),
     installments: z.string().optional(),
     recurrenceMonths: z.string().optional(),
-    /** Já foi pago/recebido (a primeira ocorrência): a liquidação nasce junto. */
-    settle: z.boolean(),
     /** Só no fixo: compromisso firmado (contrato) em vez de previsão cancelável. */
     committed: z.boolean(),
     /** Data do fato, quando difere do vencimento (vazio = a mesma). */
     eventDate: z.string().optional(),
-  })
-  .refine((data) => !data.settle || data.transactionDate <= todayInputValue(), {
-    message: 'Data futura ainda não foi paga: desmarque "já foi pago" ou use a data do pagamento.',
-    path: ['settle'],
   })
   .refine(
     (data) =>
@@ -100,8 +94,6 @@ export function TransactionForm({
   const [submitting, setSubmitting] = useState(false);
   // Uma chave por abertura do formulário: duplo clique não cria dois lançamentos.
   const [idempotencyKey] = useState(newIdempotencyKey);
-  // Enquanto o usuário não mexe, "já foi pago" acompanha a data (passada = à vista).
-  const [settleTouched, setSettleTouched] = useState(false);
   const [showEventDate, setShowEventDate] = useState(false);
   const toast = useToast();
 
@@ -134,7 +126,6 @@ export function TransactionForm({
       recurrenceFrequency: 'monthly',
       installments: '',
       recurrenceMonths: '',
-      settle: !transaction && !fixedOnly && !installmentOnly,
       committed: false,
       eventDate: '',
     },
@@ -144,7 +135,6 @@ export function TransactionForm({
   const selectedRecurrenceType = watch('recurrenceType');
   const watchedDate = watch('transactionDate');
   const watchedAccount = watch('accountId');
-  const watchedSettle = watch('settle');
   const watchedAmount = watch('amount');
   const watchedInstallments = watch('installments');
 
@@ -180,13 +170,27 @@ export function TransactionForm({
   const onCard = isCardAccount(watchedAccount);
   const isFuture = !!watchedDate && watchedDate > todayInputValue();
 
-  // Padrão de "já foi pago": avulso em conta comum com data até hoje. Data
-  // futura nunca está paga. Depois que o usuário escolhe, a escolha vale.
-  useEffect(() => {
-    if (transaction) return;
-    if (isFuture) setValue('settle', false);
-    else if (!settleTouched) setValue('settle', selectedRecurrenceType === 'avulso');
-  }, [transaction, isFuture, settleTouched, selectedRecurrenceType, setValue]);
+  // Pago ou a pagar é regra, não pergunta (docs/adrs/0020): único em conta com
+  // data até hoje nasce pago; data futura, parcela e fixo nascem em aberto. A
+  // API aplica a regra; aqui só se diz o que vai acontecer com o saldo.
+  const balanceHint = (() => {
+    if (transaction || onCard) return null;
+    const income = selectedType === 'income';
+    if (selectedRecurrenceType === 'avulso') {
+      if (isFuture) {
+        return income
+          ? 'Fica a receber até você marcar como recebido.'
+          : 'Fica a pagar até você marcar como pago.';
+      }
+      return income ? 'Entra no saldo da conta agora.' : 'Sai do saldo da conta agora.';
+    }
+    if (selectedRecurrenceType === 'parcelado') {
+      return 'Cada parcela fica a pagar: o saldo só muda quando você marcar como paga.';
+    }
+    return income
+      ? 'Cada ocorrência fica a receber: o saldo só muda quando você marcar como recebida.'
+      : 'Cada ocorrência fica a pagar: o saldo só muda quando você marcar como paga.';
+  })();
 
   /** Preferencial que serve para o tipo: cartão não recebe receita. */
   const preferredFor = (type: FormData['type']) => {
@@ -217,7 +221,6 @@ export function TransactionForm({
       recurrenceMonths,
       recurrenceType,
       recurrenceFrequency,
-      settle,
       committed,
       eventDate,
       ...rest
@@ -230,8 +233,6 @@ export function TransactionForm({
           recurrenceType,
           amount: currencyToNumber(data.amount),
           idempotencyKey,
-          // No cartão quem paga é a fatura: a API ignora, e a tela nem pergunta.
-          ...(!card && { settle }),
           ...(!card && recurrenceType === 'avulso' && eventDate && { eventDate }),
           ...(recurrenceType === 'parcelado' && { installments: Number(installments) }),
           ...(recurrenceType === 'fixo' && {
@@ -372,28 +373,9 @@ export function TransactionForm({
           <p className="text-xs text-destructive">{errors.transactionDate.message}</p>
         )}
       </div>
-      {!transaction && !onCard && (
-        <div className="space-y-2 rounded-md border border-border p-3">
-          <label className="flex items-start gap-2 text-sm">
-            <input
-              type="checkbox"
-              className="mt-0.5 h-4 w-4"
-              disabled={isFuture}
-              {...register('settle', { onChange: () => setSettleTouched(true) })}
-            />
-            <span>
-              {selectedType === 'income' ? 'Já foi recebido' : 'Já foi pago'}
-              {selectedRecurrenceType !== 'avulso' && ' (a primeira)'}
-              <span className="block text-xs text-muted-foreground">
-                {isFuture
-                  ? 'Data futura: fica em aberto até você registrar o pagamento.'
-                  : watchedSettle
-                    ? 'O saldo da conta muda agora.'
-                    : 'Fica em aberto (e vencido, se a data passou) até você registrar o pagamento.'}
-              </span>
-            </span>
-          </label>
-          {errors.settle && <p className="text-xs text-destructive">{errors.settle.message}</p>}
+      {balanceHint && (
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">{balanceHint}</p>
           {selectedRecurrenceType === 'avulso' &&
             (showEventDate ? (
               <div className="space-y-1">

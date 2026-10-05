@@ -5,6 +5,7 @@ import asyncio
 import pytest
 
 from src.schemas.financial_intent import (
+    AccountKindEnum,
     AmountBasisEnum,
     FinancialIntent,
     IntentType,
@@ -158,3 +159,72 @@ def test_outros_como_curinga_vira_pergunta():
 
     pedido = asyncio.run(classifier.classify("gasto 266,40 em outros", {}))
     assert pedido.category_name == "Outros"
+
+
+# ── Conta e cartão só valem se a mensagem disser (docs/adrs/0020) ────────────
+# Em produção o LLM devolvia "account" para mensagens sem menção, e o cartão
+# marcado como padrão era ignorado.
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Compra de capa do celular no valor de 38,60",
+        "Compra de 18,95 nas loterias da caixa",
+        "gastei 50 no mercado",
+        "paguei 180 da conta de luz",
+    ],
+)
+def test_conta_que_o_llm_inventou_e_descartada(message):
+    result = classify_with_llm(
+        message, amount=50, account_kind=AccountKindEnum.account, account_name="Conta Principal"
+    )
+    assert result.account_kind is None
+    assert result.account_name is None
+
+
+@pytest.mark.parametrize(
+    "message", ["paguei 50 no pix", "gastei 50 no débito", "mercado 50 em dinheiro", "50 da conta"]
+)
+def test_conta_dita_na_mensagem_fica(message):
+    result = classify_with_llm(message, amount=50, account_kind=AccountKindEnum.account)
+    assert result.account_kind == AccountKindEnum.account
+
+
+def test_nome_da_conta_citado_fica_com_o_tipo():
+    result = classify_with_llm(
+        "gastei 50 na conta principal",
+        amount=50,
+        account_kind=AccountKindEnum.account,
+        account_name="Conta Principal",
+    )
+    assert result.account_name == "Conta Principal"
+    assert result.account_kind == AccountKindEnum.account
+
+
+def test_cartao_que_o_llm_inventou_e_descartado():
+    result = classify_with_llm(
+        "gastei 50 no mercado",
+        amount=50,
+        account_kind=AccountKindEnum.card,
+        account_name="Nubank (cartão de crédito)",
+    )
+    assert result.account_kind is None
+    assert result.account_name is None
+
+
+@pytest.mark.parametrize("message", ["paguei 80 no cartão", "80 no crédito"])
+def test_cartao_dito_na_mensagem_fica(message):
+    result = classify_with_llm(message, amount=80, account_kind=AccountKindEnum.card)
+    assert result.account_kind == AccountKindEnum.card
+
+
+def test_nome_do_cartao_citado_fica_mesmo_sem_a_palavra_cartao():
+    result = classify_with_llm(
+        "tv 3000 no nubank",
+        amount=3000,
+        account_kind=AccountKindEnum.card,
+        account_name="Nubank (cartão de crédito)",
+    )
+    assert result.account_name == "Nubank (cartão de crédito)"
+    assert result.account_kind == AccountKindEnum.card

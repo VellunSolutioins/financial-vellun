@@ -55,6 +55,38 @@ quando o tipo é Receita. No WhatsApp, o agente pergunta "Registro como receita 
 R$ X?". Receitas parceladas gravadas antes continuam funcionando, e o
 `db:verify:financial-model` as conta.
 
+### Pago ou a pagar é regra, não pergunta
+
+O formulário e o WhatsApp não perguntam mais se o lançamento já foi pago. Vale a regra
+que já era o padrão da API (`defaultSettle`, em `entry-writer.ts`), igual para despesa
+(pago / a pagar) e receita (recebido / a receber):
+
+| Lançamento | No cartão                          | Na conta                                              |
+| ---------- | ---------------------------------- | ----------------------------------------------------- |
+| Única vez  | vai para a fatura                  | nasce pago e mexe no saldo; com data futura, a pagar  |
+| Parcelado  | parcelas na fatura                 | parcelas a pagar; o saldo muda ao marcar cada uma     |
+| Recorrente | cobranças entram na fatura na data | ocorrências a pagar; o saldo muda ao marcar como pago |
+
+Quem registrou uma conta de hoje ou do passado que ainda não pagou usa "Desfazer
+pagamento" na edição. A API continua aceitando `settle` explícito (testes e
+integrações); os clientes deixaram de enviar. No WhatsApp, o campo `settled` saiu do
+que a IA preenche.
+
+### A IA não escolhe conta sem o usuário dizer
+
+Em produção, mensagens sem menção a conta ou cartão ("Compra de capa do celular no
+valor de 38,60") foram gravadas na conta comum, com um cartão marcado como padrão: o
+LLM devolvia `account_kind = "account"`, e às vezes o nome da conta. O campo `settled`
+("já foi pago") no schema reforçava esse palpite. Agora:
+
+- o prompt diz que "gastei", "paguei", "comprei" e "compra" não indicam conta nem cartão;
+- `IntentClassifier._drop_unmentioned_account` confere a extração com o texto: "conta"
+  só fica com sinal na mensagem (na conta, débito, Pix, dinheiro); "cartão" só com
+  cartão, crédito ou fatura; o nome só se uma palavra distintiva dele aparecer.
+
+Sem sinal, os campos são anulados e vale a regra de sempre: o recurso padrão do usuário;
+sem padrão, a conta comum mais antiga.
+
 ### Abas "Até hoje" e "Próximos" em Lançamentos
 
 Recorrências e parcelas gravam as ocorrências do mês com data futura. Com a ordem "mais
