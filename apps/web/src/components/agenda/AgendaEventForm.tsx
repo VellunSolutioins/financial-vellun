@@ -7,12 +7,20 @@ import { z } from 'zod';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select } from '@/components/ui/select';
 import { apiClient } from '@/lib/api-client';
 import { useToast } from '@/components/ui/toast';
 import type { AgendaEvent } from '@/hooks/useAgendaEvents';
 import { cn } from '@/lib/utils';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#ef4444'];
+
+// Select próprio de hora/minuto em vez de <input type="time"> -- o seletor NATIVO do Android
+// (achado ao vivo pelo usuário) abre um relógio cujo botão "Definir" fica cortado fora da tela em
+// telas estreitas, e isso é chrome do sistema operacional: não dá pra estilizar/reposicionar via
+// CSS. Com dois <select> normais, o app controla 100% da aparência e do comportamento.
+const HOURS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
+const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
 
 const schema = z.object({
   title: z.string().min(1, 'Título obrigatório'),
@@ -52,6 +60,20 @@ export function AgendaEventForm({ event, defaultDate, onSuccess, onCancel }: Pro
   });
 
   const selectedColor = watch('color');
+  const eventTime = watch('eventTime');
+  const [selectedHour, selectedMinute] = eventTime ? eventTime.split(':') : ['', ''];
+
+  function setHour(nextHour: string) {
+    if (!nextHour) {
+      setValue('eventTime', '', { shouldDirty: true });
+      return;
+    }
+    setValue('eventTime', `${nextHour}:${selectedMinute || '00'}`, { shouldDirty: true });
+  }
+  function setMinute(nextMinute: string) {
+    if (!selectedHour) return;
+    setValue('eventTime', `${selectedHour}:${nextMinute}`, { shouldDirty: true });
+  }
 
   const onSubmit = async (data: FormData) => {
     setSubmitting(true);
@@ -98,7 +120,32 @@ export function AgendaEventForm({ event, defaultDate, onSuccess, onCancel }: Pro
         </div>
         <div className="space-y-1">
           <Label>Horário (opcional)</Label>
-          <Input type="time" {...register('eventTime')} />
+          <div className="grid grid-cols-2 gap-2">
+            <Select
+              aria-label="Hora"
+              value={selectedHour}
+              onChange={(e) => setHour(e.target.value)}
+            >
+              <option value="">Sem horário</option>
+              {HOURS.map((h) => (
+                <option key={h} value={h}>
+                  {h}h
+                </option>
+              ))}
+            </Select>
+            <Select
+              aria-label="Minuto"
+              value={selectedHour ? selectedMinute || '00' : '00'}
+              onChange={(e) => setMinute(e.target.value)}
+              disabled={!selectedHour}
+            >
+              {MINUTES.map((m) => (
+                <option key={m} value={m}>
+                  {m}min
+                </option>
+              ))}
+            </Select>
+          </div>
         </div>
       </div>
 

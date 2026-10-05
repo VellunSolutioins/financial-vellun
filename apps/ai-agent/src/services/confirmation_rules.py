@@ -98,10 +98,16 @@ def next_question(intent: FinancialIntent, raw_message: str = "") -> Question | 
     if recurrence is not None:
         return recurrence
 
-    if intent.amount > MAX_REASONABLE_AMOUNT:
+    # Achado em revisão: comparar direto `intent.amount` deixava passar sem confirmação um
+    # parcelado grande informado "por parcela" (ex.: "3000 por parcela, 60 vezes" tem
+    # intent.amount=3000, abaixo do limiar, mas total_amount() = 180.000) -- o valor que
+    # realmente vai pro lançamento (ver total_amount() e transaction_creator.py) é o que
+    # precisa ser comparado aqui, não o valor por parcela.
+    total = total_amount(intent)
+    if total > MAX_REASONABLE_AMOUNT:
         return Question(
             FIELD_CONFIRM,
-            f"O valor de {format_brl(intent.amount)} é alto. Confirma que está correto?",
+            f"O valor de {format_brl(total)} é alto. Confirma que está correto?",
         )
 
     if intent.confidence < settings.confidence_threshold:

@@ -62,7 +62,7 @@ export function ResourcePeriodView({ selection, basis = 'competence' }: Props) {
         />
       </div>
 
-      <div className="grid grid-cols-3 gap-2 sm:gap-4">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-4">
         {[
           { label: 'Receitas', value: summary?.income ?? 0, tone: 'text-emerald-600' },
           { label: 'Despesas', value: summary?.expense ?? 0, tone: 'text-rose-600' },
@@ -73,9 +73,9 @@ export function ResourcePeriodView({ selection, basis = 'competence' }: Props) {
           },
         ].map((item) => (
           <Card key={item.label} className="rounded-2xl">
-            <CardContent className="p-3 sm:p-4">
+            <CardContent className="flex items-center justify-between gap-2 p-3 sm:block sm:p-4">
               <p className="text-xs text-muted-foreground">{item.label}</p>
-              <p className={cn('truncate text-sm font-bold sm:text-lg', item.tone)}>
+              <p className={cn('truncate text-base font-bold sm:text-lg', item.tone)}>
                 {formatCurrency(item.value)}
               </p>
             </CardContent>

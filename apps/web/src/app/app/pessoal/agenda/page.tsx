@@ -217,21 +217,22 @@ function AgendaContent() {
       </div>
 
       <Card className="rounded-2xl">
-        <CardContent className="overflow-x-auto p-3 sm:p-4">
+        <CardContent className="p-2 sm:p-4">
           {loading || remindersLoading ? (
             <div className="p-10 text-center text-sm text-muted-foreground">Carregando...</div>
           ) : (
-            <div className="min-w-[640px]">
-              <div className="grid grid-cols-7 gap-1 text-center text-xs font-medium text-muted-foreground">
+            <div>
+              <div className="grid grid-cols-7 gap-0.5 text-center text-[10px] font-medium text-muted-foreground sm:gap-1 sm:text-xs">
                 {WEEKDAYS.map((w) => (
-                  <div key={w} className="py-2">
+                  <div key={w} className="truncate py-2">
                     {w}
                   </div>
                 ))}
               </div>
-              <div className="grid grid-cols-7 gap-1">
+              <div className="grid grid-cols-7 gap-0.5 sm:gap-1">
                 {cells.map((day, i) => {
-                  if (day === null) return <div key={`empty-${i}`} className="min-h-[92px]" />;
+                  if (day === null)
+                    return <div key={`empty-${i}`} className="min-h-[56px] sm:min-h-[92px]" />;
                   const key = dayKey(day);
                   const dayEvents = eventsByDay.get(key) ?? [];
                   const dayReminders = remindersByDay.get(key) ?? [];
@@ -250,10 +251,10 @@ function AgendaContent() {
                           openNew(key);
                         }
                       }}
-                      className="min-h-[92px] rounded-lg border border-border p-1.5 text-left hover:bg-muted/40"
+                      className="min-h-[56px] min-w-0 rounded-lg border border-border p-0.5 text-left hover:bg-muted/40 sm:min-h-[92px] sm:p-1.5"
                     >
-                      <span className="text-xs font-medium">{day}</span>
-                      <div className="mt-1 space-y-1">
+                      <span className="text-[10px] font-medium sm:text-xs">{day}</span>
+                      <div className="mt-0.5 space-y-0.5 sm:mt-1 sm:space-y-1">
                         {dayReminders.map((r) => (
                           <button
                             type="button"
@@ -262,7 +263,7 @@ function AgendaContent() {
                               openReminder(r);
                             }}
                             key={r.id}
-                            className="truncate rounded px-1.5 py-0.5 text-[10px] font-medium text-white"
+                            className="block w-full truncate rounded px-0.5 py-0.5 text-left text-[8px] font-medium text-white sm:px-1.5 sm:text-[10px]"
                             style={{ backgroundColor: REMINDER_COLOR }}
                             title={r.title}
                           >
@@ -277,7 +278,7 @@ function AgendaContent() {
                               ev.stopPropagation();
                               openEdit(e);
                             }}
-                            className="block w-full truncate rounded px-1.5 py-0.5 text-left text-[10px] font-medium text-white"
+                            className="block w-full truncate rounded px-0.5 py-0.5 text-left text-[8px] font-medium text-white sm:px-1.5 sm:text-[10px]"
                             style={{ backgroundColor: e.color ?? '#3b82f6' }}
                             title={e.title}
                           >

@@ -31,6 +31,12 @@ const schema = z
     recurrenceType: z.enum(['avulso', 'fixo', 'parcelado']),
     recurrenceFrequency: z.enum(['monthly', 'bimonthly', 'semiannual', 'annual']),
     installments: z.string().optional(),
+    // 'auto': recorrência sem uma quantidade definida pelo usuário -- gera o
+    // máximo hoje suportado (RECURRENCE_MONTHS_AUTO, 120 meses = 10 anos) por
+    // baixo dos panos, já que o backend ainda não tem um job que crie a
+    // próxima ocorrência mês a mês sozinho (ver onSubmit). 'custom': usuário
+    // define a quantidade exata em `recurrenceMonths`.
+    recurrenceMode: z.enum(['auto', 'custom']).optional(),
     recurrenceMonths: z.string().optional(),
   })
   .refine(
@@ -42,10 +48,15 @@ const schema = z
   .refine(
     (data) =>
       data.recurrenceType !== 'fixo' ||
+      data.recurrenceMode !== 'custom' ||
       (Number(data.recurrenceMonths) >= 2 && Number(data.recurrenceMonths) <= 120),
     { message: 'Informe entre 2 e 120 repetições', path: ['recurrenceMonths'] },
   );
 type FormData = z.infer<typeof schema>;
+
+/** Repetições geradas quando o usuário escolhe "Recorrência" (sem definir quantidade) --
+ * ver comentário de `recurrenceMode` no schema acima. */
+const RECURRENCE_MONTHS_AUTO = 120;
 
 export const recurrenceLabels: Record<FormData['recurrenceType'], string> = {
   avulso: 'Única vez',
@@ -63,6 +74,11 @@ export const frequencyLabels: Record<FormData['recurrenceFrequency'], string> = 
 const typeOptions = [
   { value: 'expense', label: 'Despesa', active: 'border-rose-600 bg-rose-600 text-white' },
   { value: 'income', label: 'Receita', active: 'border-emerald-600 bg-emerald-600 text-white' },
+] as const;
+
+const recurrenceModeOptions = [
+  { value: 'auto', label: 'Recorrência', hint: 'Repete automaticamente, sem definir quantas vezes.' },
+  { value: 'custom', label: 'Repetições', hint: 'Você define a quantidade exata de repetições.' },
 ] as const;
 
 interface Props {
@@ -115,12 +131,14 @@ export function TransactionForm({
             : 'avulso',
       recurrenceFrequency: 'monthly',
       installments: '',
+      recurrenceMode: 'auto',
       recurrenceMonths: '',
     },
   });
 
   const selectedType = watch('type');
   const selectedRecurrenceType = watch('recurrenceType');
+  const selectedRecurrenceMode = watch('recurrenceMode');
   const watchedAmount = watch('amount');
   const watchedInstallments = watch('installments');
 
@@ -171,8 +189,8 @@ export function TransactionForm({
   }, [resources, transaction, setValue, getValues]);
 
   const onSubmit = async (data: FormData) => {
-    setSubmitting(true);
-    const { installments, recurrenceMonths, recurrenceType, recurrenceFrequency, ...rest } = data;
+    const { installments, recurrenceMode, recurrenceMonths, recurrenceType, recurrenceFrequency, ...rest } =
+      data;
     const payload = transaction
       ? { ...rest, amount: currencyToNumber(data.amount) }
       : {
@@ -182,12 +200,35 @@ export function TransactionForm({
           ...(recurrenceType === 'parcelado' && { installments: Number(installments) }),
           ...(recurrenceType === 'fixo' && {
             recurrenceFrequency,
-            recurrenceMonths: Number(recurrenceMonths),
+            recurrenceMonths:
+              recurrenceMode === 'custom' ? Number(recurrenceMonths) : RECURRENCE_MONTHS_AUTO,
           }),
         };
+
+    // Pedido do usuário: editar uma parcela ("1/2") pergunta se descrição/categoria valem só
+    // pra essa parcela ou pra compra inteira. Valor, data e conta NUNCA se propagam -- cada
+    // parcela é intencionalmente independente nesses campos (é o que o backend já garante em
+    // PATCH /installments/:seriesId, que só aceita description/categoryId).
+    let applyToAllInstallments = false;
+    if (transaction && transaction.recurrenceType === 'parcelado' && transaction.seriesId) {
+      applyToAllInstallments = await confirm({
+        title: 'Aplicar a todas as parcelas?',
+        description: `Essa compra tem ${transaction.installmentTotal} parcelas (você está editando a ${transaction.installmentNumber}/${transaction.installmentTotal}). Descrição e categoria podem valer pra todas de uma vez; valor, data e conta sempre valem só pra esta parcela.`,
+        confirmText: 'Aplicar a todas',
+        cancelText: 'Somente esta parcela',
+      });
+    }
+
+    setSubmitting(true);
     try {
       if (transaction) {
         await apiClient.patch(`/transactions/${transaction.id}`, payload);
+        if (applyToAllInstallments) {
+          await apiClient.patch(`/installments/${transaction.seriesId}`, {
+            description: rest.description,
+            categoryId: rest.categoryId,
+          });
+        }
         toast.success('Lançamento atualizado com sucesso.');
       } else {
         await apiClient.post('/transactions', payload);
@@ -356,7 +397,7 @@ export function TransactionForm({
             </div>
           )}
           {selectedRecurrenceType === 'fixo' && (
-            <div className="grid grid-cols-2 gap-4 pt-1">
+            <div className="space-y-3 pt-1">
               <div className="space-y-1">
                 <Label htmlFor="recurrence-frequency">Frequência</Label>
                 <Select id="recurrence-frequency" {...register('recurrenceFrequency')}>
@@ -368,28 +409,66 @@ export function TransactionForm({
                 </Select>
               </div>
               <div className="space-y-1">
-                <Label htmlFor="recurrence-count">Repetições</Label>
-                <Input
-                  id="recurrence-count"
-                  type="number"
-                  inputMode="numeric"
-                  min={2}
-                  max={120}
-                  placeholder="Ex: 12"
-                  {...register('recurrenceMonths')}
-                />
-              </div>
-              {errors.recurrenceMonths && (
-                <p className="col-span-2 text-xs text-destructive">
-                  {errors.recurrenceMonths.message}
+                <Label id="recurrence-mode-label">Repetições</Label>
+                <input type="hidden" {...register('recurrenceMode')} />
+                <div
+                  role="radiogroup"
+                  aria-labelledby="recurrence-mode-label"
+                  className="grid grid-cols-2 gap-2"
+                >
+                  {recurrenceModeOptions.map((option) => {
+                    const selected = selectedRecurrenceMode === option.value;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        onClick={() =>
+                          setValue('recurrenceMode', option.value, {
+                            shouldDirty: true,
+                            shouldValidate: true,
+                          })
+                        }
+                        className={cn(
+                          'h-10 rounded-md border text-sm font-medium transition-colors',
+                          selected
+                            ? 'border-primary bg-primary text-primary-foreground'
+                            : 'border-input bg-background text-muted-foreground hover:bg-muted',
+                        )}
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {recurrenceModeOptions.find((o) => o.value === selectedRecurrenceMode)?.hint}
                 </p>
+              </div>
+              {selectedRecurrenceMode === 'custom' && (
+                <div className="space-y-1">
+                  <Label htmlFor="recurrence-count">Quantidade de repetições</Label>
+                  <Input
+                    id="recurrence-count"
+                    type="number"
+                    inputMode="numeric"
+                    min={2}
+                    max={120}
+                    placeholder="Ex: 12"
+                    {...register('recurrenceMonths')}
+                  />
+                  {errors.recurrenceMonths && (
+                    <p className="text-xs text-destructive">{errors.recurrenceMonths.message}</p>
+                  )}
+                </div>
               )}
             </div>
           )}
         </div>
       )}
-      <div className="flex gap-2 pt-2">
-        <Button type="submit" disabled={submitting} className="flex-1">
+      <div className="flex flex-col gap-2 pt-2 sm:flex-row">
+        <Button type="submit" disabled={submitting} className="w-full sm:flex-1">
           {submitting
             ? 'Salvando...'
             : transaction
@@ -401,11 +480,11 @@ export function TransactionForm({
                   : 'Criar lançamento'}
         </Button>
         {transaction && (
-          <Button type="button" variant="destructive" onClick={handleCancel}>
+          <Button type="button" variant="destructive" onClick={handleCancel} className="w-full sm:w-auto">
             Cancelar
           </Button>
         )}
-        <Button type="button" variant="outline" onClick={onCancel}>
+        <Button type="button" variant="outline" onClick={onCancel} className="w-full sm:w-auto">
           Fechar
         </Button>
       </div>

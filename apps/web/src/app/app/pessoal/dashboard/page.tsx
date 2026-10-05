@@ -66,6 +66,10 @@ interface DailyBreakdown {
   days: { day: number; income: number; expense: number }[];
 }
 
+/** Filtro do card "Receitas x Despesas": 'mensal' mostra só o mês atualmente selecionado
+ * (um par de barras); os demais mostram a evolução dos últimos N meses. */
+type EvolutionFilter = 'mensal' | 3 | 6 | 12;
+
 function formatCurrency(v: number) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 }
@@ -228,7 +232,7 @@ function DashboardContent() {
   const { selection, setSelection } = useResourceFilter();
   const scopeParams = new URLSearchParams(resourceQuery(selection)).toString();
 
-  const [evolutionMonths, setEvolutionMonths] = useState(12);
+  const [evolutionFilter, setEvolutionFilter] = useState<EvolutionFilter>('mensal');
   const [selectedMonth, setSelectedMonth] = useState('');
   const [daily, setDaily] = useState<DailyBreakdown | null>(null);
   const [dailyLoading, setDailyLoading] = useState(false);
@@ -269,13 +273,19 @@ function DashboardContent() {
       .finally(() => setDailyLoading(false));
   }, [selectedMonth, scopeParams]);
 
-  const evolutionData = useMemo(
-    () =>
-      (data?.monthlyComparison ?? [])
-        .slice(-evolutionMonths)
-        .map((m) => ({ ...m, label: monthLabel(m.month) })),
-    [data, evolutionMonths],
-  );
+  const evolutionData = useMemo(() => {
+    const months = data?.monthlyComparison ?? [];
+    if (evolutionFilter === 'mensal') {
+      const current = months.find((m) => m.month === selectedMonth);
+      return current ? [{ ...current, label: monthLabel(current.month) }] : [];
+    }
+    return months.slice(-evolutionFilter).map((m) => ({ ...m, label: monthLabel(m.month) }));
+  }, [data, evolutionFilter, selectedMonth]);
+
+  const evolutionSubtitle =
+    evolutionFilter === 'mensal'
+      ? 'Comparativo do mês atual'
+      : `Evolução dos últimos ${evolutionFilter} meses`;
 
   // O comparativo mensal termina no mês corrente; depois dele vêm os meses com
   // lançamentos agendados (recorrências e parcelas), para o usuário vê-los.
@@ -471,13 +481,19 @@ function DashboardContent() {
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
             <div>
               <CardTitle className="text-base">Receitas x Despesas</CardTitle>
-              <p className="text-xs text-muted-foreground">Comparativo mensal</p>
+              <p className="text-xs text-muted-foreground">{evolutionSubtitle}</p>
             </div>
             <Select
-              value={evolutionMonths}
-              onChange={(e) => setEvolutionMonths(Number(e.target.value))}
+              value={evolutionFilter}
+              onChange={(e) =>
+                setEvolutionFilter(
+                  e.target.value === 'mensal' ? 'mensal' : (Number(e.target.value) as 3 | 6 | 12),
+                )
+              }
               className="h-8 w-auto text-xs"
             >
+              <option value="mensal">Mensal</option>
+              <option value={3}>3 meses</option>
               <option value={6}>6 meses</option>
               <option value={12}>12 meses</option>
             </Select>

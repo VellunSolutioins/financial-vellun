@@ -355,7 +355,7 @@ function TransacoesContent() {
 
       {totals && (
         <div className="space-y-2">
-          <div className="grid grid-cols-3 gap-2 sm:gap-4">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-4">
             {[
               { label: 'Receitas', value: totals.income, tone: 'text-emerald-600' },
               { label: 'Despesas', value: totals.expense, tone: 'text-rose-600' },
@@ -366,9 +366,9 @@ function TransacoesContent() {
               },
             ].map((item) => (
               <Card key={item.label} className="rounded-2xl">
-                <CardContent className="p-3 sm:p-4">
+                <CardContent className="flex items-center justify-between gap-2 p-3 sm:block sm:p-4">
                   <p className="text-xs text-muted-foreground">{item.label}</p>
-                  <p className={cn('truncate text-sm font-bold sm:text-lg', item.tone)}>
+                  <p className={cn('truncate text-base font-bold sm:text-lg', item.tone)}>
                     {formatCurrency(item.value)}
                   </p>
                 </CardContent>

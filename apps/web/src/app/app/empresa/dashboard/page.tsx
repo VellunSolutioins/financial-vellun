@@ -109,7 +109,7 @@ function EmpresaDashboardContent() {
       ) : (
         <>
           {/* Summary cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {[
               { label: 'Saldo Total', value: data.totalBalance, color: 'text-blue-600' },
               { label: 'Receitas', value: data.totalIncome, color: 'text-green-600' },
@@ -127,7 +127,9 @@ function EmpresaDashboardContent() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className={`text-2xl font-bold ${card.color}`}>{formatCurrency(card.value)}</p>
+                  <p className={`truncate text-lg font-bold sm:text-2xl ${card.color}`}>
+                    {formatCurrency(card.value)}
+                  </p>
                 </CardContent>
               </Card>
             ))}

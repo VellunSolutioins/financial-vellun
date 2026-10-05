@@ -317,6 +317,13 @@ export class TransactionsService {
       throw new BadRequestException('Só uma despesa confirmada pode ser estornada');
     }
     const date = parseDateOnly(dto.date.slice(0, 10));
+    // Achado em revisão: o pagamento de fatura já trava data futura (ver card-payments.service.ts),
+    // mas o estorno não tinha a mesma trava -- uma data futura aqui cria um `refund` que
+    // recalculateBalance (filtra transactionDate <= hoje) ignora até a data chegar, e o
+    // CardLedgerService chega a abrir/estender fatura numa referência futura pra ele.
+    if (compareCalendarDays(calendarDayFromUtcDate(date), todaySaoPaulo()) > 0) {
+      throw new BadRequestException('A data do estorno não pode ser futura');
+    }
 
     if (dto.scope === 'series') return this.refundSeries(userId, original, date);
 

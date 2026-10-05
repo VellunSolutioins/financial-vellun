@@ -52,6 +52,7 @@ export function ReminderForm({ reminder, onSuccess, onCancel }: Props) {
   });
 
   const isRecurrent = watch('isRecurrent');
+  const recurrenceEndDate = watch('recurrenceEndDate');
 
   const onSubmit = async (data: FormData) => {
     setSubmitting(true);
@@ -123,7 +124,18 @@ export function ReminderForm({ reminder, onSuccess, onCancel }: Props) {
       {isRecurrent && (
         <div className="space-y-1">
           <Label>Recorrente até (opcional)</Label>
-          <Input type="date" {...register('recurrenceEndDate')} />
+          <div className="flex gap-2">
+            <Input type="date" className="flex-1" {...register('recurrenceEndDate')} />
+            {recurrenceEndDate && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setValue('recurrenceEndDate', '', { shouldDirty: true })}
+              >
+                Limpar
+              </Button>
+            )}
+          </div>
           <p className="text-xs text-muted-foreground">Sem data, repete indefinidamente.</p>
         </div>
       )}
