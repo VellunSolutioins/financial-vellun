@@ -236,6 +236,33 @@ async def test_sem_mencao_usa_a_conta_padrao(mundo):
     assert "na conta Carteira" in resposta
 
 
+async def test_cartao_padrao_vale_mesmo_com_o_llm_dizendo_conta(mundo, monkeypatch):
+    # Caso de produção: sem menção a conta ou cartão, o LLM devolvia "account"
+    # e a compra ia para a conta, ignorando o cartão marcado como padrão.
+    # Aqui o classificador é o real, só o LLM é falso.
+    class Provider:
+        supports_vision = False
+
+        async def extract_intent(self, message, context):
+            return mundo.llm[message].model_copy(deep=True)
+
+    monkeypatch.setattr(mp, "intent_classifier", IntentClassifier(provider=Provider()))
+    mundo.contas[0]["isPreferred"] = True
+    mensagem = "Compra de capa do celular no valor de 38,60"
+    mundo.llm[mensagem] = despesa(
+        amount=38.6,
+        description="capa do celular",
+        account_kind=AccountKindEnum.account,
+        account_name="Itaú",
+    )
+
+    resposta = await mundo.enviar(mensagem)
+
+    assert mundo.payload["accountId"] == "card-acc"
+    assert "settle" not in mundo.payload
+    assert "no cartão Nubank" in resposta
+
+
 async def test_conta_citada_que_nao_existe_pergunta_e_a_resposta_define(mundo):
     mundo.llm["gastei 50 no bradesco"] = despesa(account_name="Bradesco")
 

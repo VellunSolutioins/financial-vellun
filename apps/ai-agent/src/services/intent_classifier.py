@@ -11,6 +11,7 @@ import time
 from datetime import date
 
 from ..schemas.financial_intent import (
+    AccountKindEnum,
     FinancialIntent,
     IntentType,
     RecurrenceTypeEnum,
@@ -20,7 +21,14 @@ from .clock import today_local
 from .llm.base import LlmProvider
 from .llm.factory import create_llm_provider
 from .metrics import metrics
-from .reply_parsers import detect_recurrence, match_names, normalize, parse_amount, parse_date
+from .reply_parsers import (
+    detect_recurrence,
+    match_names,
+    normalize,
+    parse_amount,
+    parse_date,
+    tokens,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,13 +50,18 @@ MOVEMENT_KEYWORDS = (
     "apliquei", "aportei", "aporte", "resgatei", "resgate",
     "empréstimo", "emprestimo", "financiamento", "amortizei", "amortização", "amortizacao",
 )
-# Ainda vai acontecer: o lançamento fica em aberto.
-OPEN_KEYWORDS = (
-    "vence", "vencimento", "vou pagar", "a pagar", "vou receber", "a receber", "boleto",
-    "tenho que pagar", "preciso pagar",
+# A IA só escolhe conta ou cartão quando a mensagem diz (docs/adrs/0020): sem
+# um destes sinais, vale o padrão do usuário. Comparados sem acento.
+ACCOUNT_HINT_RE = re.compile(
+    # "da conta de luz" é a conta que se paga, não a conta bancária.
+    r"\b(n[ao]|d[ao]|pel[ao]|minha) conta\b(?! de\b)"
+    r"|\bdebito\b|\bpix\b|\bdinheiro\b|\bespecie\b|\btransferi"
 )
-# Já aconteceu: pago/recebido.
-SETTLED_KEYWORDS = ("gastei", "paguei", "comprei", "recebi", "ganhei", "caiu", "vendi")
+CARD_HINT_RE = re.compile(r"\bcartao\b|\bcredito\b|\bfatura\b")
+#: Palavras de nome de conta que não identificam nenhuma em particular.
+GENERIC_ACCOUNT_WORDS = frozenset(
+    {"conta", "cartao", "credito", "debito", "de", "do", "da", "corrente", "poupanca"}
+)
 
 # Palavra-chave -> nome de categoria padrão (do seed §7).
 CATEGORY_KEYWORDS: dict[str, str] = {
@@ -234,19 +247,10 @@ class IntentClassifier:
             amount_basis=recurrence.amount_basis,
             recurrence_frequency=recurrence.frequency,
             occurrences=recurrence.occurrences,
-            settled=self._detect_settled(text),
         )
 
         intent.confidence = self._estimate_confidence(intent)
         return self._finalize(intent)
-
-    def _detect_settled(self, text: str) -> bool | None:
-        """Já pago/recebido, ainda em aberto, ou desconhecido (a API decide pela data)."""
-        if self._has_any(text, OPEN_KEYWORDS):
-            return False
-        if self._has_any(text, SETTLED_KEYWORDS):
-            return True
-        return None
 
     def _detect_type(self, text: str) -> TransactionTypeEnum | None:
         if self._has_any(text, INCOME_KEYWORDS):
@@ -365,7 +369,49 @@ class IntentClassifier:
         ):
             self._override(intent, "category_name", None)
 
+        self._drop_unmentioned_account(message, intent)
         return intent
+
+    def _drop_unmentioned_account(self, message: str, intent: FinancialIntent) -> None:
+        """Conta ou cartão só valem se a mensagem disser (docs/adrs/0020).
+
+        Em produção o LLM devolvia ``account_kind="account"`` (e às vezes o
+        nome da conta mais óbvia) para "compra de capa do celular no valor de
+        38,60". Isso passava por cima do cartão que o usuário marcou como
+        padrão. Sem sinal no texto, os campos são anulados e quem decide é
+        ``transaction_creator._resolve_account``: o padrão do usuário.
+        """
+        text = normalize(message)
+        words = set(tokens(message))
+
+        if intent.account_name:
+            name_words = tokens(intent.account_name)
+            distinctive = [w for w in name_words if w not in GENERIC_ACCOUNT_WORDS]
+            # Nome só de palavras genéricas ("Conta corrente"): precisa vir inteiro.
+            mentioned = (
+                any(w in words for w in distinctive)
+                if distinctive
+                else bool(name_words) and all(w in words for w in name_words)
+            )
+            if not mentioned:
+                self._override(intent, "account_name", None)
+
+        names_card = bool(intent.account_name) and "(cartao de credito)" in normalize(
+            intent.account_name
+        )
+        names_account = bool(intent.account_name) and not names_card
+        if (
+            intent.account_kind == AccountKindEnum.account
+            and not names_account
+            and not ACCOUNT_HINT_RE.search(text)
+        ):
+            self._override(intent, "account_kind", None)
+        elif (
+            intent.account_kind == AccountKindEnum.card
+            and not names_card
+            and not CARD_HINT_RE.search(text)
+        ):
+            self._override(intent, "account_kind", None)
 
     @staticmethod
     def _override(intent: FinancialIntent, field: str, value: object) -> None:

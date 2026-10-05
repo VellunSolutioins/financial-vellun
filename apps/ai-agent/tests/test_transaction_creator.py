@@ -343,22 +343,32 @@ async def test_fixo_envia_frequencia_e_repeticoes(catalogo, api):
     )
 
 
-# ── Pago na hora × em aberto (docs/adrs/0018) ──────────────────────────────
+# ── Pago ou a pagar é regra da API (docs/adrs/0020) ────────────────────────
 
 
-async def test_pago_na_hora_envia_settle(catalogo, api):
-    await TransactionCreator().create_from_intent(intent(settled=True), "u1", "gastei 47,50")
-    assert api[0]["settle"] is True
-
-
-async def test_conta_a_pagar_fica_em_aberto_e_a_resposta_diz(catalogo, api):
-    resultado = await TransactionCreator().create_from_intent(
-        intent(settled=False), "u1", "luz vence dia 30"
-    )
-    assert api[0]["settle"] is False
-    assert "Ficou em aberto" in resultado["message"]
-
-
-async def test_sem_indicacao_nao_envia_settle(catalogo, api):
-    await TransactionCreator().create_from_intent(intent(), "u1", "mercado 47,50")
+async def test_nunca_envia_settle_a_api_decide(catalogo, api):
+    await TransactionCreator().create_from_intent(intent(), "u1", "gastei 47,50")
     assert "settle" not in api[0]
+
+
+async def test_data_futura_fica_em_aberto_e_a_resposta_diz(catalogo, api, monkeypatch):
+    monkeypatch.setattr(modulo, "today_local", lambda: date(2026, 9, 20))
+    resultado = await TransactionCreator().create_from_intent(
+        intent(transaction_date="2026-09-30"), "u1", "luz vence dia 30"
+    )
+    assert "settle" not in api[0]
+    assert "Ficou em aberto: quando pagar, registre no app." in resultado["message"]
+
+
+async def test_data_de_hoje_nasce_paga_sem_aviso(catalogo, api, monkeypatch):
+    monkeypatch.setattr(modulo, "today_local", lambda: date(2026, 9, 20))
+    resultado = await TransactionCreator().create_from_intent(intent(), "u1", "mercado 47,50")
+    assert "Ficou em aberto" not in resultado["message"]
+
+
+async def test_data_futura_no_cartao_nao_fala_em_aberto(catalogo, api, monkeypatch):
+    monkeypatch.setattr(modulo, "today_local", lambda: date(2026, 9, 20))
+    resultado = await TransactionCreator().create_from_intent(
+        intent(transaction_date="2026-09-30", account_kind=AccountKindEnum.card), "u1", "tv"
+    )
+    assert "Ficou em aberto" not in resultado["message"]

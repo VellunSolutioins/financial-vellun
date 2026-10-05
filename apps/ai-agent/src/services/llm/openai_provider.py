@@ -32,8 +32,6 @@ se estiver ilegível.
 - `recurrence_type`: "parcelado" se o comprovante mostrar parcelamento (ex.: \
 "3x", "parcela 1/3"), com `installments` e `amount_basis` ("total" se o valor \
 lido for o total da compra, "installment" se for o de uma parcela); senão "avulso".
-- `settled`: true para comprovante de pagamento já feito; false para boleto ou \
-fatura ainda não paga; nulo se não der para saber.
 - `confidence`: 0.0 a 1.0, sua confiança na leitura da imagem.
 """
 
@@ -56,10 +54,6 @@ não souber.
 recebimentos/receitas/vendas (ex.: "venda", "vendi"). Pix ou transferência \
 para outra pessoa ou empresa é "expense"; recebido de outra pessoa é \
 "income". Rendimento de investimento é "income"; juros pagos, "expense".
-- `settled`: true quando o lançamento já aconteceu e foi pago/recebido \
-("gastei", "paguei", "comprei", "recebi", "caiu"); false quando ainda vai \
-ser pago/recebido ("vence dia 10", "vou pagar", "conta a pagar", "a \
-receber", "boleto para"); nulo quando não der para saber.
 - `amount`: valor numérico (use ponto decimal). Interprete vírgula como \
 separador decimal brasileiro (ex.: "47,50" -> 47.5).
 - `description`: descrição curta do lançamento.
@@ -76,7 +70,10 @@ nome, use o cartão só quando o usuário indicar cartão/crédito. Sem menção
 conta ou cartão, deixe nulo (o sistema usa a conta padrão do usuário).
 - `account_kind`: "card" quando o usuário indicar que pagou no cartão de \
 crédito ("no cartão", "no crédito"), mesmo sem dizer qual; "account" quando \
-indicar conta, débito, Pix ou dinheiro; nulo sem indicação.
+indicar conta, débito, Pix ou dinheiro; nulo sem indicação. "Gastei", \
+"paguei", "comprei" e "compra" não indicam conta nem cartão: sem menção \
+explícita, `account_name` e `account_kind` ficam nulos (o padrão do usuário \
+pode ser um cartão).
 - `transaction_date`: data em formato ISO (YYYY-MM-DD), resolvida a partir da \
 "Data atual" fornecida: "hoje", "ontem", "anteontem"; "dia 10" é o dia 10 do \
 mês atual, ou do mês anterior se o dia 10 ainda não chegou (exceto em conta a \
