@@ -201,6 +201,22 @@ integration('vencimento × pagamento (PostgreSQL)', () => {
     expect(await env.balance(accountId)).toBe(100);
   });
 
+  it('recorrência em conta nasce a pagar; previsão é escolha de quem cria', async () => {
+    const accountId = await env.account(userId, 1000);
+    const bill = await env.transactions.create(userId, {
+      accountId,
+      type: 'expense',
+      amount: 100,
+      description: 'Internet',
+      transactionDate: dayFromToday(-3),
+      recurrenceType: 'fixo',
+      recurrenceMonths: 2,
+    });
+    // Sem marcar "Previsão": conta a pagar, já vencida, sem mexer no saldo.
+    expect(bill).toMatchObject({ state: 'open', forecast: false, isOverdue: true });
+    expect(await env.balance(accountId)).toBe(1000);
+  });
+
   it('recorrência: previsão vencida segue visível; pausar não apaga o que foi pago', async () => {
     const accountId = await env.account(userId, 1000);
     const first = await env.transactions.create(userId, {
@@ -211,8 +227,9 @@ integration('vencimento × pagamento (PostgreSQL)', () => {
       transactionDate: dayFromToday(-20),
       recurrenceType: 'fixo',
       recurrenceMonths: 3,
+      forecast: true,
     });
-    // Recorrência nasce como previsão, não como obrigação nem pagamento.
+    // Marcada como previsão: não é obrigação nem pagamento.
     expect(first).toMatchObject({ state: 'forecast', forecast: true, isOverdue: true });
     expect(await env.balance(accountId)).toBe(1000);
 
@@ -250,7 +267,12 @@ integration('vencimento × pagamento (PostgreSQL)', () => {
     await create(40, dayFromToday(0)); // à vista: realizado
     await create(60, dayFromToday(-1), { settle: false }); // fato passado, em aberto: realizado
     await create(500, dayFromToday(3)); // conta futura: prevista
-    await create(30, dayFromToday(-2), { recurrenceType: 'fixo', recurrenceMonths: 2 }); // previsão não paga
+    // Recorrência marcada como previsão, não paga: fica de fora do realizado.
+    await create(30, dayFromToday(-2), {
+      recurrenceType: 'fixo',
+      recurrenceMonths: 2,
+      forecast: true,
+    });
     const period = {
       periodStart: dayFromToday(-40),
       periodEnd: dayFromToday(40),

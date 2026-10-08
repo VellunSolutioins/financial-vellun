@@ -12,6 +12,7 @@ import { useConfirm } from '@/components/ui/confirm';
 import { FixedSummary } from '@/components/transactions/FixedSummary';
 import { RecurrenceForm } from '@/components/transactions/RecurrenceForm';
 import { TransactionForm, frequencyLabels } from '@/components/transactions/TransactionForm';
+import { useFinancialResources } from '@/hooks/useFinancialResources';
 import { useRecurrences, type Recurrence } from '@/hooks/useRecurrences';
 import { apiClient } from '@/lib/api-client';
 import { cn, formatDateBR } from '@/lib/utils';
@@ -29,6 +30,8 @@ function formatCurrency(v: number) {
  */
 export function RecurrencesView() {
   const { data, loading, error, refetch } = useRecurrences();
+  const { data: resources } = useFinancialResources();
+  const cardAccountIds = new Set(resources?.cards.map((c) => c.accountId) ?? []);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<Recurrence | undefined>();
   const [page, setPage] = useState(1);
@@ -151,8 +154,9 @@ export function RecurrencesView() {
                         <p className="truncate font-medium">{r.description}</p>
                         <p className="text-xs text-muted-foreground">
                           {r.type === 'income' ? 'Receita' : 'Despesa'} ·{' '}
-                          {frequencyLabels[r.frequency]} · Dia {r.dueDay} ·{' '}
-                          {r.forecast ? 'previsão' : 'compromisso firmado'}
+                          {frequencyLabels[r.frequency]} · Dia {r.dueDay}
+                          {/* No cartão a marca não tem efeito: lá vale a data da cobrança. */}
+                          {r.forecast && !cardAccountIds.has(r.accountId) && ' · previsão'}
                         </p>
                       </div>
                       <span className={cn('shrink-0', amountClass(r))}>

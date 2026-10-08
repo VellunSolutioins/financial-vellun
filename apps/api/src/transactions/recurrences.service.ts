@@ -18,9 +18,9 @@ import { UpdateRecurrenceDto } from './dto/update-recurrence.dto';
  * passadas e as já pagas ficam como estão, porque já aconteceram: cancelar a
  * assinatura não apaga o que foi gasto nem pago (docs/adrs/0018).
  *
- * As ocorrências nascem como previsão (`forecast`): não são obrigação nem
- * dívida. "Compromisso firmado" (`forecast: false`) marca a série inteira como
- * obrigação constituída — escolha do usuário, nunca inferida da recorrência.
+ * As ocorrências nascem a pagar (ou a receber). "Previsão" (`forecast: true`)
+ * marca a série inteira como estimativa, não como conta — escolha do usuário
+ * (docs/adrs/0020). No cartão a marca não tem efeito: lá vale a data.
  */
 
 const occurrenceInclude = {
@@ -73,7 +73,7 @@ export function groupRecurrences(occurrences: Occurrence[]) {
       frequency: next.recurrenceFrequency ?? 'monthly',
       dueDay: Math.max(...list.map((o) => o.transactionDate.getUTCDate())),
       isActive: confirmed.length > 0,
-      /** Previsão (cancelável) ou compromisso firmado. */
+      /** Previsão (estimativa) ou conta a pagar/receber. */
       forecast: next.forecast,
       nextDate: next.transactionDate,
       remaining: confirmed.length,

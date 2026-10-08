@@ -67,8 +67,8 @@ export class CreateTransactionDto {
   @ApiProperty({
     required: false,
     description:
-      'Previsão (não é obrigação constituída). Padrão: verdadeiro no fixo, falso no resto. ' +
-      'No fixo, `false` marca um compromisso firmado (ex.: aluguel com contrato).',
+      'Previsão em vez de conta a pagar ou a receber. Padrão: falso. Só faz diferença na ' +
+      'recorrência (fixo) em conta comum; no cartão, o que separa previsão de cobrança é a data.',
   })
   @IsOptional()
   @IsBoolean()
