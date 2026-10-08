@@ -27,6 +27,7 @@ import {
 import { cents } from '../common/db';
 import { CardLedgerService, toDbDate } from '../credit-cards/card-ledger.service';
 import { cardNeedsSetup } from '../credit-cards/card-setup';
+import { findCardInvoiceCategoryId } from '../categories/default-categories';
 import { cardPosition, cycleState } from '../credit-cards/invoice-cycle';
 import {
   realizedSpendingFilter,
@@ -828,6 +829,115 @@ export class DashboardService {
   }
 
   /** Categorias de despesa líquida, com nome, natureza e participação, da maior para a menor. */
+  /**
+   * "Saiu da conta" (docs/adrs/0021): o que saiu das contas no período,
+   * por categoria. São as despesas em conta comum, no mesmo critério dos
+   * gastos do mês, mais os pagamentos de fatura — na categoria "Fatura do
+   * cartão" e no mês em que o dinheiro saiu. Sem conta no recorte, vazio.
+   */
+  async getAccountsSpending(
+    userId: string,
+    periodStart?: string,
+    periodEnd?: string,
+    filter: ResourceFilterDto = {},
+  ) {
+    const accountIds = await this.resourceScope.resolve(userId, {
+      accountIds: filter.accountIds,
+    });
+    if (!accountIds) return { total: 0, slices: [] };
+    const { start, end } = periodBounds(periodStart, periodEnd);
+    const endOfToday = endOfDayUtc(dateOnlyString(todaySaoPaulo()));
+    const inAccounts = { userId, accountId: { in: accountIds } };
+
+    const [expenses, invoicePayments, invoiceCategoryId] = await Promise.all([
+      this.prisma.transaction.groupBy({
+        by: ['categoryId', 'type'],
+        where: { ...inAccounts, ...realizedSpendingWhere(start, end, endOfToday) },
+        _sum: { amount: true },
+      }),
+      // Perna de saída do pagamento de fatura: a data dela é a do pagamento.
+      this.prisma.transaction.groupBy({
+        by: ['categoryId'],
+        where: {
+          ...inAccounts,
+          status: 'confirmed',
+          type: 'transfer',
+          transferDirection: 'out',
+          cardPaymentId: { not: null },
+          transactionDate: { gte: start, lte: end },
+        },
+        _sum: { amount: true },
+      }),
+      findCardInvoiceCategoryId(this.prisma),
+    ]);
+
+    const byCategory = netExpenseByCategory(expenses);
+    for (const row of invoicePayments) {
+      // Pagamento gravado antes de a categoria existir entra nela mesmo assim.
+      const key = row.categoryId ?? invoiceCategoryId;
+      byCategory.set(key, (byCategory.get(key) ?? 0) + Number(row._sum.amount ?? 0));
+    }
+    const total = [...byCategory.values()].reduce((sum, value) => sum + value, 0);
+    return { total: roundCents(total), slices: await this.categoryTotals(byCategory, total) };
+  }
+
+  /**
+   * "Foi no cartão" (docs/adrs/0021): das compras do período nos cartões
+   * (mesmo critério dos gastos do mês: a parcela no mês dela), a parte que
+   * ainda não foi paga, por categoria. Fatura paga inteira tira as compras
+   * dela daqui — o dinheiro aparece em "Saiu da conta"; paga em parte,
+   * sai a parte proporcional de cada compra (`unpaidShareByInvoice`).
+   * Cartão sem fechamento configurado não tem fatura: as compras contam
+   * inteiras. Sem cartão no recorte, vazio.
+   */
+  async getCardsUnpaid(
+    userId: string,
+    periodStart?: string,
+    periodEnd?: string,
+    filter: ResourceFilterDto = {},
+  ) {
+    const cardIds = [...new Set(filter.cardIds ?? [])];
+    const accountIds = await this.resourceScope.resolve(userId, { cardIds });
+    if (!accountIds) return { total: 0, slices: [] };
+    const { start, end } = periodBounds(periodStart, periodEnd);
+    const endOfToday = endOfDayUtc(dateOnlyString(todaySaoPaulo()));
+
+    const [purchases, shares, cards] = await Promise.all([
+      this.prisma.transaction.findMany({
+        where: {
+          userId,
+          accountId: { in: accountIds },
+          type: 'expense',
+          ...realizedSpendingWhere(start, end, endOfToday),
+        },
+        select: { amount: true, categoryId: true, invoiceId: true, accountId: true },
+      }),
+      this.cardLedger.unpaidShareByInvoice(cardIds),
+      this.prisma.creditCard.findMany({
+        where: { id: { in: cardIds } },
+        select: { accountId: true, closingDay: true, dueDay: true, invoiceTrackingStart: true },
+      }),
+    ]);
+    const withoutInvoices = new Set(cards.filter(cardNeedsSetup).map((c) => c.accountId));
+
+    const byCategory = new Map<string | null, number>();
+    for (const purchase of purchases) {
+      const amountCents = cents(purchase.amount);
+      const unpaidCents = purchase.invoiceId
+        ? Math.round(amountCents * (shares.get(purchase.invoiceId) ?? 0))
+        : withoutInvoices.has(purchase.accountId)
+          ? amountCents
+          : 0; // anterior ao controle: coberta pela posição inicial
+      if (unpaidCents === 0) continue;
+      byCategory.set(
+        purchase.categoryId,
+        (byCategory.get(purchase.categoryId) ?? 0) + unpaidCents / 100,
+      );
+    }
+    const total = [...byCategory.values()].reduce((sum, value) => sum + value, 0);
+    return { total: roundCents(total), slices: await this.categoryTotals(byCategory, total) };
+  }
+
   private async categoryTotals(byCategory: Map<string | null, number>, totalExpense: number) {
     const categoryIds = [...byCategory.keys()].filter(Boolean) as string[];
     const categories = await this.prisma.category.findMany({

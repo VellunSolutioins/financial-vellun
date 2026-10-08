@@ -3,6 +3,7 @@ import { ProfileType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
+import { withoutShadowedDefaults } from './default-categories';
 
 @Injectable()
 export class CategoriesService {
@@ -25,7 +26,7 @@ export class CategoriesService {
         },
       },
     });
-    return categories.map(({ _count, ...category }) => ({
+    return withoutShadowedDefaults(categories).map(({ _count, ...category }) => ({
       ...category,
       transactionCount: _count.transactions,
       spendingGoalCount: _count.spendingGoals,

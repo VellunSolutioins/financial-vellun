@@ -21,6 +21,7 @@ import {
   assertInstallmentIsExpense,
 } from '../transactions/transactions.service';
 import { CardLedgerService } from '../credit-cards/card-ledger.service';
+import { withoutShadowedDefaults } from '../categories/default-categories';
 import { cardNeedsSetup } from '../credit-cards/card-setup';
 import { writeEntrySeries } from '../transactions/entry-writer';
 
@@ -85,13 +86,15 @@ export class InternalService {
     if (!user) throw new NotFoundException('Usuário não encontrado');
     await this.assertCanUseProduct(userId);
 
-    return this.prisma.category.findMany({
+    const categories = await this.prisma.category.findMany({
       where: {
         profileType: user.profileType,
         OR: [{ userId }, { isDefault: true, userId: null }],
       },
       orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
     });
+    // Mesma lista do app: padrão com o nome de uma categoria do usuário some.
+    return withoutShadowedDefaults(categories);
   }
 
   /**

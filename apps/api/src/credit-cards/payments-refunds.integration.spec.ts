@@ -294,7 +294,7 @@ integration('pagamentos de fatura e estornos (PostgreSQL)', () => {
     expect(dash).toMatchObject({ income: { received: 0 }, spending: { realized: 50 } });
   });
 
-  it('estorno de parcelado: cancela as não faturadas e estorna as faturadas', async () => {
+  it('estorno de parcelado em fatura aberta: cancela as parcelas, e o que foi pago antes do fechamento vira crédito', async () => {
     const checking = await newAccount(1000);
     const card = await newCard();
     const first = await buy(card.accountId, 90, today, {
@@ -302,24 +302,23 @@ integration('pagamentos de fatura e estornos (PostgreSQL)', () => {
       installments: 3,
     });
     const currentInvoice = await invoiceIdOf(first.id);
-    // Pagamento antecipado trava a parcela 1 (fatura com pagamento ativo).
+    // Pagamento antes do fechamento não trava a parcela 1: nada foi faturado ainda.
     await pay(card.id, currentInvoice, checking, 10);
 
     const result = await transactions.refund(userId, first.id, { date: today, scope: 'series' });
-    expect(result.refunds.map((r) => Number(r.amount))).toEqual([30]);
-    expect(result.cancelled).toHaveLength(2);
+    expect(result.refunds).toEqual([]);
+    expect(result.cancelled).toHaveLength(3);
 
     const series = await prisma.transaction.findMany({
       where: { seriesId: first.seriesId },
       orderBy: { installmentNumber: 'asc' },
     });
-    expect(series.map((t) => t.status)).toEqual(['confirmed', 'cancelled', 'cancelled']);
-    expect(series.slice(1).map((t) => t.invoiceId)).toEqual([null, null]);
+    expect(series.map((t) => t.status)).toEqual(['cancelled', 'cancelled', 'cancelled']);
     const view = await cards.findOne(userId, card.id);
     expect(view).toMatchObject({ totalDebt: 0, credit: 10, futureInstallments: 0 });
   });
 
-  it('fatura fechada ou paga trava valor e data, não descrição; pernas de pagamento só via reversão', async () => {
+  it('fatura fechada trava valor e data, não descrição; a aberta não trava nem com pagamento; pernas só via reversão', async () => {
     const checking = await newAccount(1000);
     const card = await newCard();
     const closed = await buy(card.accountId, 40, '2026-06-05');
@@ -338,10 +337,12 @@ integration('pagamentos de fatura e estornos (PostgreSQL)', () => {
     const open = await buy(card.accountId, 25, today);
     const openInvoice = await invoiceIdOf(open.id);
     await expect(transactions.update(userId, open.id, { amount: 26 })).resolves.toBeDefined();
+    // Pagamento antes do fechamento não congela as compras do mês (docs/adrs/0021).
     const payment = await pay(card.id, openInvoice, checking, 5);
-    await expect(transactions.update(userId, open.id, { amount: 27 })).rejects.toMatchObject({
-      status: 409,
+    await expect(transactions.update(userId, open.id, { amount: 27 })).resolves.toMatchObject({
+      amount: expect.anything(),
     });
+    expect(await invoiceView(card.id, openInvoice)).toMatchObject({ total: 27, remaining: 22 });
 
     const leg = await prisma.transaction.findFirstOrThrow({
       where: { cardPaymentId: payment.id, transferDirection: 'out' },
@@ -350,6 +351,141 @@ integration('pagamentos de fatura e estornos (PostgreSQL)', () => {
       status: 409,
     });
     await expect(transactions.remove(userId, leg.id, true)).rejects.toMatchObject({ status: 409 });
+  });
+
+  // ── Pagamento antes do fechamento (docs/adrs/0021) ─────────────────────────
+
+  it('fatura aberta: paga uma parte, entra compra nova, paga o resto — o limite acompanha', async () => {
+    const checking = await newAccount(1000);
+    const card = await newCard();
+    const first = await buy(card.accountId, 300, today);
+    const openInvoice = await invoiceIdOf(first.id);
+    expect(await invoiceView(card.id, openInvoice)).toMatchObject({
+      state: 'open',
+      remaining: 300,
+    });
+    expect((await cards.findOne(userId, card.id)).available).toBe(4700);
+
+    // Uma parte agora: sai da conta, abate a fatura e libera o limite na hora.
+    await pay(card.id, openInvoice, checking, 100);
+    expect(await balance(checking)).toBe(900);
+    expect(await invoiceView(card.id, openInvoice)).toMatchObject({
+      state: 'open',
+      total: 300,
+      payments: 100,
+      remaining: 200,
+    });
+    expect((await cards.findOne(userId, card.id)).available).toBe(4800);
+
+    // Compra feita depois do pagamento entra na mesma fatura.
+    const second = await buy(card.accountId, 50, today);
+    expect(await invoiceIdOf(second.id)).toBe(openInvoice);
+    expect(await invoiceView(card.id, openInvoice)).toMatchObject({ total: 350, remaining: 250 });
+
+    // O resto: nada a pagar até aqui, e a fatura segue aberta.
+    await pay(card.id, openInvoice, checking, 250);
+    expect(await balance(checking)).toBe(650);
+    expect(await invoiceView(card.id, openInvoice)).toMatchObject({
+      state: 'open',
+      remaining: 0,
+      paymentStatus: 'paid',
+    });
+    expect(await cards.findOne(userId, card.id)).toMatchObject({ totalDebt: 0, available: 5000 });
+  });
+
+  it('fatura aberta já paga: a compra continua editável e excluível, e a sobra vira crédito', async () => {
+    const checking = await newAccount(1000);
+    const card = await newCard();
+    const purchase = await buy(card.accountId, 80, today);
+    const openInvoice = await invoiceIdOf(purchase.id);
+    await pay(card.id, openInvoice, checking, 80);
+
+    // Corrigir o valor para menos: R$ 20 pagos a mais viram crédito.
+    await transactions.update(userId, purchase.id, { amount: 60 });
+    expect(await cards.findOne(userId, card.id)).toMatchObject({ totalDebt: 0, credit: 20 });
+
+    // Excluir a compra: tudo o que foi pago vira crédito; o saldo da conta não volta sozinho.
+    await transactions.remove(userId, purchase.id);
+    expect(await cards.findOne(userId, card.id)).toMatchObject({ totalDebt: 0, credit: 80 });
+    expect(await balance(checking)).toBe(920);
+  });
+
+  it('pagar a mais na fatura aberta abate a seguinte; desfazer devolve tudo; fatura futura não recebe pagamento', async () => {
+    const checking = await newAccount(1000);
+    const card = await newCard();
+    const first = await buy(card.accountId, 90, today, {
+      recurrenceType: 'parcelado',
+      installments: 3,
+    });
+    const [, second, third] = await prisma.transaction.findMany({
+      where: { seriesId: first.seriesId },
+      orderBy: { installmentNumber: 'asc' },
+    });
+    const openInvoice = await invoiceIdOf(first.id);
+
+    // A fatura que ainda não começou só tem parcelas futuras: o caminho é adiantar.
+    await expect(pay(card.id, third.invoiceId!, checking, 30)).rejects.toMatchObject({
+      status: 400,
+    });
+
+    // R$ 50 na aberta (R$ 30): os R$ 20 a mais abatem a fatura seguinte.
+    const payment = await pay(card.id, openInvoice, checking, 50);
+    expect(await invoiceView(card.id, openInvoice)).toMatchObject({ remaining: 0, surplus: 20 });
+    expect(await invoiceView(card.id, second.invoiceId!)).toMatchObject({
+      total: 30,
+      remaining: 10,
+    });
+    expect((await cards.findOne(userId, card.id)).totalDebt).toBe(40);
+
+    // Desfazer: o dinheiro volta para a conta e a dívida volta inteira.
+    await payments.reverse(userId, card.id, openInvoice, payment.id);
+    expect(await balance(checking)).toBe(1000);
+    expect((await cards.findOne(userId, card.id)).totalDebt).toBe(90);
+    expect(await invoiceView(card.id, second.invoiceId!)).toMatchObject({ remaining: 30 });
+  });
+
+  it('dashboard: a fatura paga entra em "Saiu da conta" como "Fatura do cartão" e sai de "Foi no cartão"', async () => {
+    const checking = await newAccount(1000);
+    const card = await newCard();
+    await buy(card.accountId, 300, today); // Alimentação
+    const uncategorized = await buy(card.accountId, 100, today, { categoryId: undefined });
+    const openInvoice = await invoiceIdOf(uncategorized.id);
+
+    const byCategory = (chart: { slices: { categoryName: string; total: number }[] }) =>
+      Object.fromEntries(chart.slices.map((s) => [s.categoryName, s.total]));
+    const accountsChart = () =>
+      dashboard.getAccountsSpending(userId, `${month}-01`, monthEnd, { accountIds: [checking] });
+    const cardsChart = () =>
+      dashboard.getCardsUnpaid(userId, `${month}-01`, monthEnd, { cardIds: [card.id] });
+
+    // Nada pago: nada saiu da conta; tudo ainda está no cartão.
+    expect(await accountsChart()).toMatchObject({ total: 0, slices: [] });
+    expect(byCategory(await cardsChart())).toEqual({ Alimentação: 300, 'Sem categoria': 100 });
+
+    // Metade paga: R$ 200 saem da conta; no cartão fica metade de cada categoria.
+    const payment = await pay(card.id, openInvoice, checking, 200);
+    expect(byCategory(await accountsChart())).toEqual({ 'Fatura do cartão': 200 });
+    expect(byCategory(await cardsChart())).toEqual({ Alimentação: 150, 'Sem categoria': 50 });
+    // As duas pernas do pagamento levam a categoria.
+    const legs = await prisma.transaction.findMany({
+      where: { cardPaymentId: payment.id },
+      include: { category: true },
+    });
+    expect(legs.map((leg) => leg.category?.name)).toEqual(['Fatura do cartão', 'Fatura do cartão']);
+
+    // Tudo pago: as compras saem do gráfico do cartão.
+    await pay(card.id, openInvoice, checking, 200);
+    expect(await accountsChart()).toMatchObject({ total: 400 });
+    expect(await cardsChart()).toMatchObject({ total: 0, slices: [] });
+    // "Para onde foi seu dinheiro" continua por categoria da compra, sem a fatura.
+    const summary = await dashboard.getSummary(userId, `${month}-01`, monthEnd, {
+      cardIds: [card.id],
+      accountIds: [checking],
+    });
+    expect(byCategory({ slices: summary.expensesByCategory })).toEqual({
+      Alimentação: 300,
+      'Sem categoria': 100,
+    });
   });
 
   it('cartão não recebe receita; isola pagamentos e estornos por usuário', async () => {
