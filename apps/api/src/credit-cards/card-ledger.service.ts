@@ -12,6 +12,7 @@ import {
   parseDateOnly,
   todaySaoPaulo,
 } from '../common/date.util';
+import { reconcileCard } from './card-reconciliation';
 import { cardNeedsSetup } from './card-setup';
 import { CycleConfig, InvoiceAmounts, InvoiceSpan, cycleFor, toCents } from './invoice-cycle';
 
@@ -173,9 +174,14 @@ export class CardLedgerService {
   /**
    * Por que cada lançamento não pode mudar de valor, data, conta, tipo ou
    * status. Perna de pagamento ou de transferência só muda revertendo;
-   * posição inicial só pela tela dela; cobrança em fatura fechada ou com
-   * pagamento ativo só se corrige com estorno. Descrição e categoria continuam
-   * editáveis (não mexem em valores).
+   * posição inicial só pela tela dela; cobrança em fatura fechada só se
+   * corrige com estorno. Descrição e categoria continuam editáveis (não mexem
+   * em valores).
+   *
+   * Pagamento não trava (docs/adrs/0021): a fatura aberta pode ser paga antes
+   * do fechamento, inteira ou em parte, e as compras do mês seguem editáveis.
+   * Os valores de fatura são derivados: se uma compra já paga muda ou sai, a
+   * sobra do pagamento vira crédito para as próximas faturas.
    */
   async lockReasons(
     txs: readonly {
@@ -192,11 +198,7 @@ export class CardLedgerService {
     const invoices = invoiceIds.length
       ? await db.creditCardInvoice.findMany({
           where: { id: { in: invoiceIds } },
-          select: {
-            id: true,
-            closingDate: true,
-            _count: { select: { payments: { where: { status: 'active' } } } },
-          },
+          select: { id: true, closingDate: true },
         })
       : [];
     const today = todaySaoPaulo();
@@ -230,14 +232,32 @@ export class CardLedgerService {
           tx.id,
           'Este lançamento está em uma fatura fechada. Valor, data, cartão e cancelamento não mudam mais: use estorno.',
         );
-      } else if (invoice._count.payments > 0) {
-        reasons.set(
-          tx.id,
-          'A fatura deste lançamento já tem pagamento. Valor, data, cartão e cancelamento não mudam mais: use estorno.',
-        );
       }
     }
     return reasons;
+  }
+
+  /**
+   * Para cada fatura dos cartões, a fração do cobrado que ainda falta pagar
+   * (0 a 1), já com pagamentos, estornos e créditos de outras faturas. Uma
+   * compra de R$ 100 numa fatura paga pela metade ainda deve R$ 50: é assim
+   * que se reparte por compra ou por categoria o que falta de uma fatura.
+   */
+  async unpaidShareByInvoice(
+    cardIds: readonly string[],
+    db: Db = this.prisma,
+  ): Promise<Map<string, number>> {
+    const shares = new Map<string, number>();
+    const amounts = await this.invoicesWithAmounts(cardIds, db);
+    for (const invoices of amounts.values()) {
+      for (const row of reconcileCard(invoices).invoices) {
+        shares.set(
+          row.invoice.span.id,
+          row.debitCents > 0 ? row.remainingCents / row.debitCents : 0,
+        );
+      }
+    }
+    return shares;
   }
 
   /** Depois de excluir lançamentos de uma conta: some com faturas futuras vazias. */

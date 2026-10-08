@@ -37,3 +37,4 @@ decisão não seja revertida sem que o contexto original seja considerado.
 | [0018](0018-gasto-obrigacao-liquidacao.md)                  | Gasto, previsão, obrigação e liquidação             | Aceito |
 | [0019](0019-gasto-parcelado-no-mes-da-parcela.md)           | Gasto parcelado conta no mês de cada parcela        | Aceito |
 | [0020](0020-clareza-para-leigos-nas-telas.md)               | Clareza para leigos nas telas                       | Aceito |
+| [0021](0021-pagamento-antes-do-fechamento.md)               | Pagamento da fatura antes do fechamento             | Aceito |

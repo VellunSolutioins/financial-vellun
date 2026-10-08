@@ -21,7 +21,12 @@ import {
   invoiceStatus,
 } from '@/components/credit-cards/invoice-labels';
 import { useCardInvoices, useInvoiceDetail } from '@/hooks/useCardInvoices';
-import { useCreditCards, type CreditCard, type InvoiceItem } from '@/hooks/useCreditCards';
+import {
+  useCreditCards,
+  type CreditCard,
+  type InvoiceItem,
+  type InvoicePayment,
+} from '@/hooks/useCreditCards';
 import { useFinancialResources } from '@/hooks/useFinancialResources';
 import { apiClient } from '@/lib/api-client';
 import { cn, formatDateBR } from '@/lib/utils';
@@ -94,6 +99,26 @@ function ItemAmount({ item }: { item: InvoiceItem }) {
 
 const parcelOf = (item: InvoiceItem) =>
   item.installmentTotal ? `${item.installmentNumber}/${item.installmentTotal}` : '';
+
+/**
+ * Linha do extrato da fatura: uma compra (ou estorno, saldo anterior) ou um
+ * pagamento. O pagamento entra como linha para a soma bater com o que falta
+ * pagar — pago antes do fechamento, a fatura mostra R$ 0,00 e o porquê.
+ */
+type StatementRow =
+  | { kind: 'item'; key: string; item: InvoiceItem }
+  | { kind: 'payment'; key: string; payment: InvoicePayment; early: boolean };
+
+const paymentLabel = (row: { early: boolean }) =>
+  row.early ? 'Pagamento antecipado' : 'Pagamento da fatura';
+
+function PaymentAmount({ payment }: { payment: InvoicePayment }) {
+  return (
+    <span className="whitespace-nowrap font-medium text-emerald-600">
+      −{formatCurrency(payment.amount)}
+    </span>
+  );
+}
 
 /**
  * Faturas de um cartão (docs/adrs/0020): o limite do cartão escolhido, o total
@@ -200,9 +225,22 @@ export function InvoicesView() {
   const otherOverdue = invoices?.find((i) => i.isOverdue && i.id !== invoice?.id) ?? null;
 
   const items = detail?.items ?? [];
-  const totalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+  // Pagamentos ativos entram no extrato, depois das compras; os desfeitos
+  // ficam só na lista de pagamentos do card.
+  const activePayments = (detail?.paymentRecords ?? []).filter((p) => p.status === 'active');
+  const rows: StatementRow[] = [
+    ...items.map((item) => ({ kind: 'item' as const, key: item.id, item })),
+    ...activePayments.map((payment) => ({
+      kind: 'payment' as const,
+      key: `pagamento-${payment.id}`,
+      payment,
+      // Pago antes de a fatura fechar.
+      early: !!detail && payment.paymentDate.slice(0, 10) < detail.closingDate.slice(0, 10),
+    })),
+  ];
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
-  const pageItems = items.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const pageRows = rows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   const charged = items.filter((i) => !i.isForecast);
 
   const header = (
@@ -258,6 +296,11 @@ export function InvoicesView() {
   }
 
   const status = invoice ? invoiceStatus(invoice) : null;
+  // Pagamento antes do fechamento (docs/adrs/0021): só na fatura do ciclo
+  // atual. A que ainda não começou só tem parcelas futuras: o caminho é adiantar.
+  const notStarted = !!invoice && invoice.isFuture;
+  const beforeClosing =
+    !!invoice && invoice.state === 'open' && !invoice.isFuture && !invoice.isOpening;
   const paidSoFar = invoice ? invoice.payments : 0;
   const creditsApplied = invoice ? invoice.creditsApplied.reduce((sum, c) => sum + c.amount, 0) : 0;
 
@@ -334,20 +377,34 @@ export function InvoicesView() {
                   </p>
                 ) : (
                   <>
+                    {/* Fatura aberta: o destaque é o que falta pagar agora (zero
+                        depois de um pagamento integral antes do fechamento); as
+                        compras e o que já foi pago ficam logo abaixo. Fechada: o
+                        destaque continua sendo o total da fatura. */}
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-sm text-muted-foreground">Total da fatura</span>
+                      <span className="text-sm text-muted-foreground">
+                        {beforeClosing ? 'Valor da fatura' : 'Total da fatura'}
+                      </span>
                       <Badge className={cn('shrink-0', status.className)}>{status.label}</Badge>
                     </div>
                     <div>
-                      <p className="text-2xl font-bold">{formatCurrency(invoice.total)}</p>
+                      <p className="text-2xl font-bold">
+                        {formatCurrency(beforeClosing ? invoice.remaining : invoice.total)}
+                      </p>
                       <p className="text-xs text-muted-foreground">{status.detail}</p>
                     </div>
                     {(paidSoFar > 0 || creditsApplied > 0) && (
                       <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                        {beforeClosing && (
+                          <>
+                            <dt className="text-muted-foreground">Compras até agora</dt>
+                            <dd className="text-right">{formatCurrency(invoice.total)}</dd>
+                          </>
+                        )}
                         {paidSoFar > 0 && (
                           <>
                             <dt className="text-muted-foreground">Já pago</dt>
-                            <dd className="text-right">{formatCurrency(paidSoFar)}</dd>
+                            <dd className="text-right">−{formatCurrency(paidSoFar)}</dd>
                           </>
                         )}
                         {creditsApplied > 0 && (
@@ -356,10 +413,14 @@ export function InvoicesView() {
                             <dd className="text-right">−{formatCurrency(creditsApplied)}</dd>
                           </>
                         )}
-                        <dt className="font-medium">Falta pagar</dt>
-                        <dd className="text-right font-semibold">
-                          {formatCurrency(invoice.remaining)}
-                        </dd>
+                        {!beforeClosing && (
+                          <>
+                            <dt className="font-medium">Falta pagar</dt>
+                            <dd className="text-right font-semibold">
+                              {formatCurrency(invoice.remaining)}
+                            </dd>
+                          </>
+                        )}
                       </dl>
                     )}
                     {invoice.unappliedSurplus > 0 && (
@@ -374,10 +435,44 @@ export function InvoicesView() {
                         fatura.
                       </p>
                     )}
-                    {invoice.remaining > 0 && (
-                      <Button className="w-full" onClick={() => setPaying(true)}>
-                        Marcar como paga
-                      </Button>
+                    {notStarted ? (
+                      invoice.remaining > 0 && (
+                        <p className="rounded-md bg-muted p-2 text-xs text-muted-foreground">
+                          Esta fatura ainda não começou. Para pagar estas parcelas agora, adiante-as
+                          em{' '}
+                          <Link
+                            href="/app/pessoal/parcelamentos"
+                            className="font-medium text-foreground underline"
+                          >
+                            Parcelamentos
+                          </Link>
+                          : elas vêm para a fatura aberta.
+                        </p>
+                      )
+                    ) : beforeClosing ? (
+                      invoice.remaining > 0 ? (
+                        <div className="space-y-1.5">
+                          <Button className="w-full" onClick={() => setPaying(true)}>
+                            Pagar
+                          </Button>
+                          <p className="text-xs text-muted-foreground">
+                            Pague tudo ou uma parte agora. O valor pago libera o limite do cartão na
+                            hora.
+                          </p>
+                        </div>
+                      ) : (
+                        invoice.total > 0 && (
+                          <p className="text-xs text-muted-foreground">
+                            Tudo o que entrou até agora já está pago.
+                          </p>
+                        )
+                      )
+                    ) : (
+                      invoice.remaining > 0 && (
+                        <Button className="w-full" onClick={() => setPaying(true)}>
+                          Marcar como paga
+                        </Button>
+                      )
                     )}
 
                     {detail && detail.paymentRecords.length > 0 && (
@@ -431,37 +526,50 @@ export function InvoicesView() {
                   <div className="p-10 text-center text-sm text-muted-foreground">
                     Carregando...
                   </div>
-                ) : items.length === 0 ? (
+                ) : rows.length === 0 ? (
                   <div className="p-10 text-center text-sm text-muted-foreground">
                     Nenhuma compra nesta fatura.
                   </div>
                 ) : (
                   <>
-                    {/* Mobile: uma linha por compra */}
+                    {/* Mobile: uma linha por compra ou pagamento */}
                     <ul className="divide-y divide-border md:hidden">
-                      {pageItems.map((item) => (
-                        <li key={item.id} className="flex items-start justify-between gap-3 p-4">
-                          <div className="min-w-0 space-y-0.5">
-                            <p className="truncate font-medium">
-                              {itemLabel(item)}
-                              {parcelOf(item) && (
-                                <span className="font-normal text-muted-foreground">
-                                  {' '}
-                                  · {parcelOf(item)}
-                                </span>
-                              )}
-                            </p>
-                            <p className="truncate text-xs text-muted-foreground">
-                              {formatDateBR(item.transactionDate)} ·{' '}
-                              {item.category?.name ?? 'Sem categoria'}
-                            </p>
-                            <div className="flex flex-wrap gap-1">
-                              <ItemBadges item={item} />
+                      {pageRows.map((row) =>
+                        row.kind === 'payment' ? (
+                          <li key={row.key} className="flex items-start justify-between gap-3 p-4">
+                            <div className="min-w-0 space-y-0.5">
+                              <p className="truncate font-medium">{paymentLabel(row)}</p>
+                              <p className="truncate text-xs text-muted-foreground">
+                                {formatDateBR(row.payment.paymentDate)} ·{' '}
+                                {row.payment.sourceAccount.name}
+                              </p>
                             </div>
-                          </div>
-                          <ItemAmount item={item} />
-                        </li>
-                      ))}
+                            <PaymentAmount payment={row.payment} />
+                          </li>
+                        ) : (
+                          <li key={row.key} className="flex items-start justify-between gap-3 p-4">
+                            <div className="min-w-0 space-y-0.5">
+                              <p className="truncate font-medium">
+                                {itemLabel(row.item)}
+                                {parcelOf(row.item) && (
+                                  <span className="font-normal text-muted-foreground">
+                                    {' '}
+                                    · {parcelOf(row.item)}
+                                  </span>
+                                )}
+                              </p>
+                              <p className="truncate text-xs text-muted-foreground">
+                                {formatDateBR(row.item.transactionDate)} ·{' '}
+                                {row.item.category?.name ?? 'Sem categoria'}
+                              </p>
+                              <div className="flex flex-wrap gap-1">
+                                <ItemBadges item={row.item} />
+                              </div>
+                            </div>
+                            <ItemAmount item={row.item} />
+                          </li>
+                        ),
+                      )}
                     </ul>
 
                     {/* Tablet/desktop: tabela */}
@@ -477,26 +585,44 @@ export function InvoicesView() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border">
-                          {pageItems.map((item) => (
-                            <tr key={item.id} className="hover:bg-muted/40">
-                              <td className="whitespace-nowrap p-3 text-muted-foreground">
-                                {formatDateBR(item.transactionDate)}
-                              </td>
-                              <td className="p-3">
-                                <div className="flex flex-wrap items-center gap-1.5">
-                                  <span className="font-medium">{itemLabel(item)}</span>
-                                  <ItemBadges item={item} />
-                                </div>
-                              </td>
-                              <td className="p-3 text-muted-foreground">
-                                {item.category?.name ?? 'Sem categoria'}
-                              </td>
-                              <td className="p-3 text-muted-foreground">{parcelOf(item) || '—'}</td>
-                              <td className="p-3 text-right">
-                                <ItemAmount item={item} />
-                              </td>
-                            </tr>
-                          ))}
+                          {pageRows.map((row) =>
+                            row.kind === 'payment' ? (
+                              <tr key={row.key} className="bg-emerald-50/40 hover:bg-emerald-50">
+                                <td className="whitespace-nowrap p-3 text-muted-foreground">
+                                  {formatDateBR(row.payment.paymentDate)}
+                                </td>
+                                <td className="p-3 font-medium">{paymentLabel(row)}</td>
+                                <td className="p-3 text-muted-foreground">
+                                  {row.payment.sourceAccount.name}
+                                </td>
+                                <td className="p-3 text-muted-foreground">—</td>
+                                <td className="p-3 text-right">
+                                  <PaymentAmount payment={row.payment} />
+                                </td>
+                              </tr>
+                            ) : (
+                              <tr key={row.key} className="hover:bg-muted/40">
+                                <td className="whitespace-nowrap p-3 text-muted-foreground">
+                                  {formatDateBR(row.item.transactionDate)}
+                                </td>
+                                <td className="p-3">
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <span className="font-medium">{itemLabel(row.item)}</span>
+                                    <ItemBadges item={row.item} />
+                                  </div>
+                                </td>
+                                <td className="p-3 text-muted-foreground">
+                                  {row.item.category?.name ?? 'Sem categoria'}
+                                </td>
+                                <td className="p-3 text-muted-foreground">
+                                  {parcelOf(row.item) || '—'}
+                                </td>
+                                <td className="p-3 text-right">
+                                  <ItemAmount item={row.item} />
+                                </td>
+                              </tr>
+                            ),
+                          )}
                         </tbody>
                       </table>
                     </div>
@@ -506,18 +632,27 @@ export function InvoicesView() {
             </Card>
           )}
 
-          {detail && items.length > 0 && (
+          {detail && rows.length > 0 && (
             <Pagination
               page={currentPage}
               totalPages={totalPages}
               onPageChange={setPage}
-              summary={`${charged.length} lançamento${charged.length === 1 ? '' : 's'} · total ${formatCurrency(detail.total)}`}
+              summary={
+                `${charged.length} lançamento${charged.length === 1 ? '' : 's'} · total ${formatCurrency(detail.total)}` +
+                (detail.payments > 0
+                  ? ` · pago ${formatCurrency(detail.payments)} · falta pagar ${formatCurrency(detail.remaining)}`
+                  : '')
+              }
             />
           )}
         </>
       )}
 
-      <Dialog open={paying} onClose={() => setPaying(false)} title="Marcar fatura como paga">
+      <Dialog
+        open={paying}
+        onClose={() => setPaying(false)}
+        title={beforeClosing ? 'Pagar antes do fechamento' : 'Marcar fatura como paga'}
+      >
         {paying && invoice && (
           <PayInvoiceForm
             cardId={card.id}

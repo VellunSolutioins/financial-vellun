@@ -14,7 +14,8 @@ import type { ResourceAccount } from '@/hooks/useFinancialResources';
 import { apiClient } from '@/lib/api-client';
 import { CURRENCY_REGEX, currencyToNumber, formatCurrencyInput, maskCurrency } from '@/lib/masks';
 import { newIdempotencyKey } from '@/lib/transaction-display';
-import { formatDateBR } from '@/lib/utils';
+import { cn, formatDateBR } from '@/lib/utils';
+import { formatCurrency } from './invoice-labels';
 
 function todayLocal() {
   const now = new Date();
@@ -70,6 +71,7 @@ export function PayInvoiceForm({
     register,
     handleSubmit,
     setValue,
+    setFocus,
     watch,
     formState: { errors },
   } = useForm<FormData>({
@@ -82,9 +84,15 @@ export function PayInvoiceForm({
   });
 
   const watchedAmount = watch('amount');
-  const overpaid =
-    CURRENCY_REGEX.test(watchedAmount ?? '') &&
-    Math.round(currencyToNumber(watchedAmount) * 100) > Math.round(invoice.remaining * 100);
+  const amountCents = CURRENCY_REGEX.test(watchedAmount ?? '')
+    ? Math.round(currencyToNumber(watchedAmount) * 100)
+    : null;
+  const remainingCents = Math.round(invoice.remaining * 100);
+  const overpaid = amountCents !== null && amountCents > remainingCents;
+  // Fatura do ciclo atual, ainda aberta: pagamento antes do fechamento,
+  // inteiro ou em parte (docs/adrs/0021).
+  const beforeClosing = invoice.state === 'open' && !invoice.isOpening;
+  const payingAll = amountCents === remainingCents;
 
   const onSubmit = async (data: FormData) => {
     setSubmitting(true);
@@ -95,7 +103,11 @@ export function PayInvoiceForm({
         paymentDate: data.paymentDate,
         idempotencyKey,
       });
-      toast.success('Pagamento registrado.');
+      toast.success(
+        beforeClosing
+          ? 'Pagamento registrado. O limite do cartão já foi liberado.'
+          : 'Pagamento registrado.',
+      );
       onSuccess();
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Erro ao registrar pagamento');
@@ -128,6 +140,38 @@ export function PayInvoiceForm({
           <p className="text-xs text-destructive">{errors.sourceAccountId.message}</p>
         )}
       </div>
+      {beforeClosing && invoice.remaining > 0 && (
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            aria-pressed={payingAll}
+            className={cn(payingAll && 'border-primary text-primary')}
+            onClick={() =>
+              setValue('amount', formatCurrencyInput(invoice.remaining), {
+                shouldDirty: true,
+                shouldValidate: true,
+              })
+            }
+          >
+            Tudo até agora ({formatCurrency(invoice.remaining)})
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            aria-pressed={!payingAll}
+            className={cn(!payingAll && 'border-primary text-primary')}
+            onClick={() => {
+              setValue('amount', '', { shouldDirty: true });
+              setFocus('amount');
+            }}
+          >
+            Outro valor
+          </Button>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1">
           <Label htmlFor="pay-amount">Valor (R$)</Label>
@@ -152,13 +196,13 @@ export function PayInvoiceForm({
           )}
         </div>
       </div>
-      {invoice.state === 'open' && !invoice.isOpening && (
+      {beforeClosing && (
         <p className="rounded-md bg-amber-50 p-2 text-xs text-amber-900">
           Esta fatura ainda está aberta: compras feitas até{' '}
           {formatDateBR(
             new Date(new Date(invoice.closingDate).getTime() - 86_400_000).toISOString(),
           )}{' '}
-          ainda podem entrar nela.
+          ainda podem entrar nela. No fechamento, a fatura vem só com o que faltar.
         </p>
       )}
       {overpaid && (

@@ -574,8 +574,9 @@ export class TransactionsService {
       const toCancel: string[] = [];
       const created: string[] = [];
       for (const installment of installments) {
-        // Já cobrada: no cartão, fatura fechada ou paga (sem fatura, a data já
-        // passou); em conta comum, já tem pagamento.
+        // Já cobrada: no cartão, fatura fechada (sem fatura, a data já passou);
+        // em conta comum, já tem pagamento. Parcela em fatura aberta é só
+        // cancelada, mesmo paga antes do fechamento: o pago vira crédito.
         const billed = installment.invoiceId
           ? locked.has(installment.id)
           : isCard

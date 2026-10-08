@@ -9,7 +9,6 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AccountsService } from '../accounts/accounts.service';
 import { CardLedgerService } from '../credit-cards/card-ledger.service';
-import { reconcileCard } from '../credit-cards/card-reconciliation';
 import { healthFromPercentage } from '../credit-cards/card-health';
 import {
   dateOnlyString,
@@ -386,7 +385,7 @@ export class InstallmentsService {
     const result = new Map<string, number>();
     const today = this.today();
     const invoiceIds = [...new Set(parcels.map((p) => p.invoiceId).filter(Boolean))] as string[];
-    const shareByInvoice = new Map<string, number>();
+    let shareByInvoice = new Map<string, number>();
     if (invoiceIds.length) {
       const cardIds = (
         await this.prisma.creditCardInvoice.findMany({
@@ -395,13 +394,7 @@ export class InstallmentsService {
           distinct: ['creditCardId'],
         })
       ).map((i) => i.creditCardId);
-      const amounts = await this.cardLedger.invoicesWithAmounts(cardIds);
-      for (const invoices of amounts.values()) {
-        for (const row of reconcileCard(invoices).invoices) {
-          const total = row.debitCents;
-          shareByInvoice.set(row.invoice.span.id, total > 0 ? row.remainingCents / total : 0);
-        }
-      }
+      shareByInvoice = await this.cardLedger.unpaidShareByInvoice(cardIds);
     }
     for (const p of parcels) {
       if (p.status && p.status !== 'confirmed') continue;
