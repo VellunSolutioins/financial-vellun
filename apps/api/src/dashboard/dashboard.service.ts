@@ -786,6 +786,7 @@ export class DashboardService {
           amount: true,
           eventDate: true,
           transactionDate: true,
+          budgetDate: true,
           recurrenceType: true,
         },
       }),
@@ -807,7 +808,8 @@ export class DashboardService {
 
     for (const t of expenses) {
       // A parcela no dia dela; o resto na data do fato (ADR 0019).
-      const day = t.recurrenceType === 'parcelado' ? t.transactionDate : t.eventDate;
+      const day =
+        t.recurrenceType === 'parcelado' ? (t.budgetDate ?? t.transactionDate) : t.eventDate;
       const entry = byDay.get(day.getUTCDate());
       if (!entry) continue;
       if (t.type === 'expense') entry.expense += Number(t.amount);
@@ -987,7 +989,7 @@ export class DashboardService {
     const inScope = scoped ? Prisma.sql`AND t."account_id" = ANY(${scoped}::text[])` : Prisma.empty;
 
     // Mês do gasto: a parcela no dela, o resto na data do fato (ADR 0019).
-    const budgetDate = Prisma.sql`(CASE WHEN t."recurrence_type" = 'parcelado' THEN t."transaction_date" ELSE t."event_date" END)`;
+    const budgetDate = Prisma.sql`(CASE WHEN t."recurrence_type" = 'parcelado' THEN COALESCE(t."budget_date", t."transaction_date") ELSE t."event_date" END)`;
     const rows = await this.prisma.$queryRaw<MonthlyTotalRow[]>`
       SELECT to_char(date_trunc('month', ${budgetDate}), 'YYYY-MM') AS month,
              t."type"::text AS type,

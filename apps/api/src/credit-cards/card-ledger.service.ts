@@ -55,6 +55,7 @@ type LedgerTransaction = {
   status: string;
   transactionDate: Date;
   eventDate: Date;
+  budgetDate: Date | null;
   seriesId: string | null;
   recurrenceType: string;
   installmentNumber: number | null;
@@ -91,6 +92,7 @@ export class CardLedgerService {
         status: true,
         transactionDate: true,
         eventDate: true,
+        budgetDate: true,
         seriesId: true,
         recurrenceType: true,
         installmentNumber: true,
@@ -342,8 +344,11 @@ export class CardLedgerService {
   private async syncCard(card: CreditCard, userId: string, all: LedgerTransaction[], db: Db) {
     // A posição inicial fica na fatura em que foi gravada.
     const txs = all.filter((tx) => !(OPENING_TYPES as readonly string[]).includes(tx.type));
-    const desired = cardNeedsSetup(card)
-      ? new Map(txs.map((tx) => [tx.id, null as string | null]))
+    const { invoices: desired, postingDates } = cardNeedsSetup(card)
+      ? {
+          invoices: new Map(txs.map((tx) => [tx.id, null as string | null])),
+          postingDates: new Map<string, Date>(),
+        }
       : await this.assignInvoices(card as ConfiguredCard, userId, txs, db);
 
     const byTarget = new Map<string | null, string[]>();
@@ -361,16 +366,33 @@ export class CardLedgerService {
       });
     }
 
+    // A parcela 2+ é cobrada quando a fatura dela abre (docs/adrs/0022): a
+    // data passa a ser o primeiro dia da fatura. A data original (compra + n
+    // meses) fica em `budgetDate`, que é o mês em que ela pesa nos gastos.
+    for (const tx of txs) {
+      const posting = postingDates.get(tx.id);
+      if (!posting || posting.getTime() === tx.transactionDate.getTime()) continue;
+      await db.transaction.update({
+        where: { id: tx.id },
+        data: { transactionDate: posting, budgetDate: tx.budgetDate ?? tx.transactionDate },
+      });
+    }
+
     await this.pruneEmptyFutureInvoices(card.id, db);
   }
 
-  /** `txId → invoiceId` (ou `null`), criando as faturas que faltarem. */
+  /**
+   * `invoices`: `txId → invoiceId` (ou `null`), criando as faturas que
+   * faltarem. `postingDates`: a data em que cada parcela 2+ entra na fatura —
+   * o primeiro dia dela —, só para faturas ainda não fechadas (as fechadas não
+   * mudam mais).
+   */
   private async assignInvoices(
     card: ConfiguredCard,
     userId: string,
     txs: LedgerTransaction[],
     db: Db,
-  ): Promise<Map<string, string | null>> {
+  ): Promise<{ invoices: Map<string, string | null>; postingDates: Map<string, Date> }> {
     const config: CycleConfig = { closingDay: card.closingDay, dueDay: card.dueDay };
     const trackingStart = calendarDayFromUtcDate(card.invoiceTrackingStart);
     const stored = (await db.creditCardInvoice.findMany({ where: { creditCardId: card.id } })).map(
@@ -390,6 +412,9 @@ export class CardLedgerService {
     };
 
     const chains = new Map<string, InvoiceSpan[]>();
+    // Parcelas atribuídas pelo ciclo da compra + (n − 1): as que são datadas
+    // na abertura da fatura.
+    const byCycle = new Set<string>();
 
     const assigned = new Map<string, InvoiceSpan | null>();
     for (const tx of txs) {
@@ -423,6 +448,7 @@ export class CardLedgerService {
         while (chain.length < n) chain.push(resolve(chain[chain.length - 1].closingDate));
         chains.set(tx.seriesId, chain);
         assigned.set(tx.id, chain[n - 1]);
+        byCycle.add(tx.id);
       } else {
         assigned.set(tx.id, resolve(own));
       }
@@ -458,9 +484,23 @@ export class CardLedgerService {
       });
     }
 
-    return new Map(
-      [...assigned].map(([txId, span]) => [txId, span ? (idOf.get(span) ?? null) : null]),
-    );
+    // Só depois de todas as atribuições: o início de uma fatura pode ter sido
+    // estendido no caminho.
+    const today = todaySaoPaulo();
+    const postingDates = new Map<string, Date>();
+    for (const txId of byCycle) {
+      const span = assigned.get(txId);
+      if (span && compareCalendarDays(span.closingDate, today) > 0) {
+        postingDates.set(txId, toDbDate(span.periodStart));
+      }
+    }
+
+    return {
+      invoices: new Map(
+        [...assigned].map(([txId, span]) => [txId, span ? (idOf.get(span) ?? null) : null]),
+      ),
+      postingDates,
+    };
   }
 
   /** Fatura futura sem lançamento não tem por que existir. */
