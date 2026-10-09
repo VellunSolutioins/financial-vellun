@@ -596,6 +596,8 @@ export class InstallmentsService {
             transactionDate: today,
             advancedAt: today,
             advancedFromDate: p.transactionDate,
+            // Adiantada, pesa no mês do adiantamento (a data nova).
+            budgetDate: null,
             ...(discounted && { amount: newCents[i] / 100, amountBeforeAdvance: p.amount }),
           },
         });

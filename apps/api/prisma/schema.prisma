@@ -488,6 +488,10 @@ model Transaction {
   advancedFromDate    DateTime?          @map("advanced_from_date") @db.Date
   // Valor antes do desconto do adiantamento; nulo quando não houve desconto.
   amountBeforeAdvance Decimal?           @map("amount_before_advance") @db.Decimal(15, 2)
+  // Mês em que a parcela pesa nos gastos, quando difere de `transactionDate`
+  // (docs/adrs/0022): a parcela 2+ no cartão é datada na abertura da fatura, e
+  // aqui fica a data original (compra + n meses). Nulo = vale `transactionDate`.
+  budgetDate          DateTime?          @map("budget_date") @db.Date
 
   user            User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
   account         Account                 @relation(fields: [accountId], references: [id], onDelete: Cascade)

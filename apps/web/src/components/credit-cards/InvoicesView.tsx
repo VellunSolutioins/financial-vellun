@@ -109,6 +109,10 @@ type StatementRow =
   | { kind: 'item'; key: string; item: InvoiceItem }
   | { kind: 'payment'; key: string; payment: InvoicePayment; early: boolean };
 
+/** Data da linha (`YYYY-MM-DD`): a da compra ou a do pagamento. */
+const statementDate = (row: StatementRow) =>
+  (row.kind === 'item' ? row.item.transactionDate : row.payment.paymentDate).slice(0, 10);
+
 const paymentLabel = (row: { early: boolean }) =>
   row.early ? 'Pagamento antecipado' : 'Pagamento da fatura';
 
@@ -173,7 +177,11 @@ export function InvoicesView() {
   // Ao trocar de fatura, o detalhe anterior não pode aparecer com o cabeçalho novo.
   const detail = loadedDetail && loadedDetail.id === invoice?.id ? loadedDetail : null;
 
-  useEffect(() => setPage(1), [invoice?.id]);
+  // Ordem do extrato: mais novos primeiro por padrão. Fica na URL, como o
+  // cartão e o mês, e se mantém ao trocar de fatura.
+  const order: 'asc' | 'desc' = searchParams.get('ordem') === 'asc' ? 'asc' : 'desc';
+
+  useEffect(() => setPage(1), [invoice?.id, order]);
   useEffect(() => {
     if (card) saveLastCard(card.id);
   }, [card]);
@@ -228,7 +236,7 @@ export function InvoicesView() {
   // Pagamentos ativos entram no extrato, depois das compras; os desfeitos
   // ficam só na lista de pagamentos do card.
   const activePayments = (detail?.paymentRecords ?? []).filter((p) => p.status === 'active');
-  const rows: StatementRow[] = [
+  const unsortedRows: StatementRow[] = [
     ...items.map((item) => ({ kind: 'item' as const, key: item.id, item })),
     ...activePayments.map((payment) => ({
       kind: 'payment' as const,
@@ -238,6 +246,16 @@ export function InvoicesView() {
       early: !!detail && payment.paymentDate.slice(0, 10) < detail.closingDate.slice(0, 10),
     })),
   ];
+  // Por data, na ordem escolhida. No mesmo dia vale a ordem original (compras
+  // antes dos pagamentos), invertida junto quando os mais novos vêm primeiro.
+  const rows = unsortedRows
+    .map((row, index) => ({ row, index }))
+    .sort((a, b) => {
+      const byDate = statementDate(a.row).localeCompare(statementDate(b.row));
+      const ascending = byDate !== 0 ? byDate : a.index - b.index;
+      return order === 'asc' ? ascending : -ascending;
+    })
+    .map(({ row }) => row);
   const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const pageRows = rows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
@@ -518,6 +536,20 @@ export function InvoicesView() {
 
             <CardLimitCard card={card} />
           </div>
+
+          {detail && rows.length > 1 && (
+            <div className="flex justify-end">
+              <Select
+                aria-label="Ordem dos lançamentos"
+                value={order}
+                onChange={(e) => setParams({ ordem: e.target.value === 'asc' ? 'asc' : null })}
+                className="h-9 w-full text-sm sm:w-auto"
+              >
+                <option value="desc">Mais novos primeiro</option>
+                <option value="asc">Mais antigos primeiro</option>
+              </Select>
+            </div>
+          )}
 
           {invoice && (
             <Card className="rounded-2xl">

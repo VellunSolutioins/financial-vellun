@@ -440,6 +440,10 @@ export class TransactionsService {
           ...(dto.forecast !== undefined && { forecast: dto.forecast }),
           ...(categoryId !== undefined && { categoryId }),
           ...(transactionDate && { transactionDate }),
+          // Parcela datada na abertura da fatura (docs/adrs/0022): a data
+          // informada passa a ser o mês em que ela pesa nos gastos; a data do
+          // lançamento é refeita pela sincronização da fatura.
+          ...(transactionDate && existing.budgetDate && { budgetDate: transactionDate }),
           ...(eventDate && { eventDate }),
         },
       });

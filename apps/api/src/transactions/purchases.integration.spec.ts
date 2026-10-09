@@ -96,13 +96,15 @@ integration('compra parcelada × calendário de cobrança (PostgreSQL)', () => {
       committed: 1200,
     });
 
-    // Compromissos por vencimento: uma parcela por mês — nunca somada à compra.
-    const dueSeptember = await env.transactions.summary(userId, {
+    // Pela data do lançamento, as três parcelas somam a compra — nunca mais
+    // que ela. (A data de cada parcela 2+ é a abertura da fatura dela, ver o
+    // teste seguinte; o mês do gasto, acima, não muda com isso.)
+    const byDate = await env.transactions.summary(userId, {
       periodStart: '2026-09-01',
-      periodEnd: '2026-09-30',
+      periodEnd: '2026-12-31',
       ...scope,
     });
-    expect(dueSeptember.expense).toBe(400);
+    expect(byDate.expense).toBe(1200);
 
     // Calendário: três faturas consecutivas de R$ 400.
     const invoices = (await env.cards.invoices(userId, card.id)).reverse();
@@ -116,11 +118,12 @@ integration('compra parcelada × calendário de cobrança (PostgreSQL)', () => {
     const installment = await env.installments.findOne(userId, purchase.seriesId!);
     expect(installment).toMatchObject({ contractAmount: 1200, remainingCommitment: 1200 });
     expect(installment.purchaseDate.toISOString().slice(0, 10)).toBe('2026-09-05');
-    expect(installment.schedule.map((p) => [p.installmentNumber, p.amount, p.dueDate])).toEqual([
-      [1, 400, '2026-09-05'],
-      [2, 400, '2026-10-05'],
-      [3, 400, '2026-11-05'],
+    expect(installment.schedule.map((p) => [p.installmentNumber, p.amount])).toEqual([
+      [1, 400],
+      [2, 400],
+      [3, 400],
     ]);
+    expect(installment.schedule[0].dueDate).toBe('2026-09-05');
 
     // Comprar no cartão não mexe no saldo bancário.
     expect(await env.balance(checking)).toBe(5000);
@@ -188,6 +191,65 @@ integration('compra parcelada × calendário de cobrança (PostgreSQL)', () => {
     expect((await env.installments.findOne(userId, purchase.seriesId!)).remainingCommitment).toBe(
       200,
     );
+  });
+
+  it('parcela 2+ no cartão: a data é o primeiro dia da fatura dela; o mês do gasto continua um por mês', async () => {
+    const card = await newCard();
+    const today = dayFromToday(0);
+    const purchase = await env.transactions.create(userId, {
+      accountId: card.accountId,
+      type: 'expense',
+      amount: 900,
+      description: 'Sofá',
+      transactionDate: today,
+      recurrenceType: 'parcelado',
+      installments: 3,
+    });
+    const parcels = await env.prisma.transaction.findMany({
+      where: { seriesId: purchase.seriesId },
+      orderBy: { installmentNumber: 'asc' },
+      include: { invoice: true },
+    });
+    const iso = (date: Date | null) => date?.toISOString().slice(0, 10) ?? null;
+    // Compra + n meses, no mesmo dia (ou no último dia do mês, se ele não existir).
+    const monthsAhead = (n: number) => {
+      const [y, m, d] = today.split('-').map(Number);
+      const lastDay = new Date(Date.UTC(y, m - 1 + n + 1, 0)).getUTCDate();
+      return iso(new Date(Date.UTC(y, m - 1 + n, Math.min(d, lastDay))));
+    };
+
+    // A 1ª parcela fica na data da compra, sem mês do gasto à parte.
+    expect([iso(parcels[0].transactionDate), parcels[0].budgetDate]).toEqual([today, null]);
+    // As seguintes: cobradas quando a fatura abre; pesam um mês depois da anterior.
+    for (const [index, parcel] of parcels.slice(1).entries()) {
+      expect(iso(parcel.transactionDate)).toBe(iso(parcel.invoice!.periodStart));
+      expect(iso(parcel.budgetDate)).toBe(monthsAhead(index + 1));
+    }
+    // Três faturas diferentes, uma parcela em cada.
+    expect(new Set(parcels.map((p) => p.invoiceId)).size).toBe(3);
+
+    // O gasto de cada mês é uma parcela, pela data original — não pela abertura da fatura.
+    const spentOn = async (day: string | null) =>
+      (
+        await env.transactions.summary(userId, {
+          periodStart: day!,
+          periodEnd: day!,
+          dateBasis: 'spending',
+          cardIds: [card.id],
+        })
+      ).expense;
+    expect(await spentOn(today)).toBe(300);
+    expect(await spentOn(monthsAhead(1))).toBe(300);
+    expect(await spentOn(monthsAhead(2))).toBe(300);
+
+    // Adiantar a última: vem para hoje e passa a pesar neste mês.
+    await env.installments.advance(userId, purchase.seriesId!, { count: 1 });
+    const advanced = await env.prisma.transaction.findUniqueOrThrow({
+      where: { id: parcels[2].id },
+    });
+    expect([iso(advanced.transactionDate), advanced.budgetDate]).toEqual([today, null]);
+    expect(await spentOn(today)).toBe(600);
+    expect(await spentOn(monthsAhead(2))).toBe(0);
   });
 
   it('resumo de Parcelamentos: por cartão, o que falta pagar das compras — inclusive a parcela da fatura aberta', async () => {
