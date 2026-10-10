@@ -1,5 +1,4 @@
 import {
-  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -12,6 +11,7 @@ import { CreateBusinessProfileDto } from './dto/create-business-profile.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdatePasswordDto } from './dto/update-password.dto';
 import { normalizeEmail } from '../common/email.util';
+import { fieldConflict } from '../common/field-errors';
 import { SessionService } from '../auth/session.service';
 import {
   RequestContext,
@@ -45,7 +45,7 @@ export class UsersService {
       throw new ForbiddenException('Usuário não é do tipo individual');
 
     const cpfOwner = await this.prisma.individualProfile.findUnique({ where: { cpf: dto.cpf } });
-    if (cpfOwner && cpfOwner.userId !== userId) throw new ConflictException('CPF já cadastrado');
+    if (cpfOwner && cpfOwner.userId !== userId) throw fieldConflict('cpf', 'CPF já cadastrado');
 
     const existing = await this.prisma.individualProfile.findUnique({ where: { userId } });
     if (existing) {
@@ -71,7 +71,7 @@ export class UsersService {
       throw new ForbiddenException('Usuário não é do tipo business');
 
     const cnpjOwner = await this.prisma.businessProfile.findUnique({ where: { cnpj: dto.cnpj } });
-    if (cnpjOwner && cnpjOwner.userId !== userId) throw new ConflictException('CNPJ já cadastrado');
+    if (cnpjOwner && cnpjOwner.userId !== userId) throw fieldConflict('cnpj', 'CNPJ já cadastrado');
 
     const existing = await this.prisma.businessProfile.findUnique({ where: { userId } });
     if (existing) {
@@ -135,7 +135,7 @@ export class UsersService {
         const emailOwner = await this.prisma.user.findFirst({
           where: { email: { equals: email, mode: 'insensitive' }, id: { not: userId } },
         });
-        if (emailOwner) throw new ConflictException('Email já cadastrado');
+        if (emailOwner) throw fieldConflict('email', 'Email já cadastrado');
         emailAnterior = current.email;
       }
     }

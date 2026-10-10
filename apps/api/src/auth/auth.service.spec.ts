@@ -132,17 +132,40 @@ describe('AuthService', () => {
       const { prisma, service } = createMocks();
       prisma.user.findFirst.mockResolvedValue(userRow());
 
+      const attempt = service.register({
+        name: 'Outro',
+        email: 'JOAO@EXAMPLE.COM',
+        phone: '(19) 99999-9999',
+        password: TEST_PASSWORD,
+        profileType: ProfileType.individual,
+        cpf: CPF,
+        ...ADDRESS,
+      });
+
+      await expect(attempt).rejects.toThrow('Email já cadastrado');
+      // O corpo aponta o campo, para o formulário marcar o erro no lugar certo.
+      await expect(attempt).rejects.toMatchObject({
+        response: { errors: [{ field: 'email', message: 'Email já cadastrado' }] },
+      });
+    });
+
+    it('aponta o campo quando o CPF já pertence a outra conta', async () => {
+      const { prisma, service } = createMocks();
+      prisma.individualProfile.findUnique.mockResolvedValue({ id: 'profile-9' });
+
       await expect(
         service.register({
           name: 'Outro',
-          email: 'JOAO@EXAMPLE.COM',
+          email: 'outro@example.com',
           phone: '(19) 99999-9999',
           password: TEST_PASSWORD,
           profileType: ProfileType.individual,
           cpf: CPF,
           ...ADDRESS,
         }),
-      ).rejects.toThrow('Email já cadastrado');
+      ).rejects.toMatchObject({
+        response: { errors: [{ field: 'cpf', message: 'CPF já cadastrado' }] },
+      });
     });
   });
 
