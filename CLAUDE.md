@@ -6,23 +6,23 @@ Monorepo iniciado em 2026-06-17. Aplicação de controle financeiro para **pesso
 
 ## Stack
 
-| Camada     | Tecnologia                                                      |
-| ---------- | --------------------------------------------------------------- |
-| Frontend   | Next.js 14 (App Router) + Tailwind CSS + shadcn/ui (`apps/web`) |
-| Backend    | NestJS + Prisma + PostgreSQL (`apps/api`)                       |
-| AI Agent   | Python + FastAPI (`apps/ai-agent`)                              |
-| Shared     | TypeScript + Zod (`packages/shared`)                            |
-| Config     | TS / ESLint / Prettier compartilhados (`packages/config`)       |
-| Mensageria | RabbitMQ (broker durável) + Redis (estado distribuído)          |
-| Monorepo   | pnpm workspaces                                                 |
-| Language   | TypeScript (strict) + Python 3.11                               |
+| Camada     | Tecnologia                                                                 |
+| ---------- | -------------------------------------------------------------------------- |
+| Frontend   | Next.js 15 (App Router) + React 19 + Tailwind CSS + shadcn/ui (`apps/web`) |
+| Backend    | NestJS + Prisma + PostgreSQL (`apps/api`)                                  |
+| AI Agent   | Python + FastAPI (`apps/ai-agent`)                                         |
+| Shared     | TypeScript + Zod (`packages/shared`)                                       |
+| Config     | TS / ESLint / Prettier compartilhados (`packages/config`)                  |
+| Mensageria | RabbitMQ (broker durável) + Redis (estado distribuído)                     |
+| Monorepo   | pnpm workspaces                                                            |
+| Language   | TypeScript (strict) + Python 3.11                                          |
 
 ## Estrutura do Monorepo
 
 ```
 financial-vellun/
 ├── apps/
-│   ├── web/            # @financial-vellun/web — Next.js 14 + Tailwind + shadcn/ui
+│   ├── web/            # @financial-vellun/web — Next.js 15 + Tailwind + shadcn/ui
 │   ├── api/            # @financial-vellun/api — NestJS + Prisma + PostgreSQL
 │   └── ai-agent/       # Agente de IA — Python + FastAPI (venv própria)
 ├── packages/
@@ -49,6 +49,8 @@ apps/api/src/        accounts/ auth/ billing/ categories/ contacts/ credit-cards
                      ops/ (auth GitHub OAuth, audit append-only, operators)
 apps/web/src/        app/ components/ contexts/ hooks/ lib/ middleware.ts
                      app/(auth)/{login,cadastro}  app/app/{pessoal,empresa,conta}
+                     app/{privacidade,termos} (páginas legais públicas)
+                     components/marketing/ (landing e páginas públicas)  components/auth/
                      app/ops/ (área de operações — sessão e cliente HTTP próprios)
 apps/ai-agent/src/   main.py worker.py bootstrap.py config.py
                      routers/ schemas/ services/
