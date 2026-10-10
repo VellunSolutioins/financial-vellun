@@ -7,7 +7,7 @@ Aplicação de controle financeiro para pessoa física e jurídica, com lançame
 ```
 financial-vellun/
   apps/
-    web/            # Frontend — Next.js 14 + Tailwind CSS + shadcn/ui
+    web/            # Frontend — Next.js 15 + React 19 + Tailwind CSS + shadcn/ui
     api/            # API principal — NestJS + Prisma + PostgreSQL
     ai-agent/       # Agente de IA — Python + FastAPI (venv própria)
   packages/

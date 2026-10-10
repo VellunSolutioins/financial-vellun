@@ -1,5 +1,19 @@
 # Plano — Recuperação de senha por e-mail
 
+> **Lembrete (2026-10-10): não implementado.** Revisar este plano antes de executar; o projeto
+> mudou desde que ele foi escrito:
+>
+> - **Sessões:** o refresh deixou de ser JWT stateless. A redefinição deve encerrar as sessões do
+>   usuário com `SessionService.revokeAllForUser` (o item "Fora de escopo" abaixo caducou).
+> - **Rate limit:** `@nestjs/throttler` já está instalado e em uso (`@Throttle` no
+>   `auth.controller.ts`, guard em `common/throttling/`); não é dependência nova.
+> - **E-mail:** buscar o usuário com `normalizeEmail`, como o login faz.
+> - **Trilha de segurança:** registrar o pedido e a troca em `SecurityEventsService`.
+> - **Erros:** usar `fieldConflict`/`errors: [{ field, message }]` (`common/field-errors.ts`).
+> - **Web:** o `middleware.ts` virou no-op (não há `PUBLIC_PATHS`). As telas devem usar o layout
+>   de `app/(auth)/` e os componentes de `components/auth/` (`FormField`, `FormAlert`); o link
+>   "Esqueci minha senha" entra em `components/auth/login-form.tsx`.
+
 ## Context
 
 Hoje o app permite **trocar a senha logado** (com a senha atual), mas não há como
