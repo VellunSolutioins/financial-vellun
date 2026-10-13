@@ -1,10 +1,14 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { Subscription, SubscriptionStatus } from '@prisma/client';
+import { SubscriptionStatus } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
-import { PAYMENT_PROVIDER, PaymentProvider } from './providers/payment-provider.interface';
-import { SubscriptionAuditService } from './services/subscription-audit.service';
+import {
+  PAYMENT_PROVIDER,
+  PaymentProvider,
+  ProviderPayment,
+} from './providers/payment-provider.interface';
+import { ChargeSyncService, SubscriptionWithPlan } from './services/charge-sync.service';
 import { SubscriptionStateService } from './services/subscription-state.service';
 import { SubscriptionService } from './services/subscription.service';
 
@@ -34,8 +38,8 @@ export class ReconciliationService {
     @Inject(PAYMENT_PROVIDER) private readonly provider: PaymentProvider,
     private readonly prisma: PrismaService,
     private readonly subscriptions: SubscriptionService,
-    private readonly audit: SubscriptionAuditService,
     private readonly state: SubscriptionStateService,
+    private readonly charges: ChargeSyncService,
   ) {}
 
   @Cron(CronExpression.EVERY_HOUR, { name: 'billing-reconciliation' })
@@ -71,7 +75,13 @@ export class ReconciliationService {
           ],
         },
       },
-      orderBy: { updatedAt: 'asc' },
+      // Só o necessário para consultar o PSP: o estado local é relido depois,
+      // assinatura por assinatura (ver `reconcileSubscription`).
+      select: { id: true, providerSubscriptionId: true },
+      // Rodízio: quem nunca foi olhada primeiro, depois a olhada há mais tempo.
+      // Por `updatedAt` as consistentes nunca saíam do topo, e acima de
+      // BATCH_SIZE assinaturas as demais não eram verificadas.
+      orderBy: { lastReconciledAt: { sort: 'asc', nulls: 'first' } },
       take: BATCH_SIZE,
     });
 
@@ -82,107 +92,194 @@ export class ReconciliationService {
       errors: 0,
     };
 
-    for (const local of candidates) {
-      try {
-        const outcome = await this.reconcileSubscription(local);
-        if (outcome === 'corrected') summary.corrected++;
-        else if (outcome === 'divergent') summary.divergent++;
-        else if (outcome === 'error') summary.errors++;
-      } catch (error) {
-        summary.errors++;
-        const message = error instanceof Error ? error.message : String(error);
-        this.alert(`Falha ao reconciliar assinatura ${local.id}: ${message}`);
+    try {
+      for (const candidate of candidates) {
+        try {
+          const outcome = await this.reconcileSubscription(candidate);
+          if (outcome === 'corrected') summary.corrected++;
+          else if (outcome === 'divergent') summary.divergent++;
+          else if (outcome === 'error') summary.errors++;
+        } catch (error) {
+          summary.errors++;
+          const message = error instanceof Error ? error.message : String(error);
+          this.alert(`Falha ao reconciliar assinatura ${candidate.id}: ${message}`);
+        }
       }
+    } finally {
+      await this.advanceCursor(candidates.map((candidate) => candidate.id));
     }
 
     return summary;
   }
 
+  /**
+   * Avança o cursor do rodízio do lote inteiro, inclusive das que falharam: uma
+   * assinatura que sempre dá erro não pode segurar o topo da fila.
+   */
+  private async advanceCursor(subscriptionIds: string[]): Promise<void> {
+    if (subscriptionIds.length === 0) return;
+    try {
+      await this.prisma.subscription.updateMany({
+        where: { id: { in: subscriptionIds } },
+        data: { lastReconciledAt: new Date() },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`Não foi possível avançar o cursor da reconciliação: ${message}`);
+    }
+  }
+
   /** Compara uma assinatura local com o estado real no PSP e corrige se preciso. */
-  async reconcileSubscription(local: Subscription): Promise<ReconcileOutcome> {
-    if (!local.providerSubscriptionId) return 'consistent';
+  async reconcileSubscription(candidate: {
+    id: string;
+    providerSubscriptionId: string | null;
+  }): Promise<ReconcileOutcome> {
+    if (!candidate.providerSubscriptionId) return 'consistent';
 
-    const remote = await this.provider.getSubscription(local.providerSubscriptionId);
-    const target = this.targetFromRemote(remote.status);
-    if (!target) return 'consistent';
+    const remote = await this.provider.getSubscription(candidate.providerSubscriptionId);
+    const terminal = this.terminalFromRemote(remote.status);
+    // 'inactive' e demais estados ambíguos não são auto-corrigidos.
+    if (!terminal && remote.status !== 'active') return 'consistent';
 
-    if (local.status !== target) {
-      // Cancelamento agendado ainda dentro do período pago: o PSP já reporta a
-      // assinatura como cancelada/deletada, mas o acesso é mantido até
-      // `currentPeriodEnd`. A correção para `canceled` ocorre no ciclo seguinte
-      // ao fim do período, quando o cancelamento deixa de estar adiado.
-      if (target === SubscriptionStatus.canceled && this.state.isCancellationDeferred(local)) {
-        return 'consistent';
-      }
+    const charges = terminal
+      ? []
+      : await this.provider.listSubscriptionPayments(candidate.providerSubscriptionId);
 
-      if (!this.state.canTransition(local.status, target)) {
-        this.alert(
-          `Divergência não auto-corrigível na assinatura ${local.id}: ` +
-            `local=${local.status} remoto=${remote.status}`,
-        );
-        return 'divergent';
-      }
+    // O estado local é lido DEPOIS das consultas ao PSP. O lote leva minutos,
+    // e decidir com a linha carregada no início dele desfaria o que um webhook
+    // tivesse aplicado nesse meio-tempo.
+    const local = await this.prisma.subscription.findUnique({
+      where: { id: candidate.id },
+      include: { plan: true },
+    });
+    if (!local) return 'consistent';
 
-      await this.subscriptions.transitionTo(local.id, target, {
-        actor: 'reconciliation',
-        reason: `divergência banco↔PSP: local=${local.status} remoto=${remote.status}`,
-        data: this.correctionData(target, remote.currentPeriodEnd ?? null),
-      });
-      this.alert(`Assinatura ${local.id} corrigida por reconciliação: ${local.status} → ${target}`);
+    if (terminal) return this.reconcileTerminal(local, terminal, remote.status);
+
+    // Assinatura `active` no PSP só quer dizer que ela continua gerando
+    // cobranças — segue assim com cobrança vencida ou em chargeback. Quem diz
+    // se o cliente está em dia são as cobranças.
+    const charge = this.decidingCharge(charges);
+    if (!charge) return 'consistent';
+
+    const outcome = await this.charges.sync(local, charge, {
+      source: 'reconciliation',
+      onlyOnChange: false,
+    });
+    if (outcome === 'applied') {
+      this.alert(
+        `Assinatura ${local.id} corrigida por reconciliação a partir da cobrança ` +
+          `${charge.id} (${charge.status}); estava ${local.status}.`,
+      );
       return 'corrected';
     }
-
-    // Mesmo status: detecta deriva no fim do período quando ativa.
-    if (
-      target === SubscriptionStatus.active &&
-      this.periodDrifted(local, remote.currentPeriodEnd)
-    ) {
-      await this.prisma.subscription.update({
-        where: { id: local.id },
-        data: { currentPeriodEnd: remote.currentPeriodEnd },
-      });
-      await this.audit.record({
-        subscriptionId: local.id,
-        action: 'reconciliation:period_update',
-        previousStatus: local.status,
-        newStatus: local.status,
-        actor: 'reconciliation',
-        reason: 'ajuste de currentPeriodEnd',
-      });
-      this.alert(`Assinatura ${local.id}: currentPeriodEnd ajustado por reconciliação.`);
-      return 'corrected';
+    if (outcome === 'held') {
+      this.alert(
+        `Assinatura ${local.id} está ${local.status} com a cobrança ${charge.id} estornada. ` +
+          'A reconciliação não cancela sozinha; avaliar o cancelamento manualmente.',
+      );
+      return 'divergent';
     }
 
-    return 'consistent';
+    return this.reconcileLapsed(local, charge, charges);
   }
 
-  private targetFromRemote(remoteStatus: string): SubscriptionStatus | null {
-    switch (remoteStatus) {
-      case 'active':
-        return SubscriptionStatus.active;
-      case 'canceled':
-        return SubscriptionStatus.canceled;
-      case 'expired':
-        return SubscriptionStatus.expired;
-      default:
-        // 'inactive' e demais estados ambíguos não são auto-corrigidos.
-        return null;
-    }
+  /**
+   * Assinatura em dia cujo período pago acabou sem o PSP ter gerado a cobrança
+   * seguinte (removida no painel, por exemplo). Nenhum evento vai rebaixá-la, e
+   * `active` não confere data: sem isto ela ficaria com acesso para sempre.
+   */
+  private async reconcileLapsed(
+    local: SubscriptionWithPlan,
+    charge: ProviderPayment,
+    charges: ProviderPayment[],
+    now: Date = new Date(),
+  ): Promise<ReconcileOutcome> {
+    const inGoodStanding =
+      local.status === SubscriptionStatus.active || local.status === SubscriptionStatus.trialing;
+    if (!inGoodStanding || charge.status !== 'paid' || !charge.dueAt) return 'consistent';
+
+    const periodEnd = this.state.computePeriodEnd(charge.dueAt, local.plan.interval);
+    if (periodEnd > now) return 'consistent';
+
+    // O PSP gera a próxima cobrança com semanas de antecedência. Se existe uma
+    // depois desta, a assinatura segue cobrando e é ela que vai decidir.
+    const paidDueAt = charge.dueAt;
+    const hasLaterCharge = charges.some(
+      (other) => other.status !== 'canceled' && other.dueAt && other.dueAt > paidDueAt,
+    );
+    if (hasLaterCharge) return 'consistent';
+
+    await this.subscriptions.transitionTo(local.id, SubscriptionStatus.past_due, {
+      actor: 'reconciliation',
+      reason:
+        `período pago terminou em ${periodEnd.toISOString().slice(0, 10)} ` +
+        'sem nova cobrança no PSP',
+      data: { graceUntil: this.state.computeGraceUntil(periodEnd) },
+    });
+    this.alert(
+      `Assinatura ${local.id}: período pago terminou sem nova cobrança no PSP; ` +
+        `movida para past_due.`,
+    );
+    return 'corrected';
   }
 
-  private correctionData(target: SubscriptionStatus, currentPeriodEnd: Date | null) {
-    if (target === SubscriptionStatus.active) {
-      return currentPeriodEnd ? { currentPeriodEnd } : {};
+  /** Assinatura encerrada no PSP: o estado local acompanha. */
+  private async reconcileTerminal(
+    local: SubscriptionWithPlan,
+    target: SubscriptionStatus,
+    remoteStatus: string,
+  ): Promise<ReconcileOutcome> {
+    if (local.status === target) return 'consistent';
+
+    // Cancelamento agendado ainda dentro do período pago: o PSP já reporta a
+    // assinatura como cancelada/deletada, mas o acesso é mantido até
+    // `currentPeriodEnd`. A correção para `canceled` ocorre no ciclo seguinte
+    // ao fim do período, quando o cancelamento deixa de estar adiado.
+    if (target === SubscriptionStatus.canceled && this.state.isCancellationDeferred(local)) {
+      return 'consistent';
     }
-    if (target === SubscriptionStatus.canceled) {
-      return { canceledAt: new Date() };
+
+    if (!this.state.canTransition(local.status, target)) {
+      this.alert(
+        `Divergência não auto-corrigível na assinatura ${local.id}: ` +
+          `local=${local.status} remoto=${remoteStatus}`,
+      );
+      return 'divergent';
     }
-    return {};
+
+    await this.subscriptions.transitionTo(local.id, target, {
+      actor: 'reconciliation',
+      reason: `divergência banco↔PSP: local=${local.status} remoto=${remoteStatus}`,
+      data: target === SubscriptionStatus.canceled ? { canceledAt: new Date() } : {},
+    });
+    this.alert(`Assinatura ${local.id} corrigida por reconciliação: ${local.status} → ${target}`);
+    return 'corrected';
   }
 
-  private periodDrifted(local: Subscription, remoteEnd: Date | null | undefined): boolean {
-    if (!remoteEnd) return false;
-    return local.currentPeriodEnd?.getTime() !== remoteEnd.getTime();
+  private terminalFromRemote(remoteStatus: string): SubscriptionStatus | null {
+    if (remoteStatus === 'canceled') return SubscriptionStatus.canceled;
+    if (remoteStatus === 'expired') return SubscriptionStatus.expired;
+    return null;
+  }
+
+  /**
+   * A cobrança que decide o estado da assinatura.
+   *
+   * Havendo alguma em disputa, é ela, por mais antiga que seja: a contestação
+   * revoga o acesso enquanto durar. Senão, a mais recente cujo vencimento já
+   * chegou — o PSP gera cobranças com antecedência, então as do topo da lista
+   * costumam ser futuras e ainda `pending`, e não dizem nada sobre o cliente
+   * estar em dia.
+   */
+  private decidingCharge(
+    charges: ProviderPayment[],
+    now: Date = new Date(),
+  ): ProviderPayment | null {
+    const newestFirst = charges
+      .filter((charge) => charge.status !== 'canceled' && charge.dueAt && charge.dueAt <= now)
+      .sort((a, b) => b.dueAt!.getTime() - a.dueAt!.getTime());
+    return newestFirst.find((charge) => charge.status === 'chargeback') ?? newestFirst[0] ?? null;
   }
 
   private alert(message: string): void {

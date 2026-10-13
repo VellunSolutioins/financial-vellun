@@ -7,6 +7,7 @@ import { ReconciliationService } from './reconciliation.service';
 import { ActiveSubscriptionGuard } from './guards/active-subscription.guard';
 import { AsaasPaymentProvider } from './providers/asaas/asaas-payment.provider';
 import { PAYMENT_PROVIDER } from './providers/payment-provider.interface';
+import { ChargeSyncService } from './services/charge-sync.service';
 import { PaymentService } from './services/payment.service';
 import { SubscriptionAccessService } from './services/subscription-access.service';
 import { SubscriptionAuditService } from './services/subscription-audit.service';
@@ -29,6 +30,7 @@ import { WebhookProcessor } from './webhook/webhook.processor';
     SubscriptionAuditService,
     SubscriptionService,
     PaymentService,
+    ChargeSyncService,
     WebhookEventService,
     WebhookProcessor,
     WebhookRetryService,

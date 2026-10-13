@@ -51,9 +51,16 @@ export interface AsaasPayment {
   value: number;
   billingType?: string;
   dueDate?: string | null;
+  /** Data do crédito na conta. No cartão, ~32 dias depois de `confirmedDate`. */
   paymentDate?: string | null;
+  /** Data em que o pagamento foi efetuado. */
   confirmedDate?: string | null;
   clientPaymentDate?: string | null;
+  subscription?: string | null;
+  customer?: string | null;
+  /** Checkout hospedado que originou a cobrança. */
+  checkoutSession?: string | null;
+  deleted?: boolean;
 }
 
 export interface AsaasList<T> {
@@ -78,6 +85,6 @@ export interface AsaasRefund {
 export interface AsaasWebhookEvent {
   id: string;
   event: string;
-  payment?: AsaasPayment & { subscription?: string; customer?: string };
+  payment?: AsaasPayment;
   subscription?: AsaasSubscription;
 }

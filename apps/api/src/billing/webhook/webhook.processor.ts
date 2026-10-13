@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { Plan, PaymentStatus, Subscription, SubscriptionStatus } from '@prisma/client';
+import { Subscription, SubscriptionStatus } from '@prisma/client';
 
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -7,12 +7,10 @@ import {
   PAYMENT_PROVIDER,
   PaymentProvider,
 } from '../providers/payment-provider.interface';
-import { PaymentService } from '../services/payment.service';
+import { ChargeSyncService, SubscriptionWithPlan } from '../services/charge-sync.service';
 import { SubscriptionStateService } from '../services/subscription-state.service';
 import { SubscriptionService } from '../services/subscription.service';
 import { WebhookEventService } from './webhook-event.service';
-
-type SubscriptionWithPlan = Subscription & { plan: Plan };
 
 /**
  * Desfecho de uma tentativa, para o cron registrar e para os testes afirmarem.
@@ -50,7 +48,7 @@ export class WebhookProcessor {
     private readonly events: WebhookEventService,
     private readonly subscriptions: SubscriptionService,
     private readonly state: SubscriptionStateService,
-    private readonly payments: PaymentService,
+    private readonly charges: ChargeSyncService,
   ) {}
 
   /**
@@ -142,102 +140,73 @@ export class WebhookProcessor {
   /** Aplica a intenção. Devolve a assinatura correlacionada, quando houver. */
   private async apply(event: NormalizedWebhookEvent): Promise<string | null> {
     if (event.intent === 'ignore') return null;
+    if (event.intent === 'subscription_canceled') return this.applyCanceled(event);
+    return this.applyCharge(event);
+  }
 
+  /**
+   * Evento de cobrança: o payload só diz **qual** cobrança mudou.
+   *
+   * O estado dela, e a quem pertence, vêm do PSP. O webhook é autenticado por
+   * um token estático, então confiar no status do payload seria deixar quem
+   * tivesse o token conceder acesso a si mesmo. E a ordem dos eventos deixa de
+   * importar: um `PAYMENT_OVERDUE` atrasado consulta a cobrança e a encontra paga.
+   */
+  private async applyCharge(event: NormalizedWebhookEvent): Promise<string | null> {
+    if (!event.payment) {
+      this.logger.warn(`Webhook de cobrança sem cobrança no payload (intent=${event.intent})`);
+      return null;
+    }
+
+    const charge = await this.provider.getPayment(event.payment.providerPaymentId);
+    const subscription = await this.locate(charge);
+    if (!subscription) {
+      this.logger.warn(`Webhook sem assinatura local correlacionável (intent=${event.intent})`);
+      return null;
+    }
+
+    await this.charges.sync(subscription, charge, { source: 'webhook', onlyOnChange: true });
+    return subscription.id;
+  }
+
+  private async applyCanceled(event: NormalizedWebhookEvent): Promise<string | null> {
     const subscription = await this.locate(event);
     if (!subscription) {
       this.logger.warn(`Webhook sem assinatura local correlacionável (intent=${event.intent})`);
       return null;
     }
 
-    await this.dispatch(subscription, event);
+    await this.handleCanceled(subscription);
     return subscription.id;
   }
 
-  private async dispatch(
-    subscription: SubscriptionWithPlan,
-    event: NormalizedWebhookEvent,
-  ): Promise<void> {
-    switch (event.intent) {
-      case 'payment_succeeded':
-        return this.handleSuccess(subscription, event);
-      case 'payment_failed':
-        return this.handleFailure(subscription, event);
-      case 'payment_refunded':
-        return this.recordPayment(subscription, event, PaymentStatus.refunded);
-      case 'payment_chargeback':
-        return this.handleChargeback(subscription, event);
-      case 'subscription_canceled':
-        return this.handleCanceled(subscription);
-    }
-  }
+  private async locate(ref: {
+    providerSubscriptionId: string | null;
+    providerCustomerId: string | null;
+  }): Promise<SubscriptionWithPlan | null> {
+    // Cobrança avulsa (sem assinatura no PSP) não é de nenhuma assinatura
+    // nossa, mesmo sendo de um cliente nosso.
+    if (!ref.providerSubscriptionId) return null;
 
-  private async locate(event: NormalizedWebhookEvent): Promise<SubscriptionWithPlan | null> {
-    if (event.providerSubscriptionId) {
-      const bySub = await this.prisma.subscription.findFirst({
-        where: { providerSubscriptionId: event.providerSubscriptionId },
-        include: { plan: true },
-      });
-      if (bySub) return bySub;
-    }
-    if (event.providerCustomerId) {
-      return this.prisma.subscription.findFirst({
-        where: {
-          providerCustomerId: event.providerCustomerId,
-          status: { notIn: [SubscriptionStatus.canceled, SubscriptionStatus.expired] },
-        },
-        orderBy: { createdAt: 'desc' },
-        include: { plan: true },
-      });
-    }
-    return null;
-  }
-
-  private async handleSuccess(sub: SubscriptionWithPlan, event: NormalizedWebhookEvent) {
-    // Evento crítico: confirma o estado real no PSP antes de conceder acesso.
-    let periodEnd: Date | null = null;
-    if (event.providerSubscriptionId) {
-      const remote = await this.provider.getSubscription(event.providerSubscriptionId);
-      periodEnd = remote.currentPeriodEnd ?? null;
-    }
-
-    const start = new Date();
-    const end = periodEnd ?? this.state.computePeriodEnd(start, sub.plan.interval);
-
-    await this.tryTransition(sub, SubscriptionStatus.active, 'webhook:payment_succeeded', {
-      providerSubscriptionId: event.providerSubscriptionId ?? sub.providerSubscriptionId,
-      currentPeriodStart: start,
-      currentPeriodEnd: end,
-      graceUntil: null,
+    const bySub = await this.prisma.subscription.findFirst({
+      where: { providerSubscriptionId: ref.providerSubscriptionId },
+      include: { plan: true },
     });
+    if (bySub || !ref.providerCustomerId) return bySub;
 
-    await this.recordPayment(sub, event, PaymentStatus.paid);
-  }
-
-  private async handleFailure(sub: SubscriptionWithPlan, event: NormalizedWebhookEvent) {
-    // Falha de renovação (já tinha acesso) → past_due com grace. Falha de
-    // primeira cobrança (pending) → unpaid, sem conceder acesso.
-    const accessStatuses: SubscriptionStatus[] = [
-      SubscriptionStatus.active,
-      SubscriptionStatus.trialing,
-      SubscriptionStatus.past_due,
-    ];
-    const hadAccess = accessStatuses.includes(sub.status);
-
-    if (hadAccess) {
-      await this.tryTransition(sub, SubscriptionStatus.past_due, 'webhook:payment_failed', {
-        graceUntil: this.state.computeGraceUntil(),
-      });
-    } else {
-      await this.tryTransition(sub, SubscriptionStatus.unpaid, 'webhook:payment_failed', {});
-    }
-
-    await this.recordPayment(sub, event, PaymentStatus.failed);
-  }
-
-  private async handleChargeback(sub: SubscriptionWithPlan, event: NormalizedWebhookEvent) {
-    await this.recordPayment(sub, event, PaymentStatus.chargeback);
-    // Chargeback revoga o acesso: assinatura passa a `unpaid`.
-    await this.tryTransition(sub, SubscriptionStatus.unpaid, 'webhook:payment_chargeback', {});
+    // Assinatura do PSP ainda desconhecida aqui: só pode ser a de uma linha que
+    // espera o vínculo (a primeira cobrança de um checkout). Uma linha já
+    // vinculada a OUTRA assinatura do PSP não serve — casar por cliente faria o
+    // estorno de uma cobrança duplicada cancelar a assinatura válida.
+    return this.prisma.subscription.findFirst({
+      where: {
+        providerCustomerId: ref.providerCustomerId,
+        providerSubscriptionId: null,
+        status: { notIn: [SubscriptionStatus.canceled, SubscriptionStatus.expired] },
+      },
+      orderBy: { createdAt: 'desc' },
+      include: { plan: true },
+    });
   }
 
   private async handleCanceled(sub: SubscriptionWithPlan) {
@@ -269,25 +238,5 @@ export class WebhookProcessor {
       return;
     }
     await this.subscriptions.transitionTo(sub.id, to, { actor, data });
-  }
-
-  private async recordPayment(
-    sub: Subscription,
-    event: NormalizedWebhookEvent,
-    status: PaymentStatus,
-  ) {
-    if (!event.payment) return;
-    const now = new Date();
-    await this.payments.upsertFromProvider({
-      userId: sub.userId,
-      subscriptionId: sub.id,
-      providerPaymentId: event.payment.providerPaymentId,
-      amount: event.payment.amount,
-      currency: event.payment.currency,
-      status,
-      dueAt: event.payment.dueAt,
-      paidAt: status === PaymentStatus.paid ? (event.payment.paidAt ?? now) : null,
-      failedAt: status === PaymentStatus.failed ? now : null,
-    });
   }
 }

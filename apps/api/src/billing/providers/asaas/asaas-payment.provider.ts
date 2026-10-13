@@ -131,7 +131,14 @@ export class AsaasPaymentProvider implements PaymentProvider {
   async cancelSubscription(input: CancelSubscriptionInput): Promise<void> {
     // DELETE interrompe a geração de novas cobranças no Asaas. A regra de
     // acesso até o fim do período já pago é tratada na camada de domínio.
-    await this.getClient().delete<unknown>(`/subscriptions/${input.providerSubscriptionId}`);
+    try {
+      await this.getClient().delete<unknown>(`/subscriptions/${input.providerSubscriptionId}`);
+    } catch (error) {
+      // Já removida: o objetivo (parar de cobrar) está cumprido. Sem isto, um
+      // retry depois de um cancelamento que deu certo falharia para sempre.
+      if (error instanceof AsaasApiError && error.status === 404) return;
+      throw error;
+    }
   }
 
   async getSubscription(providerSubscriptionId: string): Promise<ProviderSubscription> {
@@ -141,9 +148,18 @@ export class AsaasPaymentProvider implements PaymentProvider {
     return mapSubscription(sub);
   }
 
+  async getPayment(providerPaymentId: string): Promise<ProviderPayment> {
+    const payment = await this.getClient().get<AsaasPayment>(`/payments/${providerPaymentId}`);
+    return mapPayment(payment);
+  }
+
   async listSubscriptionPayments(providerSubscriptionId: string): Promise<ProviderPayment[]> {
+    // O padrão do Asaas são 10 por página, da mais nova para a mais antiga, e
+    // a lista inclui cobranças futuras já geradas. 20 cobre com folga as
+    // vencidas recentes mesmo com duas futuras na frente.
     const list = await this.getClient().get<AsaasList<AsaasPayment>>(
       `/subscriptions/${providerSubscriptionId}/payments`,
+      { query: { limit: 20 } },
     );
     return (list.data ?? []).map(mapPayment);
   }

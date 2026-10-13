@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import {
   InternalServerErrorException,
   NotImplementedException,
@@ -98,6 +100,75 @@ describe('AsaasPaymentProvider — configuração e stubs', () => {
     await expect(provider.getSubscription('sub_1')).rejects.toBeInstanceOf(
       InternalServerErrorException,
     );
+  });
+});
+
+describe('AsaasPaymentProvider — chamadas ao Asaas', () => {
+  // Valor qualquer, gerado na hora: o cliente HTTP só o repassa no header.
+  const API = { ASAAS_API_URL: 'https://asaas.test/v3', ASAAS_API_KEY: randomUUID() };
+
+  function mockFetch(status: number, body: unknown) {
+    return jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify(body), { status }));
+  }
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('getPayment consulta a cobrança e devolve o estado e os vínculos dela', async () => {
+    const fetchMock = mockFetch(200, {
+      id: 'pay_1',
+      status: 'OVERDUE',
+      value: 49.9,
+      dueDate: '2026-09-15',
+      subscription: 'sub_1',
+      customer: 'cus_1',
+      checkoutSession: 'chk_1',
+    });
+
+    const result = await makeProvider(API).getPayment('pay_1');
+
+    expect(fetchMock.mock.calls[0][0]).toBe('https://asaas.test/v3/payments/pay_1');
+    expect(result).toMatchObject({
+      id: 'pay_1',
+      status: 'failed',
+      providerSubscriptionId: 'sub_1',
+      providerCustomerId: 'cus_1',
+      providerCheckoutId: 'chk_1',
+    });
+  });
+
+  it('listSubscriptionPayments pede mais que a página padrão de 10', async () => {
+    const fetchMock = mockFetch(200, { data: [{ id: 'pay_1', status: 'PENDING', value: 49.9 }] });
+
+    const result = await makeProvider(API).listSubscriptionPayments('sub_1');
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      'https://asaas.test/v3/subscriptions/sub_1/payments?limit=20',
+    );
+    expect(result).toHaveLength(1);
+  });
+
+  it('cancelSubscription trata assinatura já removida (404) como sucesso', async () => {
+    mockFetch(404, { errors: [{ description: 'Assinatura não encontrada' }] });
+
+    await expect(
+      makeProvider(API).cancelSubscription({
+        providerSubscriptionId: 'sub_1',
+        cancelAtPeriodEnd: true,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('cancelSubscription propaga os demais erros', async () => {
+    mockFetch(500, { errors: [{ description: 'erro interno' }] });
+
+    await expect(
+      makeProvider(API).cancelSubscription({
+        providerSubscriptionId: 'sub_1',
+        cancelAtPeriodEnd: true,
+      }),
+    ).rejects.toMatchObject({ name: 'AsaasApiError', status: 500 });
   });
 });
 

@@ -27,12 +27,12 @@ function setup() {
   };
 
   const processor = new WebhookProcessor(
-    { normalizeWebhookEvent: jest.fn(), getSubscription: jest.fn() } as any,
+    { normalizeWebhookEvent: jest.fn(), getPayment: jest.fn() } as any,
     prisma as any,
     events as any,
     { transitionTo: jest.fn() } as any,
     new SubscriptionStateService(),
-    { upsertFromProvider: jest.fn() } as any,
+    { sync: jest.fn() } as any,
   );
 
   return { processor, prisma, events };

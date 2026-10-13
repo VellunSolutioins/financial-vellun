@@ -62,8 +62,13 @@ export interface CancelSubscriptionInput {
 export interface ProviderSubscription {
   id: string;
   status: string;
-  currentPeriodStart?: Date | null;
-  currentPeriodEnd?: Date | null;
+  /**
+   * Vencimento da próxima cobrança **a ser gerada** pelo PSP. Não é o fim do
+   * período pago: o PSP pode gerar cobranças com antecedência (o Asaas gera
+   * ~40 dias antes), e aí esta data fica um ou dois ciclos à frente. O período
+   * pago se deriva da cobrança, em `SubscriptionStateService.effectOfCharge`.
+   */
+  nextDueAt?: Date | null;
   cancelAtPeriodEnd?: boolean;
 }
 
@@ -74,6 +79,14 @@ export interface ProviderPayment {
   currency: string;
   dueAt?: Date | null;
   paidAt?: Date | null;
+  /** Vínculos da cobrança no PSP — é por eles que se acha a assinatura local. */
+  providerSubscriptionId: string | null;
+  providerCustomerId: string | null;
+  /**
+   * Checkout que originou a cobrança. Ainda não participa da correlação: a
+   * assinatura local não guarda o checkout em que foi contratada.
+   */
+  providerCheckoutId: string | null;
 }
 
 export interface RefundPaymentInput {
@@ -139,6 +152,11 @@ export interface PaymentProvider {
   ): Promise<PaymentMethodUpdateSession>;
   cancelSubscription(input: CancelSubscriptionInput): Promise<void>;
   getSubscription(providerSubscriptionId: string): Promise<ProviderSubscription>;
+  /**
+   * Estado atual de uma cobrança no PSP. O webhook só avisa que algo mudou; o
+   * que vale é o que esta consulta devolve.
+   */
+  getPayment(providerPaymentId: string): Promise<ProviderPayment>;
   listSubscriptionPayments(providerSubscriptionId: string): Promise<ProviderPayment[]>;
   refundPayment(input: RefundPaymentInput): Promise<ProviderRefund>;
   verifyWebhook(input: VerifyWebhookInput): Promise<VerifiedPaymentEvent>;

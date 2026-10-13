@@ -40,8 +40,11 @@ export function mapPaymentStatus(status: AsaasPaymentStatus): string {
       return 'pending';
     case 'OVERDUE':
       return 'failed';
+    // Estorno pedido ou em andamento ainda pode ser negado. `refunded` cancela
+    // a assinatura no PSP, e isso não se desfaz — só o estorno concluído conta.
     case 'REFUND_REQUESTED':
     case 'REFUND_IN_PROGRESS':
+      return 'processing';
     case 'REFUNDED':
       return 'refunded';
     case 'PARTIALLY_REFUNDED':
@@ -74,7 +77,7 @@ export function mapSubscription(sub: AsaasSubscription): ProviderSubscription {
   return {
     id: sub.id,
     status: mapSubscriptionStatus(sub.status, sub.deleted),
-    currentPeriodEnd: parseDate(sub.nextDueDate),
+    nextDueAt: parseDate(sub.nextDueDate),
     cancelAtPeriodEnd: sub.deleted ?? false,
   };
 }
@@ -82,10 +85,17 @@ export function mapSubscription(sub: AsaasSubscription): ProviderSubscription {
 export function mapPayment(payment: AsaasPayment): ProviderPayment {
   return {
     id: payment.id,
-    status: mapPaymentStatus(payment.status),
+    // Cobrança removida continua consultável, com o status que tinha. Para o
+    // domínio ela deixou de existir.
+    status: payment.deleted ? 'canceled' : mapPaymentStatus(payment.status),
     amount: payment.value.toFixed(2),
     currency: 'BRL',
     dueAt: parseDate(payment.dueDate),
-    paidAt: parseDate(payment.paymentDate ?? payment.confirmedDate ?? payment.clientPaymentDate),
+    // `confirmedDate` primeiro: `paymentDate` é a data do crédito e, no cartão,
+    // só é preenchida ~32 dias depois, no `PAYMENT_RECEIVED`.
+    paidAt: parseDate(payment.confirmedDate ?? payment.clientPaymentDate ?? payment.paymentDate),
+    providerSubscriptionId: payment.subscription ?? null,
+    providerCustomerId: payment.customer ?? null,
+    providerCheckoutId: payment.checkoutSession ?? null,
   };
 }

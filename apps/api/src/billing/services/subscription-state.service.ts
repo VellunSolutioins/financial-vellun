@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { BillingInterval, SubscriptionStatus } from '@prisma/client';
+import { BillingInterval, PaymentStatus, SubscriptionStatus } from '@prisma/client';
 
 import { GRACE_DAYS, TRIAL_DAYS } from '../billing.constants';
 import { InvalidSubscriptionTransitionError } from '../billing.errors';
@@ -19,6 +19,25 @@ const ALLOWED_TRANSITIONS: Record<SubscriptionStatus, SubscriptionStatus[]> = {
   canceled: ['pending', 'active'],
   expired: ['pending', 'active'],
 };
+
+/** O que uma cobrança, no estado em que está, pede da assinatura. */
+export type ChargeEffect =
+  | { kind: 'none' }
+  | { kind: 'activate'; currentPeriodStart: Date; currentPeriodEnd: Date }
+  | { kind: 'past_due'; graceUntil: Date }
+  | { kind: 'unpaid' }
+  | { kind: 'cancel' };
+
+/**
+ * Status de cobrança que decidem o estado da assinatura. Uma cobrança
+ * `pending` (ex.: a do mês que vem, já gerada pelo PSP) não decide nada.
+ */
+export const DECISIVE_PAYMENT_STATUSES: PaymentStatus[] = [
+  PaymentStatus.paid,
+  PaymentStatus.failed,
+  PaymentStatus.chargeback,
+  PaymentStatus.refunded,
+];
 
 @Injectable()
 export class SubscriptionStateService {
@@ -48,6 +67,68 @@ export class SubscriptionStateService {
     }
   }
 
+  /**
+   * Efeito de uma cobrança sobre a assinatura, dado o estado atual das duas.
+   *
+   * É uma função do **estado**, não do evento: a mesma cobrança avaliada duas
+   * vezes pede a mesma coisa, e as datas saem do vencimento, não do relógio.
+   * Por isso serve igual ao webhook e à reconciliação, e reprocessar não
+   * estende grace nem desloca o período.
+   */
+  effectOfCharge(
+    sub: {
+      status: SubscriptionStatus;
+      currentPeriodEnd: Date | null;
+      plan: { interval: BillingInterval };
+    },
+    charge: { status: PaymentStatus; dueAt: Date | null; paidAt: Date | null },
+    now: Date = new Date(),
+  ): ChargeEffect {
+    switch (charge.status) {
+      case PaymentStatus.paid: {
+        // O período pago é ancorado no vencimento: `nextDueDate` da assinatura
+        // no PSP aponta para a próxima cobrança a gerar, não para o fim deste.
+        const start = charge.dueAt ?? charge.paidAt ?? now;
+        const end = this.computePeriodEnd(start, sub.plan.interval);
+        // Cobrança de um período que já acabou não concede acesso. É o caso do
+        // aviso de crédito (~32 dias depois do pagamento no cartão) chegando
+        // com a assinatura já inadimplente ou cancelada.
+        if (end <= now) return { kind: 'none' };
+        const alreadyApplied =
+          sub.status === SubscriptionStatus.active &&
+          sub.currentPeriodEnd?.getTime() === end.getTime();
+        if (alreadyApplied) return { kind: 'none' };
+        return { kind: 'activate', currentPeriodStart: start, currentPeriodEnd: end };
+      }
+
+      case PaymentStatus.failed:
+        // Só quem estava em dia ganha grace. Quem já está `past_due` não ganha
+        // outro a cada cobrança vencida — seriam 3 dias de acesso por mês sem pagar.
+        if (
+          sub.status === SubscriptionStatus.active ||
+          sub.status === SubscriptionStatus.trialing
+        ) {
+          return { kind: 'past_due', graceUntil: this.computeGraceUntil(charge.dueAt ?? now) };
+        }
+        // Primeira cobrança recusada: nunca teve acesso.
+        if (sub.status === SubscriptionStatus.pending) return { kind: 'unpaid' };
+        return { kind: 'none' };
+
+      case PaymentStatus.chargeback:
+        return this.canTransition(sub.status, SubscriptionStatus.unpaid)
+          ? { kind: 'unpaid' }
+          : { kind: 'none' };
+
+      case PaymentStatus.refunded:
+        return this.canTransition(sub.status, SubscriptionStatus.canceled)
+          ? { kind: 'cancel' }
+          : { kind: 'none' };
+
+      default:
+        return { kind: 'none' };
+    }
+  }
+
   /** Fim do período de teste: `start` + 30 dias. */
   computeTrialEnd(start: Date = new Date()): Date {
     return this.addDays(start, TRIAL_DAYS);
@@ -60,12 +141,15 @@ export class SubscriptionStateService {
 
   /** Fim do período pago a partir de `start`, conforme a periodicidade do plano. */
   computePeriodEnd(start: Date, interval: BillingInterval): Date {
+    const months = interval === BillingInterval.monthly ? 1 : 12;
     const end = new Date(start);
-    if (interval === BillingInterval.monthly) {
-      end.setMonth(end.getMonth() + 1);
-    } else {
-      end.setFullYear(end.getFullYear() + 1);
-    }
+    const day = end.getDate();
+    // Vai ao dia 1 antes de trocar o mês: `setMonth` num dia 31 transborda
+    // para o mês seguinte (31/01 + 1 mês viraria 03/03).
+    end.setDate(1);
+    end.setMonth(end.getMonth() + months);
+    const lastDay = new Date(end.getFullYear(), end.getMonth() + 1, 0).getDate();
+    end.setDate(Math.min(day, lastDay));
     return end;
   }
 
