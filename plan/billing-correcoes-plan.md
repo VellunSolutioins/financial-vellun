@@ -27,11 +27,12 @@ Confirmadas pelo Bruno em 12/10/2026.
 
 ## Andamento
 
-| Entrega | Situação                                                                                         |
-| ------- | ------------------------------------------------------------------------------------------------ |
-| 0       | Feita em 12/10/2026. Resultado na seção 9 de `docs/analise-billing-2026-10-12.md`.               |
-| 1       | Implementada no branch `fix/billing-acesso-sem-pagamento`. Falta a verificação com webhook real. |
-| 2 a 5   | Pendentes.                                                                                       |
+| Entrega | Situação                                                                                                                                                                               |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0       | Feita em 12/10/2026. Resultado na seção 9 de `docs/analise-billing-2026-10-12.md`.                                                                                                     |
+| 1       | Implementada no branch `fix/billing-acesso-sem-pagamento`. Falta a verificação com webhook real.                                                                                       |
+| 2       | Implementada no mesmo branch. O teste de integração com Postgres (`webhook-transaction.integration.spec.ts`) passou no banco de validação local. Falta a verificação com webhook real. |
+| 3 a 5   | Pendentes.                                                                                                                                                                             |
 
 Desvios da entrega 1 em relação ao texto abaixo, todos motivados pelo sandbox:
 
@@ -59,7 +60,21 @@ Pontos para o deploy da entrega 1:
 - A regra de estorno **não é retroativa** (decisão do Bruno em 12/10/2026). O estorno só revoga o acesso quando o aviso chega pelo webhook. A reconciliação não cancela: ao encontrar uma assinatura com a última cobrança vencida estornada, registra o pagamento, emite um alerta, uma vez, e conta como divergência manual.
 - O `currentPeriodEnd` de todas as assinaturas ativas é recalculado, com um alerta por assinatura.
 
-Fica para a entrega 2: a janela de milissegundos entre a releitura do estado local e a escrita, que só a trava por assinatura fecha.
+Desvios da entrega 2 em relação ao texto abaixo, já com os ajustes da revisão de código:
+
+- `linkSubscription` deixou de existir: a ligação do evento com a assinatura vai na mesma escrita do `markProcessed`.
+- A decisão sobre a cobrança é tomada com a assinatura travada. O que ela exige do PSP (cancelar, num estorno) acontece **depois** do commit, e o evento só é fechado quando o PSP confirma; se ele falhar, o retry do evento tenta de novo. O plano previa todas as chamadas ao PSP antes da transação, o que permitiria cancelar lá com base numa leitura sem trava.
+- `transitionTo` sempre grava com o `status` lido no `where` e sempre numa transação: a de quem chama ou uma própria. Transição e auditoria passam a ir juntas em todos os chamadores.
+- Evento de cobrança sem assinatura local só vira erro quando a cobrança está **paga**. As demais (vencida, estornada) são fechadas com aviso em log, para não encher o painel de eventos que nunca vão correlacionar. Cobrança avulsa, sem assinatura nem checkout no PSP, também é só fechada.
+- O casamento pelo cliente ficou restrito à cobrança paga. Vencimento ou cancelamento de uma assinatura do PSP desconhecida não tomam mais a linha do checkout em andamento.
+- O estorno pelo webhook revoga o acesso mesmo quando a reconciliação já tinha registrado a cobrança como estornada.
+- A reconciliação usa a mesma trava, só abre transação quando há o que gravar, acerta localmente as disputas que já terminaram no PSP e decide o "período terminou sem nova cobrança" dentro da mesma regra, só para assinatura `active`.
+
+Limitações conhecidas depois da entrega 2:
+
+- Quando uma disputa termina e a cobrança não é a mais recente, o acesso só volta na reconciliação seguinte (até uma hora).
+- Duas assinaturas pagas no PSP para o mesmo cliente, com uma única linha local sem vínculo, continuam ambíguas: a primeira cobrança paga leva a linha. A correlação pelo checkout, da entrega 3, resolve.
+- Numa conta do Asaas compartilhada entre ambientes, cada cobrança paga de outro ambiente termina como evento esgotado no painel.
 
 ## Entrega 0 — Reprodução no sandbox do Asaas
 
