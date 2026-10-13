@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { BillingInterval, Prisma, SubscriptionStatus } from '@prisma/client';
+import { BillingInterval, Prisma, Subscription, SubscriptionStatus } from '@prisma/client';
 
+import { Db } from '../../common/db';
 import { PrismaService } from '../../prisma/prisma.service';
+import { ConcurrentSubscriptionChangeError } from '../billing.errors';
 import { SubscriptionAuditService } from './subscription-audit.service';
 import { SubscriptionStateService } from './subscription-state.service';
 
@@ -167,28 +169,60 @@ export class SubscriptionService {
   /**
    * Aplica uma transição de estado validada e registra a auditoria. Rejeita
    * transições inválidas via {@link SubscriptionStateService.assertTransition}.
+   *
+   * A mudança e a auditoria vão no mesmo commit: no `db` de quem chamou, quando
+   * já existe uma transação (o webhook, com a cobrança e o evento juntos), ou
+   * numa transação própria.
    */
-  async transitionTo(subscriptionId: string, to: SubscriptionStatus, input: TransitionInput) {
-    const current = await this.prisma.subscription.findUniqueOrThrow({
-      where: { id: subscriptionId },
-    });
+  async transitionTo(
+    subscriptionId: string,
+    to: SubscriptionStatus,
+    input: TransitionInput,
+    db?: Db,
+  ) {
+    if (db) return this.applyTransition(db, subscriptionId, to, input);
+    return this.prisma.$transaction((tx) => this.applyTransition(tx, subscriptionId, to, input));
+  }
+
+  private async applyTransition(
+    db: Db,
+    subscriptionId: string,
+    to: SubscriptionStatus,
+    input: TransitionInput,
+  ) {
+    const current = await db.subscription.findUniqueOrThrow({ where: { id: subscriptionId } });
 
     this.state.assertTransition(current.status, to);
 
-    const updated = await this.prisma.subscription.update({
-      where: { id: subscriptionId },
-      data: { status: to, ...input.data },
-    });
+    // `status` no `where`: se outra escrita mudou o estado depois da leitura
+    // acima, nada é gravado. Um `update` só por id deixaria valer a última
+    // escrita, com a transição validada contra um estado que já não existe.
+    let updated: Subscription;
+    try {
+      updated = await db.subscription.update({
+        where: { id: subscriptionId, status: current.status },
+        data: { status: to, ...input.data },
+      });
+    } catch (error) {
+      // P2025: nenhuma linha com esse id E esse status.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+        throw new ConcurrentSubscriptionChangeError(subscriptionId, current.status);
+      }
+      throw error;
+    }
 
-    await this.audit.record({
-      subscriptionId,
-      action: `transition:${current.status}->${to}`,
-      previousStatus: current.status,
-      newStatus: to,
-      actor: input.actor,
-      reason: input.reason,
-      metadata: input.metadata,
-    });
+    await this.audit.record(
+      {
+        subscriptionId,
+        action: `transition:${current.status}->${to}`,
+        previousStatus: current.status,
+        newStatus: to,
+        actor: input.actor,
+        reason: input.reason,
+        metadata: input.metadata,
+      },
+      db,
+    );
 
     return updated;
   }

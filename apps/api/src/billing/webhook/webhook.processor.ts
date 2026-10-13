@@ -1,13 +1,19 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { Subscription, SubscriptionStatus } from '@prisma/client';
+import { SubscriptionStatus } from '@prisma/client';
 
+import { Db, FINANCIAL_TX_OPTIONS, lockSubscription } from '../../common/db';
 import { PrismaService } from '../../prisma/prisma.service';
+import { UncorrelatedPaymentEventError } from '../billing.errors';
 import {
   NormalizedWebhookEvent,
   PAYMENT_PROVIDER,
   PaymentProvider,
 } from '../providers/payment-provider.interface';
-import { ChargeSyncService, SubscriptionWithPlan } from '../services/charge-sync.service';
+import {
+  ChargeSyncResult,
+  ChargeSyncService,
+  SubscriptionWithPlan,
+} from '../services/charge-sync.service';
 import { SubscriptionStateService } from '../services/subscription-state.service';
 import { SubscriptionService } from '../services/subscription.service';
 import { WebhookEventService } from './webhook-event.service';
@@ -16,9 +22,10 @@ import { WebhookEventService } from './webhook-event.service';
  * Desfecho de uma tentativa, para o cron registrar e para os testes afirmarem.
  *
  * `unrecorded` é a tentativa que falhou **e** cuja falha não pôde ser gravada
- * (banco fora). A linha fica em `processing`, e a varredura a devolve à fila
- * depois de 15 min, com a contagem de tentativas intacta. Chamar isso de
- * `retry_scheduled` seria afirmar um agendamento que não existe.
+ * (banco fora). A linha fica onde estava — em `processing`, ou em `received`
+ * se a falha veio antes da reivindicação — e a varredura a devolve à fila, com
+ * a contagem de tentativas intacta. Chamar isso de `retry_scheduled` seria
+ * afirmar um agendamento que não existe.
  */
 export type AttemptOutcome =
   | 'processed'
@@ -84,8 +91,8 @@ export class WebhookProcessor {
         registrado = await this.events.markFailed(eventId, message);
       } catch (erroAoRegistrar) {
         this.logger.error(
-          `Webhook ${eventId} falhou e a falha não pôde ser registrada; a varredura de ` +
-            `presos o devolve à fila. Falha original: ${message}`,
+          `Webhook ${eventId} falhou e a falha não pôde ser registrada; a varredura ` +
+            `o devolve à fila. Falha original: ${message}`,
           erroAoRegistrar instanceof Error ? erroAoRegistrar.stack : undefined,
         );
         return 'unrecorded';
@@ -130,18 +137,38 @@ export class WebhookProcessor {
       payload: event.sanitizedPayload,
     });
 
-    const subscriptionId = await this.apply(normalized);
-    if (subscriptionId) await this.events.linkSubscription(eventId, subscriptionId);
+    await this.apply(eventId, normalized);
 
-    await this.events.markProcessed(eventId);
+    // Só aqui, depois do commit: contar antes faria a métrica divergir do banco
+    // quando a transação falha.
+    this.events.observeProcessed();
     return true;
   }
 
-  /** Aplica a intenção. Devolve a assinatura correlacionada, quando houver. */
-  private async apply(event: NormalizedWebhookEvent): Promise<string | null> {
-    if (event.intent === 'ignore') return null;
-    if (event.intent === 'subscription_canceled') return this.applyCanceled(event);
-    return this.applyCharge(event);
+  /** Aplica a intenção e fecha o evento no mesmo commit dos efeitos que ele causou. */
+  private async apply(eventId: string, event: NormalizedWebhookEvent): Promise<void> {
+    if (event.intent === 'ignore') return this.close(eventId, null);
+    if (event.intent === 'subscription_canceled') return this.applyCanceled(eventId, event);
+    return this.applyCharge(eventId, event);
+  }
+
+  /**
+   * Uma transação por evento: os efeitos na assinatura (transição, auditoria,
+   * cobrança) e o `processed` do evento entram juntos ou não entram.
+   *
+   * Em commits separados, uma falha no meio deixava estado parcial e o retry
+   * reaplicava tudo por cima — ou, pior, o evento virava `processed` sem o
+   * efeito ter sido gravado.
+   */
+  private async close(
+    eventId: string,
+    subscriptionId: string | null,
+    effects?: (tx: Db) => Promise<unknown>,
+  ): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      if (effects) await effects(tx);
+      await this.events.markProcessed(eventId, subscriptionId, tx);
+    }, FINANCIAL_TX_OPTIONS);
   }
 
   /**
@@ -151,53 +178,93 @@ export class WebhookProcessor {
    * um token estático, então confiar no status do payload seria deixar quem
    * tivesse o token conceder acesso a si mesmo. E a ordem dos eventos deixa de
    * importar: um `PAYMENT_OVERDUE` atrasado consulta a cobrança e a encontra paga.
+   *
+   * A consulta ao PSP vem antes da transação, e o que a decisão exigir dele
+   * (cancelar, num estorno), depois do commit. Dentro dela, só banco.
    */
-  private async applyCharge(event: NormalizedWebhookEvent): Promise<string | null> {
+  private async applyCharge(eventId: string, event: NormalizedWebhookEvent): Promise<void> {
     if (!event.payment) {
       this.logger.warn(`Webhook de cobrança sem cobrança no payload (intent=${event.intent})`);
-      return null;
+      return this.close(eventId, null);
     }
 
     const charge = await this.provider.getPayment(event.payment.providerPaymentId);
-    const subscription = await this.locate(charge);
-    if (!subscription) {
-      this.logger.warn(`Webhook sem assinatura local correlacionável (intent=${event.intent})`);
-      return null;
+
+    // Cobrança avulsa (sem assinatura nem checkout no PSP) não é de nenhuma
+    // assinatura nossa, mesmo sendo de um cliente nosso.
+    if (!charge.providerSubscriptionId && !charge.providerCheckoutId) {
+      this.logger.log(`Cobrança avulsa ${charge.id} ignorada (intent=${event.intent})`);
+      return this.close(eventId, null);
     }
 
-    await this.charges.sync(subscription, charge, { source: 'webhook', onlyOnChange: true });
-    return subscription.id;
-  }
-
-  private async applyCanceled(event: NormalizedWebhookEvent): Promise<string | null> {
-    const subscription = await this.locate(event);
+    const paid = charge.status === 'paid';
+    const subscription = await this.locate(charge, { byCustomer: paid });
     if (!subscription) {
-      this.logger.warn(`Webhook sem assinatura local correlacionável (intent=${event.intent})`);
-      return null;
+      // Pagou e não há a quem dar acesso: tem de aparecer. As demais (vencida,
+      // estornada...) de uma assinatura que não conhecemos não mudam nada aqui;
+      // fazê-las falhar encheria o painel de eventos que nunca vão correlacionar.
+      if (paid) throw new UncorrelatedPaymentEventError(charge.id, charge.providerSubscriptionId);
+      this.logger.warn(
+        `Cobrança ${charge.id} (${charge.status}) sem assinatura local correlacionável; ignorada`,
+      );
+      return this.close(eventId, null);
     }
 
-    await this.handleCanceled(subscription);
-    return subscription.id;
+    let result!: ChargeSyncResult;
+    await this.prisma.$transaction(async (tx) => {
+      result = await this.charges.applyInTransaction(tx, subscription.id, charge, 'webhook');
+      // Com cancelamento pendente no PSP, o evento fica aberto: se o PSP
+      // falhar, é o retry dele que tenta de novo.
+      if (!result.cancelAtGateway) {
+        await this.events.markProcessed(eventId, subscription.id, tx);
+      }
+    }, FINANCIAL_TX_OPTIONS);
+
+    if (result.cancelAtGateway) {
+      await this.charges.settle(result);
+      await this.close(eventId, subscription.id);
+    }
   }
 
-  private async locate(ref: {
-    providerSubscriptionId: string | null;
-    providerCustomerId: string | null;
-  }): Promise<SubscriptionWithPlan | null> {
-    // Cobrança avulsa (sem assinatura no PSP) não é de nenhuma assinatura
-    // nossa, mesmo sendo de um cliente nosso.
-    if (!ref.providerSubscriptionId) return null;
+  private async applyCanceled(eventId: string, event: NormalizedWebhookEvent): Promise<void> {
+    const subscription = await this.locate(event, { byCustomer: false });
+    if (!subscription) {
+      // Assinatura do PSP que não é nossa (ou que nunca chegou a ser paga):
+      // não há o que cancelar aqui.
+      this.logger.warn(`Webhook sem assinatura local correlacionável (intent=${event.intent})`);
+      return this.close(eventId, null);
+    }
 
-    const bySub = await this.prisma.subscription.findFirst({
-      where: { providerSubscriptionId: ref.providerSubscriptionId },
-      include: { plan: true },
-    });
-    if (bySub || !ref.providerCustomerId) return bySub;
+    await this.close(eventId, subscription.id, (tx) =>
+      this.cancelInTransaction(tx, subscription.id),
+    );
+  }
 
-    // Assinatura do PSP ainda desconhecida aqui: só pode ser a de uma linha que
-    // espera o vínculo (a primeira cobrança de um checkout). Uma linha já
-    // vinculada a OUTRA assinatura do PSP não serve — casar por cliente faria o
-    // estorno de uma cobrança duplicada cancelar a assinatura válida.
+  /**
+   * Acha a assinatura local pela assinatura do PSP.
+   *
+   * `byCustomer` liga o plano B: quando a assinatura do PSP ainda é
+   * desconhecida aqui, casar pelo cliente com uma linha que espera o vínculo.
+   * Só serve para a primeira cobrança **paga** de um checkout — é ela que
+   * apresenta a assinatura nova. Aceitar o plano B para qualquer evento
+   * deixaria uma cobrança vencida, ou o cancelamento, de uma assinatura antiga
+   * e desconhecida do mesmo cliente tomar a linha do checkout em andamento.
+   */
+  private async locate(
+    ref: { providerSubscriptionId: string | null; providerCustomerId: string | null },
+    options: { byCustomer: boolean },
+  ): Promise<SubscriptionWithPlan | null> {
+    if (ref.providerSubscriptionId) {
+      const bySub = await this.prisma.subscription.findFirst({
+        where: { providerSubscriptionId: ref.providerSubscriptionId },
+        include: { plan: true },
+      });
+      if (bySub) return bySub;
+    }
+    if (!options.byCustomer || !ref.providerCustomerId) return null;
+
+    // Uma linha já vinculada a OUTRA assinatura do PSP não serve — casar por
+    // cliente faria a cobrança de uma assinatura duplicada mexer na válida.
     return this.prisma.subscription.findFirst({
       where: {
         providerCustomerId: ref.providerCustomerId,
@@ -209,7 +276,11 @@ export class WebhookProcessor {
     });
   }
 
-  private async handleCanceled(sub: SubscriptionWithPlan) {
+  /** Cancela com a assinatura travada, decidindo sobre o estado atual dela. */
+  private async cancelInTransaction(tx: Db, subscriptionId: string): Promise<void> {
+    await lockSubscription(tx, subscriptionId);
+    const sub = await tx.subscription.findUniqueOrThrow({ where: { id: subscriptionId } });
+
     // Cancelamento agendado para o fim do período pago: o PSP exclui a assinatura
     // imediatamente, mas o acesso deve continuar até `currentPeriodEnd`. A
     // reconciliação efetiva o `canceled` quando o período expira.
@@ -221,22 +292,20 @@ export class WebhookProcessor {
       return;
     }
 
-    await this.tryTransition(sub, SubscriptionStatus.canceled, 'webhook:subscription_canceled', {
-      canceledAt: new Date(),
-    });
-  }
-
-  /** Aplica a transição só quando válida — transições inválidas (replays/fora de ordem) são ignoradas. */
-  private async tryTransition(
-    sub: Subscription,
-    to: SubscriptionStatus,
-    actor: string,
-    data: Parameters<SubscriptionService['transitionTo']>[2]['data'],
-  ) {
-    if (!this.state.canTransition(sub.status, to)) {
-      this.logger.warn(`Transição ignorada (${sub.status} → ${to}) para assinatura ${sub.id}`);
+    // Transição inválida (reentrega, evento fora de ordem) é ignorada.
+    if (!this.state.canTransition(sub.status, SubscriptionStatus.canceled)) {
+      this.logger.warn(
+        `Transição ignorada (${sub.status} → ${SubscriptionStatus.canceled}) ` +
+          `para assinatura ${sub.id}`,
+      );
       return;
     }
-    await this.subscriptions.transitionTo(sub.id, to, { actor, data });
+
+    await this.subscriptions.transitionTo(
+      sub.id,
+      SubscriptionStatus.canceled,
+      { actor: 'webhook:subscription_canceled', data: { canceledAt: new Date() } },
+      tx,
+    );
   }
 }

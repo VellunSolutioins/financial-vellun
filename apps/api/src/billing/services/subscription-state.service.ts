@@ -24,7 +24,12 @@ const ALLOWED_TRANSITIONS: Record<SubscriptionStatus, SubscriptionStatus[]> = {
 export type ChargeEffect =
   | { kind: 'none' }
   | { kind: 'activate'; currentPeriodStart: Date; currentPeriodEnd: Date }
-  | { kind: 'past_due'; graceUntil: Date }
+  | {
+      kind: 'past_due';
+      graceUntil: Date;
+      /** `true` quando não há cobrança vencida: o período pago acabou e o PSP não gerou outra. */
+      lapsed?: true;
+    }
   | { kind: 'unpaid' }
   | { kind: 'cancel' };
 
@@ -83,6 +88,11 @@ export class SubscriptionStateService {
     },
     charge: { status: PaymentStatus; dueAt: Date | null; paidAt: Date | null },
     now: Date = new Date(),
+    /**
+     * `isLastGenerated`: o PSP não tem cobrança posterior a esta. Só a
+     * reconciliação sabe dizer, porque é quem lê a lista de cobranças.
+     */
+    context: { isLastGenerated?: boolean } = {},
   ): ChargeEffect {
     switch (charge.status) {
       case PaymentStatus.paid: {
@@ -93,7 +103,16 @@ export class SubscriptionStateService {
         // Cobrança de um período que já acabou não concede acesso. É o caso do
         // aviso de crédito (~32 dias depois do pagamento no cartão) chegando
         // com a assinatura já inadimplente ou cancelada.
-        if (end <= now) return { kind: 'none' };
+        if (end <= now) {
+          // ...a não ser que seja a última que o PSP gerou. Aí a assinatura em
+          // dia ficou sem cobrança para o período atual (removida no painel,
+          // por exemplo): nenhum evento vai rebaixá-la, e `active` não confere
+          // data — ela teria acesso para sempre.
+          const lapsed = context.isLastGenerated && sub.status === SubscriptionStatus.active;
+          return lapsed
+            ? { kind: 'past_due', graceUntil: this.computeGraceUntil(end), lapsed: true }
+            : { kind: 'none' };
+        }
         const alreadyApplied =
           sub.status === SubscriptionStatus.active &&
           sub.currentPeriodEnd?.getTime() === end.getTime();

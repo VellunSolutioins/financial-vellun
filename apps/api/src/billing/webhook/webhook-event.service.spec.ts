@@ -73,6 +73,53 @@ describe('WebhookEventService.ingest', () => {
   });
 });
 
+describe('WebhookEventService.markProcessed', () => {
+  function setup() {
+    const update = jest.fn().mockResolvedValue({});
+    // O cliente de banco é o de quem chama (a transação do evento); o do
+    // serviço não pode ser tocado.
+    const prisma = { paymentWebhookEvent: { update: jest.fn() } } as any;
+    const tx = { paymentWebhookEvent: { update } } as any;
+    const metrics = { observePaymentWebhook: jest.fn() } as any;
+    return { service: new WebhookEventService(prisma, metrics), prisma, tx, update, metrics };
+  }
+
+  it('fecha o evento e o liga à assinatura na mesma escrita, pela transação de quem chama', async () => {
+    const { service, prisma, tx, update } = setup();
+
+    await service.markProcessed('evt-1', 's1', tx);
+
+    expect(update).toHaveBeenCalledWith({
+      where: { id: 'evt-1' },
+      data: expect.objectContaining({
+        status: 'processed',
+        subscriptionId: 's1',
+        lastError: null,
+        nextRetryAt: null,
+      }),
+    });
+    expect(prisma.paymentWebhookEvent.update).not.toHaveBeenCalled();
+  });
+
+  it('evento sem assinatura correlacionada não mexe na ligação', async () => {
+    const { service, tx, update } = setup();
+
+    await service.markProcessed('evt-1', null, tx);
+
+    expect(update.mock.calls[0][0].data).not.toHaveProperty('subscriptionId');
+  });
+
+  it('não conta a métrica: ainda não houve commit', async () => {
+    const { service, tx, metrics } = setup();
+
+    await service.markProcessed('evt-1', 's1', tx);
+    expect(metrics.observePaymentWebhook).not.toHaveBeenCalled();
+
+    service.observeProcessed();
+    expect(metrics.observePaymentWebhook).toHaveBeenCalledWith('processed');
+  });
+});
+
 describe('WebhookEventService.markFailed', () => {
   /**
    * Dublê em que `update` grava o que recebeu e devolve a linha resultante, para

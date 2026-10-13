@@ -11,19 +11,43 @@ function setup() {
     listSubscriptionPayments: jest.fn().mockResolvedValue([]),
     cancelSubscription: jest.fn().mockResolvedValue(undefined),
   };
-  const prisma = {
+  const prisma: any = {
     subscription: {
       findMany: jest.fn(),
       findUnique: jest.fn(),
       updateMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
   };
-  const subscriptions = { transitionTo: jest.fn().mockResolvedValue({}) };
+  // Cliente da transação em que a cobrança é sincronizada. A releitura sob a
+  // trava devolve a mesma linha que a reconciliação releu do banco.
+  const tx = {
+    $queryRaw: jest.fn().mockResolvedValue([]),
+    subscription: {
+      findUniqueOrThrow: jest.fn(
+        async () => prisma.subscription.findUnique.mock.results.at(-1)?.value,
+      ),
+    },
+  };
+  prisma.$transaction = jest.fn(async (work: (client: typeof tx) => unknown) => work(tx));
+
+  const spies = {
+    transitionTo: jest.fn().mockResolvedValue({}),
+    upsertFromProvider: jest.fn().mockResolvedValue({}),
+  };
+  // Cliente de banco de cada transição: `tx` nas que vêm da cobrança.
+  const transitionDbs: unknown[] = [];
+  const subscriptions = {
+    transitionTo: (id: string, to: string, input: unknown, db?: unknown) => {
+      transitionDbs.push(db);
+      return spies.transitionTo(id, to, input);
+    },
+  };
   const payments = {
     findByProviderId: jest.fn().mockResolvedValue(null),
     hasNewerDecisiveCharge: jest.fn().mockResolvedValue(false),
     hasOpenChargeback: jest.fn().mockResolvedValue(false),
-    upsertFromProvider: jest.fn().mockResolvedValue({}),
+    findChargebacks: jest.fn().mockResolvedValue([]),
+    upsertFromProvider: (record: unknown) => spies.upsertFromProvider(record),
   };
   const state = new SubscriptionStateService();
 
@@ -31,13 +55,14 @@ function setup() {
   // reconciliação de reativar inadimplente.
   const charges = new ChargeSyncService(
     provider as any,
+    prisma,
     subscriptions as any,
     state,
     payments as any,
   );
   const service = new ReconciliationService(
     provider as any,
-    prisma as any,
+    prisma,
     subscriptions as any,
     state,
     charges,
@@ -49,7 +74,16 @@ function setup() {
     return service.reconcileSubscription(local);
   };
 
-  return { service, provider, prisma, subscriptions, payments, reconcileOne };
+  return {
+    service,
+    provider,
+    prisma,
+    tx,
+    transitionDbs,
+    subscriptions: { transitionTo: spies.transitionTo },
+    payments: { ...payments, upsertFromProvider: spies.upsertFromProvider },
+    reconcileOne,
+  };
 }
 
 function localSub(overrides: Record<string, unknown> = {}) {
@@ -270,6 +304,19 @@ describe('ReconciliationService.reconcileSubscription', () => {
       expect(subscriptions.transitionTo).not.toHaveBeenCalled();
     });
 
+    it('sincroniza a cobrança numa transação, com a assinatura travada', async () => {
+      const { provider, prisma, tx, transitionDbs, reconcileOne } = setup();
+      provider.listSubscriptionPayments.mockResolvedValue([
+        charge('pay_set', 'failed', '2026-09-15'),
+      ]);
+
+      await reconcileOne(localSub({ status: 'active' }));
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(transitionDbs).toEqual([tx]);
+    });
+
     it('decide com o estado local relido depois das consultas ao PSP, não com o do início do lote', async () => {
       const { service, provider, prisma, subscriptions } = setup();
       provider.listSubscriptionPayments.mockResolvedValue([
@@ -316,7 +363,7 @@ describe('ReconciliationService.reconcileSubscription', () => {
 
   describe('período pago que terminou sem nova cobrança no PSP', () => {
     it('move para past_due, com grace contado do fim do período', async () => {
-      const { provider, subscriptions, reconcileOne } = setup();
+      const { provider, subscriptions, transitionDbs, tx, reconcileOne } = setup();
       // A cobrança de setembro foi removida no painel e nenhuma outra foi gerada.
       provider.listSubscriptionPayments.mockResolvedValue([
         charge('pay_set', 'canceled', '2026-09-15'),
@@ -333,9 +380,12 @@ describe('ReconciliationService.reconcileSubscription', () => {
         'past_due',
         expect.objectContaining({
           actor: 'reconciliation',
-          data: { graceUntil: new Date('2026-09-18T12:00:00Z') },
+          reason: expect.stringContaining('terminou sem nova cobrança no PSP'),
+          data: expect.objectContaining({ graceUntil: new Date('2026-09-18T12:00:00Z') }),
         }),
       );
+      // Decidido com a assinatura travada, como qualquer efeito de cobrança.
+      expect(transitionDbs).toEqual([tx]);
     });
 
     it('não mexe quando o PSP já gerou a cobrança seguinte', async () => {
@@ -353,14 +403,89 @@ describe('ReconciliationService.reconcileSubscription', () => {
       expect(subscriptions.transitionTo).not.toHaveBeenCalled();
     });
 
-    it('não mexe em quem já está inadimplente', async () => {
+    it.each(['past_due', 'trialing'])('não mexe em quem está %s', async (status) => {
       const { provider, subscriptions, reconcileOne } = setup();
       provider.listSubscriptionPayments.mockResolvedValue([
         charge('pay_ago', 'paid', '2026-08-15'),
       ]);
 
-      expect(await reconcileOne(localSub({ status: 'past_due' }))).toBe('consistent');
+      expect(await reconcileOne(localSub({ status }))).toBe('consistent');
       expect(subscriptions.transitionTo).not.toHaveBeenCalled();
+    });
+
+    it('não rebaixa quando uma renovação foi registrada enquanto a lista do PSP era lida', async () => {
+      const { provider, subscriptions, payments, reconcileOne } = setup();
+      provider.listSubscriptionPayments.mockResolvedValue([
+        charge('pay_ago', 'paid', '2026-08-15'),
+      ]);
+      // Sob a trava, já existe aqui uma cobrança mais nova e paga.
+      payments.hasNewerDecisiveCharge.mockResolvedValue(true);
+
+      expect(await reconcileOne(localSub())).toBe('consistent');
+      expect(subscriptions.transitionTo).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('disputa que terminou no PSP e ainda consta aberta aqui', () => {
+    const disputedLocally = {
+      providerPaymentId: 'pay_ago',
+      subscriptionId: 's1',
+      status: 'chargeback',
+      amount: '49.90',
+      dueAt: new Date('2026-08-15T12:00:00Z'),
+      paidAt: null,
+      failedAt: null,
+    };
+
+    it('acerta o registro da cobrança antes de decidir, e a mais recente paga devolve o acesso', async () => {
+      const { provider, subscriptions, payments, reconcileOne } = setup();
+      provider.listSubscriptionPayments.mockResolvedValue([
+        charge('pay_out', 'paid', '2026-10-10'),
+        charge('pay_ago', 'paid', '2026-08-15'), // a disputa foi vencida
+      ]);
+      payments.findChargebacks.mockResolvedValue([disputedLocally]);
+
+      expect(await reconcileOne(localSub({ status: 'unpaid' }))).toBe('corrected');
+      expect(payments.upsertFromProvider).toHaveBeenCalledWith(
+        expect.objectContaining({ providerPaymentId: 'pay_ago', status: 'paid' }),
+      );
+      expect(subscriptions.transitionTo).toHaveBeenCalledWith('s1', 'active', expect.anything());
+    });
+
+    it('não mexe na cobrança que continua em disputa no PSP', async () => {
+      const { provider, payments, reconcileOne } = setup();
+      provider.listSubscriptionPayments.mockResolvedValue([
+        charge('pay_ago', 'chargeback', '2026-08-15'),
+      ]);
+      payments.findChargebacks.mockResolvedValue([disputedLocally]);
+      payments.findByProviderId.mockResolvedValue(disputedLocally);
+
+      await reconcileOne(localSub({ status: 'unpaid' }));
+
+      expect(payments.upsertFromProvider).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('custo quando não há nada a fazer', () => {
+    it('não abre transação nem trava a assinatura se a cobrança já está registrada igual', async () => {
+      const { provider, prisma, tx, payments, reconcileOne } = setup();
+      provider.listSubscriptionPayments.mockResolvedValue([
+        ...FUTURE,
+        charge('pay_set', 'paid', '2026-09-15'),
+      ]);
+      payments.findByProviderId.mockResolvedValue({
+        status: 'paid',
+        subscriptionId: 's1',
+        amount: '49.90',
+        dueAt: new Date('2026-09-15T12:00:00Z'),
+        paidAt: new Date('2026-09-15T12:00:00Z'),
+        failedAt: null,
+      });
+
+      expect(await reconcileOne(localSub())).toBe('consistent');
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(tx.$queryRaw).not.toHaveBeenCalled();
+      expect(payments.upsertFromProvider).not.toHaveBeenCalled();
     });
   });
 

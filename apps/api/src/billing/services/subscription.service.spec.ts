@@ -1,19 +1,25 @@
-import { SubscriptionStatus } from '@prisma/client';
+import { Prisma, SubscriptionStatus } from '@prisma/client';
 
-import { InvalidSubscriptionTransitionError } from '../billing.errors';
+import {
+  ConcurrentSubscriptionChangeError,
+  InvalidSubscriptionTransitionError,
+} from '../billing.errors';
 import { SubscriptionStateService } from './subscription-state.service';
 import { SubscriptionService } from './subscription.service';
 
 function createPrismaMock() {
-  return {
+  const prisma: any = {
     plan: { findMany: jest.fn() },
     subscription: {
       findFirst: jest.fn(),
       findUniqueOrThrow: jest.fn(),
       create: jest.fn(),
-      update: jest.fn(),
+      update: jest.fn(({ data }: any) => ({ id: 's1', ...data })),
     },
   };
+  // A transação própria do serviço roda sobre o mesmo dublê.
+  prisma.$transaction = jest.fn((work: (tx: unknown) => unknown) => work(prisma));
+  return prisma;
 }
 
 describe('SubscriptionService', () => {
@@ -57,12 +63,10 @@ describe('SubscriptionService', () => {
   });
 
   describe('transitionTo', () => {
+    const current = (status: SubscriptionStatus) => ({ id: 's1', status });
+
     it('aplica transição válida, atualiza campos e audita', async () => {
-      prisma.subscription.findUniqueOrThrow.mockResolvedValue({
-        id: 's1',
-        status: SubscriptionStatus.active,
-      });
-      prisma.subscription.update.mockImplementation(({ data }: any) => ({ id: 's1', ...data }));
+      prisma.subscription.findUniqueOrThrow.mockResolvedValue(current('active'));
 
       const result = await service.transitionTo('s1', SubscriptionStatus.canceled, {
         actor: 'webhook',
@@ -70,11 +74,14 @@ describe('SubscriptionService', () => {
         data: { cancelAtPeriodEnd: true },
       });
 
+      // O estado lido entra no `where`: a escrita só vale se ele ainda for esse.
       expect(prisma.subscription.update).toHaveBeenCalledWith({
-        where: { id: 's1' },
+        where: { id: 's1', status: 'active' },
         data: { status: 'canceled', cancelAtPeriodEnd: true },
       });
       expect(result.status).toBe('canceled');
+      // Uma leitura só: a linha devolvida é a do próprio `update`.
+      expect(prisma.subscription.findUniqueOrThrow).toHaveBeenCalledTimes(1);
       expect(audit.record).toHaveBeenCalledWith(
         expect.objectContaining({
           action: 'transition:active->canceled',
@@ -82,14 +89,32 @@ describe('SubscriptionService', () => {
           newStatus: 'canceled',
           actor: 'webhook',
         }),
+        prisma,
       );
     });
 
+    it('sem transação de quem chama, abre a própria: mudança e auditoria no mesmo commit', async () => {
+      prisma.subscription.findUniqueOrThrow.mockResolvedValue(current('active'));
+
+      await service.transitionTo('s1', SubscriptionStatus.past_due, { actor: 'webhook' });
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    });
+
+    it('com a transação de quem chama, grava nela e não abre outra', async () => {
+      const tx = createPrismaMock();
+      tx.subscription.findUniqueOrThrow.mockResolvedValue(current('active'));
+
+      await service.transitionTo('s1', SubscriptionStatus.past_due, { actor: 'webhook' }, tx);
+
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(prisma.subscription.update).not.toHaveBeenCalled();
+      expect(tx.subscription.update).toHaveBeenCalledTimes(1);
+      expect(audit.record).toHaveBeenCalledWith(expect.anything(), tx);
+    });
+
     it('rejeita transição inválida sem persistir nem auditar', async () => {
-      prisma.subscription.findUniqueOrThrow.mockResolvedValue({
-        id: 's1',
-        status: SubscriptionStatus.expired,
-      });
+      prisma.subscription.findUniqueOrThrow.mockResolvedValue(current('expired'));
 
       await expect(
         service.transitionTo('s1', SubscriptionStatus.past_due, { actor: 'webhook' }),
@@ -97,6 +122,32 @@ describe('SubscriptionService', () => {
 
       expect(prisma.subscription.update).not.toHaveBeenCalled();
       expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('não grava por cima quando o estado mudou depois da leitura', async () => {
+      prisma.subscription.findUniqueOrThrow.mockResolvedValue(current('active'));
+      // Outra escrita já tirou a assinatura de `active`: o `where` não casa.
+      prisma.subscription.update.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('não encontrado', {
+          code: 'P2025',
+          clientVersion: 'test',
+        }),
+      );
+
+      await expect(
+        service.transitionTo('s1', SubscriptionStatus.past_due, { actor: 'webhook' }),
+      ).rejects.toBeInstanceOf(ConcurrentSubscriptionChangeError);
+
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('os demais erros de escrita sobem como vieram', async () => {
+      prisma.subscription.findUniqueOrThrow.mockResolvedValue(current('active'));
+      prisma.subscription.update.mockRejectedValue(new Error('banco fora'));
+
+      await expect(
+        service.transitionTo('s1', SubscriptionStatus.past_due, { actor: 'webhook' }),
+      ).rejects.toThrow('banco fora');
     });
   });
 });

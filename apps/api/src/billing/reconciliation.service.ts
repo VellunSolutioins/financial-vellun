@@ -162,10 +162,20 @@ export class ReconciliationService {
     const charge = this.decidingCharge(charges);
     if (!charge) return 'consistent';
 
-    const outcome = await this.charges.sync(local, charge, {
-      source: 'reconciliation',
-      onlyOnChange: false,
-    });
+    // Disputa que já terminou no PSP e ainda consta aberta aqui bloquearia o
+    // webhook de reativar; acerta o registro antes de decidir.
+    await this.charges.refreshResolvedChargebacks(local, charges);
+
+    // O PSP gera a próxima cobrança com semanas de antecedência. Se não existe
+    // nenhuma depois desta, a assinatura parou de cobrar: uma `active` cujo
+    // período pago acabou não seria rebaixada por evento nenhum.
+    const chargeDueAt = charge.dueAt;
+    const isLastGenerated = !charges.some(
+      (other) =>
+        other.status !== 'canceled' && other.dueAt && chargeDueAt && other.dueAt > chargeDueAt,
+    );
+
+    const outcome = await this.charges.sync(local, charge, 'reconciliation', { isLastGenerated });
     if (outcome === 'applied') {
       this.alert(
         `Assinatura ${local.id} corrigida por reconciliação a partir da cobrança ` +
@@ -180,48 +190,7 @@ export class ReconciliationService {
       );
       return 'divergent';
     }
-
-    return this.reconcileLapsed(local, charge, charges);
-  }
-
-  /**
-   * Assinatura em dia cujo período pago acabou sem o PSP ter gerado a cobrança
-   * seguinte (removida no painel, por exemplo). Nenhum evento vai rebaixá-la, e
-   * `active` não confere data: sem isto ela ficaria com acesso para sempre.
-   */
-  private async reconcileLapsed(
-    local: SubscriptionWithPlan,
-    charge: ProviderPayment,
-    charges: ProviderPayment[],
-    now: Date = new Date(),
-  ): Promise<ReconcileOutcome> {
-    const inGoodStanding =
-      local.status === SubscriptionStatus.active || local.status === SubscriptionStatus.trialing;
-    if (!inGoodStanding || charge.status !== 'paid' || !charge.dueAt) return 'consistent';
-
-    const periodEnd = this.state.computePeriodEnd(charge.dueAt, local.plan.interval);
-    if (periodEnd > now) return 'consistent';
-
-    // O PSP gera a próxima cobrança com semanas de antecedência. Se existe uma
-    // depois desta, a assinatura segue cobrando e é ela que vai decidir.
-    const paidDueAt = charge.dueAt;
-    const hasLaterCharge = charges.some(
-      (other) => other.status !== 'canceled' && other.dueAt && other.dueAt > paidDueAt,
-    );
-    if (hasLaterCharge) return 'consistent';
-
-    await this.subscriptions.transitionTo(local.id, SubscriptionStatus.past_due, {
-      actor: 'reconciliation',
-      reason:
-        `período pago terminou em ${periodEnd.toISOString().slice(0, 10)} ` +
-        'sem nova cobrança no PSP',
-      data: { graceUntil: this.state.computeGraceUntil(periodEnd) },
-    });
-    this.alert(
-      `Assinatura ${local.id}: período pago terminou sem nova cobrança no PSP; ` +
-        `movida para past_due.`,
-    );
-    return 'corrected';
+    return 'consistent';
   }
 
   /** Assinatura encerrada no PSP: o estado local acompanha. */

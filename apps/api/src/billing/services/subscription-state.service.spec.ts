@@ -167,6 +167,41 @@ describe('SubscriptionStateService', () => {
       });
     });
 
+    describe('período pago que acabou, sendo esta a última cobrança gerada pelo PSP', () => {
+      const old = new Date('2026-08-15T12:00:00.000Z');
+      const last = { isLastGenerated: true };
+
+      it('assinatura em dia vai para past_due, com grace contado do fim do período', () => {
+        expect(service.effectOfCharge(sub('active'), charge('paid', old), now, last)).toEqual({
+          kind: 'past_due',
+          graceUntil: new Date('2026-09-18T12:00:00.000Z'),
+          lapsed: true,
+        });
+      });
+
+      it.each(['trialing', 'past_due', 'unpaid', 'canceled'] as const)(
+        'não mexe em quem está %s',
+        (status) => {
+          expect(service.effectOfCharge(sub(status), charge('paid', old), now, last)).toEqual({
+            kind: 'none',
+          });
+        },
+      );
+
+      it('sem a informação de que é a última, não rebaixa (é o caso do webhook)', () => {
+        expect(service.effectOfCharge(sub('active'), charge('paid', old), now)).toEqual({
+          kind: 'none',
+        });
+      });
+
+      it('com o período ainda vigente, ser a última não muda nada', () => {
+        const applied = sub('active', new Date('2026-11-12T12:00:00.000Z'));
+        expect(service.effectOfCharge(applied, charge('paid'), now, last)).toEqual({
+          kind: 'none',
+        });
+      });
+    });
+
     it('cobrança paga já refletida na assinatura não pede nada', () => {
       const applied = sub('active', new Date('2026-11-12T12:00:00.000Z'));
       expect(service.effectOfCharge(applied, charge('paid'), now)).toEqual({ kind: 'none' });

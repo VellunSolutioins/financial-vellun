@@ -1,5 +1,6 @@
 import { PaymentStatus } from '@prisma/client';
 
+import { UncorrelatedPaymentEventError } from '../billing.errors';
 import { ChargeSyncService } from '../services/charge-sync.service';
 import { SubscriptionStateService } from '../services/subscription-state.service';
 import { WebhookProcessor } from './webhook.processor';
@@ -15,25 +16,63 @@ function setup() {
     getPayment: jest.fn(),
     cancelSubscription: jest.fn().mockResolvedValue(undefined),
   };
-  const prisma = {
+  const prisma: any = {
     paymentWebhookEvent: { findUniqueOrThrow: jest.fn() },
     subscription: { findFirst: jest.fn() },
   };
+  // Cliente da transação do evento. Por padrão, a releitura sob a trava devolve a
+  // mesma linha que a correlação achou; o teste troca quando quer simular uma
+  // mudança feita por outro evento nesse meio-tempo.
+  const tx = {
+    $queryRaw: jest.fn().mockResolvedValue([]),
+    subscription: {
+      findUniqueOrThrow: jest.fn(async () => {
+        const located = await Promise.all(
+          prisma.subscription.findFirst.mock.results.map((result: any) => result.value),
+        );
+        return located.filter(Boolean).pop();
+      }),
+    },
+  };
+  prisma.$transaction = jest.fn(async (work: (client: typeof tx) => unknown) => work(tx));
+
+  // Cliente de banco usado em cada escrita, na ordem: o que interessa é se foi `tx`.
+  const writes: unknown[] = [];
+  const spies = {
+    transitionTo: jest.fn().mockResolvedValue({}),
+    upsertFromProvider: jest.fn().mockResolvedValue({}),
+    markProcessed: jest.fn().mockResolvedValue({}),
+    /** Assinatura a que o evento foi ligado ao ser fechado. */
+    linkedTo: jest.fn(),
+  };
+
   const events = {
     // `markProcessing` devolve se reivindicou: `false` significa que outro
     // processo levou o evento, e o processamento para aí.
     markProcessing: jest.fn().mockResolvedValue(true),
-    markProcessed: jest.fn().mockResolvedValue({}),
     markFailed: jest.fn().mockResolvedValue({}),
-    linkSubscription: jest.fn().mockResolvedValue(undefined),
+    observeProcessed: jest.fn(),
+    markProcessed: (id: string, subscriptionId: string | null, db: unknown) => {
+      writes.push(db);
+      spies.linkedTo(subscriptionId);
+      return spies.markProcessed(id);
+    },
   };
-  const subscriptions = { transitionTo: jest.fn().mockResolvedValue({}) };
+  const subscriptions = {
+    transitionTo: (id: string, to: string, input: unknown, db: unknown) => {
+      writes.push(db);
+      return spies.transitionTo(id, to, input);
+    },
+  };
   const payments = {
     // Sem registro local da cobrança, e nenhuma mais nova, salvo o teste dizer.
     findByProviderId: jest.fn().mockResolvedValue(null),
     hasNewerDecisiveCharge: jest.fn().mockResolvedValue(false),
     hasOpenChargeback: jest.fn().mockResolvedValue(false),
-    upsertFromProvider: jest.fn().mockResolvedValue({}),
+    upsertFromProvider: (record: unknown, db: unknown) => {
+      writes.push(db);
+      return spies.upsertFromProvider(record);
+    },
   };
   const state = new SubscriptionStateService();
 
@@ -41,19 +80,29 @@ function setup() {
   // estes testes existem para proteger.
   const charges = new ChargeSyncService(
     provider as any,
+    prisma,
     subscriptions as any,
     state,
     payments as any,
   );
   const processor = new WebhookProcessor(
     provider as any,
-    prisma as any,
+    prisma,
     events as any,
     subscriptions as any,
     state,
     charges,
   );
-  return { processor, provider, prisma, events, subscriptions, payments };
+  return {
+    processor,
+    provider,
+    prisma,
+    tx,
+    writes,
+    events: { ...events, markProcessed: spies.markProcessed, linkedTo: spies.linkedTo },
+    subscriptions: { transitionTo: spies.transitionTo },
+    payments: { ...payments, upsertFromProvider: spies.upsertFromProvider },
+  };
 }
 
 function persistedEvent(overrides: Record<string, unknown> = {}) {
@@ -166,6 +215,137 @@ describe('WebhookProcessor.process', () => {
     const transition = ctx.subscriptions.transitionTo.mock.invocationCallOrder[0];
     const upsert = ctx.payments.upsertFromProvider.mock.invocationCallOrder[0];
     expect(transition).toBeLessThan(upsert);
+  });
+
+  describe('uma transação por evento', () => {
+    it('assinatura, cobrança e fechamento do evento vão no mesmo commit, com a assinatura travada', async () => {
+      const ctx = setup();
+      arrange(ctx, { intent: 'payment_succeeded' });
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.prisma.$transaction).toHaveBeenCalledTimes(1);
+      // Transição, cobrança e `processed`: as três escritas pelo cliente da transação.
+      expect(ctx.writes).toEqual([ctx.tx, ctx.tx, ctx.tx]);
+      expect(ctx.events.linkedTo).toHaveBeenCalledWith('s1');
+      expect(ctx.tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+        ctx.subscriptions.transitionTo.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('consulta o PSP antes de abrir a transação', async () => {
+      const ctx = setup();
+      arrange(ctx, { intent: 'payment_succeeded' });
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.provider.getPayment.mock.invocationCallOrder[0]).toBeLessThan(
+        ctx.prisma.$transaction.mock.invocationCallOrder[0],
+      );
+    });
+
+    it('falha ao gravar o efeito não fecha o evento', async () => {
+      const ctx = setup();
+      arrange(ctx, { intent: 'payment_succeeded' });
+      ctx.subscriptions.transitionTo.mockRejectedValue(new Error('auditoria falhou'));
+
+      await expect(ctx.processor.process('row_1')).rejects.toThrow('auditoria falhou');
+
+      expect(ctx.events.markProcessed).not.toHaveBeenCalled();
+      expect(ctx.payments.upsertFromProvider).not.toHaveBeenCalled();
+    });
+
+    it('conta o evento processado só depois do commit', async () => {
+      const ok = setup();
+      arrange(ok, { intent: 'payment_succeeded' });
+      await ok.processor.process('row_1');
+      expect(ok.prisma.$transaction.mock.invocationCallOrder[0]).toBeLessThan(
+        ok.events.observeProcessed.mock.invocationCallOrder[0],
+      );
+
+      const falhou = setup();
+      arrange(falhou, { intent: 'payment_succeeded' });
+      falhou.prisma.$transaction.mockRejectedValue(new Error('commit falhou'));
+      await expect(falhou.processor.process('row_1')).rejects.toThrow('commit falhou');
+      expect(falhou.events.observeProcessed).not.toHaveBeenCalled();
+    });
+
+    it('decide com o estado relido sob a trava, não com o lido antes de esperar a vez', async () => {
+      const ctx = setup();
+      arrange(ctx, {
+        intent: 'payment_failed',
+        local: { status: 'active' },
+        remote: { status: 'failed', paidAt: null },
+      });
+      // Outro evento da mesma assinatura já a levou a `past_due` enquanto este
+      // esperava a trava: não há novo grace a dar.
+      ctx.tx.subscription.findUniqueOrThrow.mockResolvedValue({
+        ...subscription,
+        status: 'past_due',
+      });
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.subscriptions.transitionTo).not.toHaveBeenCalled();
+      expect(ctx.events.markProcessed).toHaveBeenCalledWith('row_1');
+    });
+
+    it('estorno é decidido sob a trava: se lá a cobrança já foi superada, o PSP não é tocado', async () => {
+      const ctx = setup();
+      arrange(ctx, {
+        intent: 'payment_refunded',
+        local: { status: 'active', providerSubscriptionId: 'sub_a' },
+        remote: { status: 'refunded' },
+      });
+      // Uma cobrança mais nova foi paga e registrada enquanto este evento
+      // esperava a vez: o estorno da antiga não cancela mais nada.
+      ctx.payments.hasNewerDecisiveCharge.mockResolvedValue(true);
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.provider.cancelSubscription).not.toHaveBeenCalled();
+      expect(ctx.subscriptions.transitionTo).not.toHaveBeenCalled();
+      expect(ctx.events.markProcessed).toHaveBeenCalledWith('row_1');
+    });
+
+    it('evento ignorado fecha sem efeitos e sem ligar a assinatura', async () => {
+      const ctx = setup();
+      ctx.prisma.paymentWebhookEvent.findUniqueOrThrow.mockResolvedValue(persistedEvent());
+      ctx.provider.normalizeWebhookEvent.mockReturnValue({
+        intent: 'ignore',
+        providerSubscriptionId: null,
+        providerCustomerId: null,
+        payment: null,
+      });
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.writes).toEqual([ctx.tx]);
+      expect(ctx.events.linkedTo).toHaveBeenCalledWith(null);
+      expect(ctx.events.observeProcessed).toHaveBeenCalledTimes(1);
+    });
+
+    it('cancelamento também é decidido sob a trava', async () => {
+      const ctx = setup();
+      ctx.prisma.paymentWebhookEvent.findUniqueOrThrow.mockResolvedValue(persistedEvent());
+      ctx.provider.normalizeWebhookEvent.mockReturnValue({
+        intent: 'subscription_canceled',
+        providerSubscriptionId: 'sub_a',
+        providerCustomerId: 'cus_a',
+        payment: null,
+      });
+      ctx.prisma.subscription.findFirst.mockResolvedValue({ ...subscription, status: 'active' });
+      // Enquanto esperava a trava, a assinatura já foi cancelada por outro caminho.
+      ctx.tx.subscription.findUniqueOrThrow.mockResolvedValue({
+        ...subscription,
+        status: 'canceled',
+      });
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.subscriptions.transitionTo).not.toHaveBeenCalled();
+      expect(ctx.events.markProcessed).toHaveBeenCalledWith('row_1');
+    });
   });
 
   it('é idempotente: não reprocessa evento já processado', async () => {
@@ -291,15 +471,64 @@ describe('WebhookProcessor.process', () => {
         intent: 'payment_refunded',
         remote: { status: 'refunded', providerSubscriptionId: 'sub_duplicada' },
       });
-      // A linha do cliente já está vinculada a outra assinatura do PSP: nem a
-      // busca pela assinatura nem a busca por linha sem vínculo a devolvem.
+      // A linha do cliente está vinculada a outra assinatura do PSP.
       ctx.prisma.subscription.findFirst.mockReset().mockResolvedValue(null);
 
       await ctx.processor.process('row_1');
 
+      // Só a busca pela assinatura do PSP: sem pagamento, não há plano B por cliente.
+      expect(ctx.prisma.subscription.findFirst).toHaveBeenCalledTimes(1);
       expect(ctx.provider.cancelSubscription).not.toHaveBeenCalled();
       expect(ctx.subscriptions.transitionTo).not.toHaveBeenCalled();
       expect(ctx.payments.upsertFromProvider).not.toHaveBeenCalled();
+      // Não é erro: nada aqui depende dessa cobrança.
+      expect(ctx.events.markProcessed).toHaveBeenCalledWith('row_1');
+    });
+
+    it.each(['failed', 'chargeback'])(
+      'cobrança %s de assinatura desconhecida não toma a linha do checkout em andamento',
+      async (status) => {
+        const ctx = setup();
+        arrange(ctx, {
+          intent: 'payment_failed',
+          remote: { status, providerSubscriptionId: 'sub_antiga' },
+        });
+        ctx.prisma.subscription.findFirst.mockReset().mockResolvedValue(null);
+
+        await ctx.processor.process('row_1');
+
+        expect(ctx.prisma.subscription.findFirst).toHaveBeenCalledTimes(1);
+        expect(ctx.subscriptions.transitionTo).not.toHaveBeenCalled();
+      },
+    );
+
+    it('cobrança paga de assinatura do PSP sem assinatura local falha, em vez de virar processed', async () => {
+      const ctx = setup();
+      arrange(ctx, { intent: 'payment_succeeded' });
+      ctx.prisma.subscription.findFirst.mockReset().mockResolvedValue(null);
+
+      await expect(ctx.processor.process('row_1')).rejects.toBeInstanceOf(
+        UncorrelatedPaymentEventError,
+      );
+
+      // O cliente pagou e não há a quem dar acesso: o evento tem de seguir o
+      // retry e aparecer no painel, não sumir como resolvido.
+      expect(ctx.events.markProcessed).not.toHaveBeenCalled();
+      expect(ctx.events.observeProcessed).not.toHaveBeenCalled();
+    });
+
+    it('cobrança paga de um checkout, ainda sem assinatura no PSP, não é tratada como avulsa', async () => {
+      const ctx = setup();
+      arrange(ctx, {
+        intent: 'payment_succeeded',
+        remote: { providerSubscriptionId: null, providerCheckoutId: 'chk_1' },
+      });
+      ctx.prisma.subscription.findFirst.mockReset().mockResolvedValue(null);
+
+      await expect(ctx.processor.process('row_1')).rejects.toBeInstanceOf(
+        UncorrelatedPaymentEventError,
+      );
+      expect(ctx.events.markProcessed).not.toHaveBeenCalled();
     });
 
     it('cobrança avulsa do cliente não é de nenhuma assinatura', async () => {
@@ -448,33 +677,82 @@ describe('WebhookProcessor.process', () => {
     );
   });
 
-  it('estorno integral para de cobrar no PSP e depois revoga o acesso', async () => {
-    const ctx = setup();
-    arrange(ctx, {
+  describe('estorno integral', () => {
+    const refund = {
       intent: 'payment_refunded',
       local: { status: 'active', providerSubscriptionId: 'sub_a' },
       remote: { id: 'pay_4', status: 'refunded' },
+    };
+
+    it('revoga o acesso, cancela no PSP depois do commit e só então fecha o evento', async () => {
+      const ctx = setup();
+      arrange(ctx, refund);
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.subscriptions.transitionTo).toHaveBeenCalledWith(
+        's1',
+        'canceled',
+        expect.objectContaining({
+          actor: 'webhook:payment_refunded',
+          data: { providerSubscriptionId: 'sub_a', canceledAt: NOW },
+        }),
+      );
+      expect(ctx.payments.upsertFromProvider).toHaveBeenCalledWith(
+        expect.objectContaining({ providerPaymentId: 'pay_4', status: PaymentStatus.refunded }),
+      );
+      expect(ctx.provider.cancelSubscription).toHaveBeenCalledWith(
+        expect.objectContaining({ providerSubscriptionId: 'sub_a' }),
+      );
+
+      const order = (mock: jest.Mock) => mock.mock.invocationCallOrder[0];
+      // A decisão é gravada com a assinatura travada; o PSP vem depois dela.
+      expect(order(ctx.subscriptions.transitionTo)).toBeLessThan(
+        order(ctx.provider.cancelSubscription),
+      );
+      expect(order(ctx.provider.cancelSubscription)).toBeLessThan(order(ctx.events.markProcessed));
     });
 
-    await ctx.processor.process('row_1');
+    it('se o PSP falha, o evento fica aberto para o retry tentar de novo', async () => {
+      const ctx = setup();
+      arrange(ctx, refund);
+      ctx.provider.cancelSubscription.mockRejectedValue(new Error('PSP fora'));
 
-    expect(ctx.provider.cancelSubscription).toHaveBeenCalledWith(
-      expect.objectContaining({ providerSubscriptionId: 'sub_a' }),
-    );
-    expect(ctx.subscriptions.transitionTo).toHaveBeenCalledWith(
-      's1',
-      'canceled',
-      expect.objectContaining({
-        actor: 'webhook:payment_refunded',
-        data: { providerSubscriptionId: 'sub_a', canceledAt: NOW },
-      }),
-    );
-    expect(ctx.provider.cancelSubscription.mock.invocationCallOrder[0]).toBeLessThan(
-      ctx.subscriptions.transitionTo.mock.invocationCallOrder[0],
-    );
-    expect(ctx.payments.upsertFromProvider).toHaveBeenCalledWith(
-      expect.objectContaining({ providerPaymentId: 'pay_4', status: PaymentStatus.refunded }),
-    );
+      await expect(ctx.processor.process('row_1')).rejects.toThrow('PSP fora');
+
+      expect(ctx.subscriptions.transitionTo).toHaveBeenCalledTimes(1);
+      expect(ctx.events.markProcessed).not.toHaveBeenCalled();
+    });
+
+    it('o retry encontra a assinatura já cancelada e ainda garante o cancelamento no PSP', async () => {
+      const ctx = setup();
+      arrange(ctx, { ...refund, local: { status: 'canceled', providerSubscriptionId: 'sub_a' } });
+      ctx.payments.findByProviderId.mockResolvedValue({ status: 'refunded' });
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.subscriptions.transitionTo).not.toHaveBeenCalled();
+      expect(ctx.provider.cancelSubscription).toHaveBeenCalledWith(
+        expect.objectContaining({ providerSubscriptionId: 'sub_a' }),
+      );
+      expect(ctx.events.markProcessed).toHaveBeenCalledWith('row_1');
+    });
+
+    it('revoga mesmo quando a reconciliação já tinha registrado a cobrança como estornada', async () => {
+      const ctx = setup();
+      arrange(ctx, refund);
+      // A reconciliação viu o estorno antes, registrou e não cancelou.
+      ctx.payments.findByProviderId.mockResolvedValue({ status: 'refunded' });
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.subscriptions.transitionTo).toHaveBeenCalledWith(
+        's1',
+        'canceled',
+        expect.anything(),
+      );
+      expect(ctx.provider.cancelSubscription).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('estorno parcial só registra o pagamento', async () => {
@@ -611,30 +889,24 @@ describe('WebhookProcessor.process', () => {
     expect(ctx.events.markProcessed).not.toHaveBeenCalled();
   });
 
-  it('cancelamento de assinatura do PSP ainda sem vínculo local casa pelo cliente', async () => {
-    const { processor, provider, prisma, subscriptions } = setup();
+  it('cancelamento de assinatura do PSP desconhecida aqui não casa pelo cliente', async () => {
+    const { processor, provider, prisma, subscriptions, events } = setup();
     prisma.paymentWebhookEvent.findUniqueOrThrow.mockResolvedValue(persistedEvent());
     provider.normalizeWebhookEvent.mockReturnValue({
       intent: 'subscription_canceled',
-      providerSubscriptionId: 'sub_nova',
+      providerSubscriptionId: 'sub_antiga',
       providerCustomerId: 'cus_a',
       payment: null,
     });
-    prisma.subscription.findFirst
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({ ...subscription, status: 'pending' });
+    prisma.subscription.findFirst.mockResolvedValue(null);
 
     await processor.process('row_1');
 
-    expect(prisma.subscription.findFirst).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          providerCustomerId: 'cus_a',
-          providerSubscriptionId: null,
-        }),
-      }),
-    );
-    expect(subscriptions.transitionTo).toHaveBeenCalledWith('s1', 'canceled', expect.anything());
+    // Uma só busca, pela assinatura do PSP: a linha do checkout em andamento
+    // do mesmo cliente não pode ser cancelada pelo fim de uma assinatura antiga.
+    expect(prisma.subscription.findFirst).toHaveBeenCalledTimes(1);
+    expect(subscriptions.transitionTo).not.toHaveBeenCalled();
+    expect(events.markProcessed).toHaveBeenCalledWith('row_1');
   });
 
   it('cancelamento de outra assinatura do mesmo cliente não cancela a assinatura válida', async () => {

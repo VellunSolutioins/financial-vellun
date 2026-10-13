@@ -10,20 +10,21 @@ import { WebhookProcessor } from './webhook.processor';
  * evento.
  */
 function setup() {
-  const prisma = {
+  const prisma: any = {
     paymentWebhookEvent: {
       findUniqueOrThrow: jest.fn(),
       findUnique: jest.fn(),
     },
     subscription: { findFirst: jest.fn() },
   };
+  prisma.$transaction = jest.fn((work: (tx: unknown) => unknown) => work(prisma));
   const events = {
     markProcessing: jest.fn().mockResolvedValue(true),
     markProcessed: jest.fn().mockResolvedValue({}),
     markFailed: jest
       .fn()
       .mockResolvedValue({ status: 'failed', attempts: 1, nextRetryAt: new Date() }),
-    linkSubscription: jest.fn().mockResolvedValue(undefined),
+    observeProcessed: jest.fn(),
   };
 
   const processor = new WebhookProcessor(
@@ -32,7 +33,7 @@ function setup() {
     events as any,
     { transitionTo: jest.fn() } as any,
     new SubscriptionStateService(),
-    { sync: jest.fn() } as any,
+    { prepare: jest.fn(), applyInTransaction: jest.fn() } as any,
   );
 
   return { processor, prisma, events };

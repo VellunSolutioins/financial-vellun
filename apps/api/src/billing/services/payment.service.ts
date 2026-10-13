@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PaymentStatus } from '@prisma/client';
 
+import { Db } from '../../common/db';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DECISIVE_PAYMENT_STATUSES } from './subscription-state.service';
 
@@ -30,8 +31,11 @@ export function toPaymentStatus(status: string): PaymentStatus {
 export class PaymentService {
   constructor(private readonly prisma: PrismaService) {}
 
-  findByProviderId(providerPaymentId: string) {
-    return this.prisma.payment.findUnique({ where: { providerPaymentId } });
+  // Todos os métodos aceitam `db`: dentro da transação do evento, as leituras
+  // precisam enxergar o que ela mesma gravou, e as escritas, entrar no commit dela.
+
+  findByProviderId(providerPaymentId: string, db: Db = this.prisma) {
+    return db.payment.findUnique({ where: { providerPaymentId } });
   }
 
   /**
@@ -43,9 +47,10 @@ export class PaymentService {
     subscriptionId: string,
     providerPaymentId: string,
     dueAt: Date | null,
+    db: Db = this.prisma,
   ): Promise<boolean> {
     if (!dueAt) return false;
-    const newer = await this.prisma.payment.findFirst({
+    const newer = await db.payment.findFirst({
       where: {
         subscriptionId,
         providerPaymentId: { not: providerPaymentId },
@@ -62,8 +67,12 @@ export class PaymentService {
    * nenhum devolve o acesso: a contestação pode ser de um mês antigo, com os
    * seguintes pagos em dia.
    */
-  async hasOpenChargeback(subscriptionId: string, exceptProviderPaymentId: string) {
-    const open = await this.prisma.payment.findFirst({
+  async hasOpenChargeback(
+    subscriptionId: string,
+    exceptProviderPaymentId: string,
+    db: Db = this.prisma,
+  ) {
+    const open = await db.payment.findFirst({
       where: {
         subscriptionId,
         providerPaymentId: { not: exceptProviderPaymentId },
@@ -74,8 +83,15 @@ export class PaymentService {
     return open !== null;
   }
 
+  /** Cobranças da assinatura registradas aqui como em disputa. */
+  findChargebacks(subscriptionId: string, db: Db = this.prisma) {
+    return db.payment.findMany({
+      where: { subscriptionId, status: PaymentStatus.chargeback },
+    });
+  }
+
   /** Cria ou atualiza um pagamento por `providerPaymentId` (idempotente). */
-  upsertFromProvider(input: UpsertPaymentInput) {
+  upsertFromProvider(input: UpsertPaymentInput, db: Db = this.prisma) {
     const data = {
       status: input.status,
       amount: input.amount,
@@ -86,7 +102,7 @@ export class PaymentService {
       failedAt: input.failedAt ?? null,
     };
 
-    return this.prisma.payment.upsert({
+    return db.payment.upsert({
       where: { providerPaymentId: input.providerPaymentId },
       update: data,
       create: {
