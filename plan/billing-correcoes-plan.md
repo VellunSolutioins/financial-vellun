@@ -32,7 +32,8 @@ Confirmadas pelo Bruno em 12/10/2026.
 | 0       | Feita em 12/10/2026. Resultado na seção 9 de `docs/analise-billing-2026-10-12.md`.                                                                                                     |
 | 1       | Implementada no branch `fix/billing-acesso-sem-pagamento`. Falta a verificação com webhook real.                                                                                       |
 | 2       | Implementada no mesmo branch. O teste de integração com Postgres (`webhook-transaction.integration.spec.ts`) passou no banco de validação local. Falta a verificação com webhook real. |
-| 3 a 5   | Pendentes.                                                                                                                                                                             |
+| 3       | Implementada no mesmo branch, com a tela de assinatura conferida em celular, tablet e desktop. Falta a verificação com webhook real.                                                   |
+| 4 e 5   | Pendentes.                                                                                                                                                                             |
 
 Desvios da entrega 1 em relação ao texto abaixo, todos motivados pelo sandbox:
 
@@ -75,6 +76,39 @@ Limitações conhecidas depois da entrega 2:
 - Quando uma disputa termina e a cobrança não é a mais recente, o acesso só volta na reconciliação seguinte (até uma hora).
 - Duas assinaturas pagas no PSP para o mesmo cliente, com uma única linha local sem vínculo, continuam ambíguas: a primeira cobrança paga leva a linha. A correlação pelo checkout, da entrega 3, resolve.
 - Numa conta do Asaas compartilhada entre ambientes, cada cobrança paga de outro ambiente termina como evento esgotado no painel.
+
+Desvios da entrega 3 em relação ao texto abaixo, já com os ajustes da revisão de código:
+
+- **Qual assinatura vale.** Deixou de ser "a mais recente" e passou a ser a que dá acesso hoje (não havendo, a mais recente). Regularizar cria uma assinatura `pending` mais nova; olhando só a mais nova, quem ainda estava no grace perderia o acesso ao clicar em "regularizar".
+- **Cancelamento.** A intenção gravada não é desfeita se o PSP falhar, ao contrário do que o plano previa. O erro do PSP não diz se ele cancelou; desfazer faria o aviso de exclusão derrubar o acesso já pago. A reconciliação refaz o cancelamento no PSP enquanto a assinatura continuar ativa lá, e repetir o pedido também.
+- **Assinaturas anteriores.** São canceladas primeiro no PSP e só depois fechadas aqui, para o retry do evento encontrá-las se o PSP falhar. Vale para toda cobrança paga da assinatura ativa, não só a que a ativou. Só pelo webhook.
+- **Valor pago x plano.** Só na primeira ativação. Sem um único plano ativo com aquele preço, a assinatura é ativada com o plano que tinha e fica um aviso em log; o plano previa falhar o evento, o que negaria acesso a quem pagou.
+- **Assinatura criada no PSP.** O vínculo é conferido no PSP (checkout e cliente), não tirado do payload.
+- **Reuso da tentativa.** Só de linha `pending` ou `expired` que o PSP ainda não transformou em assinatura, e sem carregar o checkout anterior.
+- **Checkout parado sem data de vencimento.** Assinaturas `pending` antigas, de antes de o vencimento ser gravado, são expiradas depois de um dia paradas.
+- **Atualização de cartão.** O endpoint `POST /billing/payment-method`, o método do serviço e o do contrato do provider foram removidos; só devolviam 501.
+- **Tela.** Além do previsto: em `pending` há "Não paguei, escolher plano", e regularizar um plano que não é mais oferecido abre a lista de planos.
+
+Ajustes da segunda revisão de código da entrega 3:
+
+- **Pagamento em análise.** Não se abre checkout novo enquanto houver uma tentativa `pending` já ligada a uma assinatura do PSP: seria uma segunda cobrança, e a aprovação dela cancelaria a primeira sem estorno.
+- **Cancelar** só vale para assinatura em vigor (`active`, `trialing`, `past_due`). Uma flag gravada numa tentativa `pending` sobreviveria ao pagamento e faria a reconciliação cancelar a assinatura recém-paga.
+- **Plano pelo valor pago** confere preço e ciclo; o ciclo vem da assinatura do PSP, consultada só na primeira ativação. Sem ele, o plano não é trocado.
+- **Expiração de checkout** sempre com a linha travada: o aviso de checkout vencido confere que a linha ainda é daquele checkout, e a varredura confere que ela continua vencida. O reuso da tentativa também é condicional ao estado lido.
+- **Casamento pelo cliente** inclui a tentativa `expired` sem assinatura no PSP: o checkout trocado ainda pode ser pago.
+- **Reconciliação** refaz o cancelamento pedido e continua conferindo as cobranças, mesmo com o PSP recusando o cancelamento.
+- **Checagem de acesso** (a cada requisição) lê só as assinaturas que podem dar acesso, sem o plano.
+- **Tela:** o aviso de `expired` passou a dizer "a última tentativa não foi concluída", que vale também para o checkout que nem chegou a abrir.
+
+Pontos para o deploy da entrega 3:
+
+- Quem tem duas assinaturas abertas no PSP terá a mais antiga cancelada na próxima cobrança paga da mais nova.
+- Assinaturas `pending` paradas há mais de um dia passam a `expired` na primeira reconciliação.
+
+Limitações conhecidas depois da entrega 3:
+
+- O cliente já existente no PSP é reusado sem atualização: CPF/CNPJ e endereço corrigidos depois não chegam lá.
+- Quem abre dois checkouts e paga os dois fica com duas assinaturas até a segunda cobrança paga cancelar a mais antiga.
 
 ## Entrega 0 — Reprodução no sandbox do Asaas
 
