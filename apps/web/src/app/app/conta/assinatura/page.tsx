@@ -1,5 +1,7 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
+import type { CustomerProfileField } from '@financial-vellun/shared';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -24,10 +26,22 @@ type ReturnStatus = 'success' | 'cancel' | 'required' | null;
 
 const MANAGED_STATUSES = ['active', 'trialing', 'past_due'];
 
+/**
+ * Nome de cada dado de cobrança, como aparece no aviso (os mesmos da mensagem
+ * da API). O documento sai à parte: CPF ou CNPJ, conforme o tipo de conta.
+ */
+const BILLING_FIELD_LABELS: Record<Exclude<CustomerProfileField, 'document'>, string> = {
+  phone: 'celular',
+  postalCode: 'CEP',
+  street: 'logradouro',
+  addressNumber: 'número',
+  neighborhood: 'bairro',
+};
+
 export default function AssinaturaPage() {
   const toast = useToast();
   const confirm = useConfirm();
-  const { refreshSubscriptionAccess } = useAuth();
+  const { user, refreshSubscriptionAccess } = useAuth();
 
   const [state, setState] = useState<SubscriptionState | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -98,6 +112,12 @@ export default function AssinaturaPage() {
   const status = state?.status ?? null;
   const showManagement = !!state?.plan && !!status && MANAGED_STATUSES.includes(status);
   const showPending = status === 'pending' && !choosingAgain;
+  // Algo na tela abre um checkout: a lista de planos ou "Regularizar pagamento".
+  const offersCheckout =
+    (!showManagement && !showPending) || choosingAgain || (showManagement && status === 'past_due');
+  // Sem os dados que o provedor de pagamentos exige, o checkout seria recusado.
+  const missing = state?.missingBillingFields ?? [];
+  const blocked = missing.length > 0;
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -110,12 +130,20 @@ export default function AssinaturaPage() {
 
       <ReturnNotice status={returnStatus} />
 
+      {!loading && blocked && offersCheckout && (
+        <BillingProfileNotice
+          missing={missing}
+          documentLabel={user?.profileType === 'business' ? 'CNPJ' : 'CPF'}
+        />
+      )}
+
       {loading ? (
         <p className="text-muted-foreground">Carregando...</p>
       ) : showManagement ? (
         <ManagementCard
           state={state!}
           busy={busy}
+          blocked={blocked}
           onRegularize={() =>
             state!.plan!.isActive ? handleSubscribe(state!.plan!.id) : setChoosingAgain(true)
           }
@@ -131,7 +159,7 @@ export default function AssinaturaPage() {
       ) : (
         <>
           <StatusNotice status={status} failure={state?.lastPaymentFailure ?? null} />
-          <PlansList plans={plans} busy={busy} onSubscribe={handleSubscribe} />
+          <PlansList plans={plans} busy={busy} blocked={blocked} onSubscribe={handleSubscribe} />
         </>
       )}
 
@@ -140,7 +168,7 @@ export default function AssinaturaPage() {
           <div className="rounded-md border border-gray-300 bg-gray-50 px-4 py-3 text-sm text-gray-700">
             O seu plano atual não é mais oferecido. Escolha um dos planos abaixo para regularizar.
           </div>
-          <PlansList plans={plans} busy={busy} onSubscribe={handleSubscribe} />
+          <PlansList plans={plans} busy={busy} blocked={blocked} onSubscribe={handleSubscribe} />
         </>
       )}
     </div>
@@ -171,6 +199,32 @@ function ReturnNotice({ status }: { status: ReturnStatus }) {
     );
   }
   return null;
+}
+
+/**
+ * Pede os dados de cobrança antes do checkout, no padrão do aviso de WhatsApp.
+ * O cadastro só pede os dados pessoais; CPF e endereço ficam em Minha Conta.
+ */
+function BillingProfileNotice({
+  missing,
+  documentLabel,
+}: {
+  missing: CustomerProfileField[];
+  documentLabel: string;
+}) {
+  const labels = missing.map((field) =>
+    field === 'document' ? documentLabel : BILLING_FIELD_LABELS[field],
+  );
+  const list =
+    labels.length > 1 ? `${labels.slice(0, -1).join(', ')} e ${labels.at(-1)}` : labels[0];
+  return (
+    <div className="rounded-md border border-blue-300 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+      Para assinar, complete seus dados de cobrança em Minha Conta: {list}.{' '}
+      <Link href="/app/conta" className="font-semibold underline">
+        Completar dados
+      </Link>
+    </div>
+  );
 }
 
 /** Por que a tela voltou a oferecer os planos, quando isso não é óbvio. */
@@ -204,11 +258,14 @@ function StatusNotice({
 function ManagementCard({
   state,
   busy,
+  blocked,
   onRegularize,
   onCancel,
 }: {
   state: SubscriptionState;
   busy: boolean;
+  /** Faltam dados de cobrança: regularizar abriria um checkout recusado. */
+  blocked: boolean;
   onRegularize: () => void;
   onCancel: () => void;
 }) {
@@ -260,7 +317,7 @@ function ManagementCard({
 
         <div className="flex flex-col gap-2 sm:flex-row">
           {state.status === 'past_due' && (
-            <Button onClick={onRegularize} disabled={busy}>
+            <Button onClick={onRegularize} disabled={busy || blocked}>
               Regularizar pagamento
             </Button>
           )}
@@ -315,10 +372,13 @@ function PendingCard({
 function PlansList({
   plans,
   busy,
+  blocked,
   onSubscribe,
 }: {
   plans: Plan[];
   busy: boolean;
+  /** Faltam dados de cobrança: só o plano gratuito (sem PSP) continua livre. */
+  blocked: boolean;
   onSubscribe: (planId: string) => void;
 }) {
   if (plans.length === 0) {
@@ -345,7 +405,10 @@ function PlansList({
                 /{plan.interval === 'annual' ? 'ano' : 'mês'}
               </span>
             </p>
-            <Button onClick={() => onSubscribe(plan.id)} disabled={busy}>
+            <Button
+              onClick={() => onSubscribe(plan.id)}
+              disabled={busy || (blocked && Number(plan.price) > 0)}
+            >
               Assinar
             </Button>
           </CardContent>

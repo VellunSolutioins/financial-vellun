@@ -14,7 +14,8 @@ import { SubscriptionService } from './services/subscription.service';
 
 /** Nome de cada dado do cadastro, como aparece na mensagem ao usuário. */
 const PROFILE_FIELD_LABELS: Record<CustomerProfileField, string> = {
-  phone: 'telefone',
+  // Os mesmos nomes do aviso na tela de assinatura.
+  phone: 'celular',
   document: 'CPF/CNPJ',
   postalCode: 'CEP',
   street: 'logradouro',
@@ -28,6 +29,19 @@ const CANCELABLE_STATUSES: SubscriptionStatus[] = [
   SubscriptionStatus.trialing,
   SubscriptionStatus.past_due,
 ];
+
+type CurrentSubscription = Awaited<ReturnType<SubscriptionAccessService['currentSubscription']>>;
+
+/** O que do cadastro vai para o PSP ao criar o cliente. */
+interface BillingProfile {
+  phone: string | null;
+  postalCode: string | null;
+  street: string | null;
+  addressNumber: string | null;
+  neighborhood: string | null;
+  individualProfile?: { cpf: string | null } | null;
+  businessProfile?: { cnpj: string | null } | null;
+}
 
 @Injectable()
 export class BillingService {
@@ -65,6 +79,9 @@ export class BillingService {
             reason: subscription.lastPaymentFailureReason,
           }
         : null,
+      // A tela bloqueia a assinatura enquanto houver pendência; a regra é a
+      // mesma que o checkout aplica.
+      missingBillingFields: await this.missingBillingFieldsOf(userId, subscription),
       access,
     };
   }
@@ -128,19 +145,20 @@ export class BillingService {
       return { checkoutUrl: successUrl };
     }
 
-    const user = await this.prisma.user.findUniqueOrThrow({
-      where: { id: userId },
-      include: { individualProfile: true, businessProfile: true },
-    });
+    const user = await this.findBillingProfile(userId);
 
-    // O cliente só vale no PSP que o criou.
-    let providerCustomerId =
-      current?.provider === this.provider.name ? (current.providerCustomerId ?? null) : null;
-    // O PSP pode exigir dados do cadastro (o Asaas exige telefone e endereço
-    // completo para cartão). Validamos aqui, antes de criar qualquer coisa, para
-    // devolver um erro acionável em vez de deixar o PSP recusar com uma
-    // mensagem genérica.
-    if (!providerCustomerId) this.assertBillingProfileComplete(user);
+    let providerCustomerId = this.reusableCustomerId(current);
+    // O PSP pode exigir dados do cadastro (o Asaas exige CPF). Validamos aqui,
+    // antes de criar qualquer coisa, para devolver um erro acionável em vez de
+    // deixar o PSP recusar com uma mensagem genérica. A tela já bloqueia antes;
+    // isto é a última barreira.
+    const missing = this.missingBillingFields(user, current);
+    if (missing.length > 0) {
+      throw new BadRequestException(
+        `Complete seus dados de cobrança em "Minha Conta" antes de assinar ` +
+          `(faltando: ${missing.map((field) => PROFILE_FIELD_LABELS[field]).join(', ')}).`,
+      );
+    }
 
     const subscription = await this.subscriptions.prepareCheckoutSubscription(
       userId,
@@ -217,19 +235,48 @@ export class BillingService {
   }
 
   /**
-   * Garante que o cadastro tem o que o PSP exige para criar o cliente
-   * (`requiredCustomerFields`). Sem isso, o PSP recusa com uma mensagem
-   * genérica; aqui o usuário fica sabendo o que falta.
+   * {@link missingBillingFields} para o estado da assinatura, chamado a cada
+   * carga do app. Com cliente já criado no PSP — o caso de quem assina —, nada
+   * falta e o cadastro nem é lido.
    */
-  private assertBillingProfileComplete(user: {
-    phone: string | null;
-    postalCode: string | null;
-    street: string | null;
-    addressNumber: string | null;
-    neighborhood: string | null;
-    individualProfile?: { cpf: string | null } | null;
-    businessProfile?: { cnpj: string | null } | null;
-  }) {
+  private async missingBillingFieldsOf(
+    userId: string,
+    current: CurrentSubscription,
+  ): Promise<CustomerProfileField[]> {
+    if (this.reusableCustomerId(current)) return [];
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { individualProfile: true, businessProfile: true },
+    });
+    // Usuário que sumiu no meio da sessão: não há o que assinar, mas a tela
+    // não deve quebrar por isso.
+    if (!user) return [...this.provider.requiredCustomerFields];
+    return this.missingBillingFields(user, current);
+  }
+
+  private findBillingProfile(userId: string) {
+    return this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      include: { individualProfile: true, businessProfile: true },
+    });
+  }
+
+  /** Cliente já criado no PSP configurado; o de outro PSP não vale aqui. */
+  private reusableCustomerId(current: CurrentSubscription): string | null {
+    return current?.provider === this.provider.name ? (current.providerCustomerId ?? null) : null;
+  }
+
+  /**
+   * O que falta no cadastro para o PSP criar o cliente
+   * (`requiredCustomerFields`). Com cliente já criado no PSP, nada falta: o
+   * checkout o reusa sem mandar o cadastro de novo — é o caso de quem
+   * regulariza um pagamento atrasado.
+   */
+  private missingBillingFields(
+    user: BillingProfile,
+    current: CurrentSubscription,
+  ): CustomerProfileField[] {
+    if (this.reusableCustomerId(current)) return [];
     const values: Record<CustomerProfileField, string | null | undefined> = {
       phone: user.phone,
       document: user.individualProfile?.cpf ?? user.businessProfile?.cnpj,
@@ -238,15 +285,7 @@ export class BillingService {
       addressNumber: user.addressNumber,
       neighborhood: user.neighborhood,
     };
-    const missing = this.provider.requiredCustomerFields
-      .filter((field) => !values[field])
-      .map((field) => PROFILE_FIELD_LABELS[field]);
-
-    if (missing.length > 0) {
-      throw new BadRequestException(
-        `Complete seu endereço de cobrança em "Minha Conta" antes de assinar (faltando: ${missing.join(', ')}).`,
-      );
-    }
+    return this.provider.requiredCustomerFields.filter((field) => !values[field]);
   }
 
   /**

@@ -1,4 +1,4 @@
-import type { PaymentFailureReason } from '@financial-vellun/shared';
+import type { CustomerProfileField, PaymentFailureReason } from '@financial-vellun/shared';
 
 import { apiClient } from './api-client';
 
@@ -51,6 +51,11 @@ export interface SubscriptionState {
   canceledAt: string | null;
   /** Última cobrança recusada; some quando um pagamento é aprovado. */
   lastPaymentFailure: { at: string; reason: PaymentFailureReason | null } | null;
+  /**
+   * Dados do cadastro que faltam para assinar (exigidos pelo provedor de
+   * pagamentos). Enquanto houver algum, a tela não abre checkout.
+   */
+  missingBillingFields: CustomerProfileField[];
   access: SubscriptionAccess;
 }
 

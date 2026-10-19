@@ -5,7 +5,14 @@ import { BillingService } from './billing.service';
 function setup(env: Record<string, string | undefined> = {}) {
   const provider = {
     name: 'asaas',
-    requiredCustomerFields: ['phone', 'postalCode', 'street', 'addressNumber', 'neighborhood'],
+    requiredCustomerFields: [
+      'document',
+      'phone',
+      'postalCode',
+      'street',
+      'addressNumber',
+      'neighborhood',
+    ],
     createCustomer: jest.fn().mockResolvedValue({ id: 'cus_1' }),
     createCheckout: jest.fn().mockResolvedValue({
       checkoutUrl: 'https://asaas/checkout/1',
@@ -16,7 +23,10 @@ function setup(env: Record<string, string | undefined> = {}) {
   };
   const prisma = {
     plan: { findUnique: jest.fn().mockResolvedValue(PLAN) },
-    user: { findUniqueOrThrow: jest.fn().mockResolvedValue(USER) },
+    user: {
+      findUniqueOrThrow: jest.fn().mockResolvedValue(USER),
+      findUnique: jest.fn().mockResolvedValue(USER),
+    },
     // Pagamento de checkout anterior em análise: nenhum, salvo o teste dizer.
     subscription: { findFirst: jest.fn().mockResolvedValue(null) },
   };
@@ -198,7 +208,7 @@ describe('BillingService.createCheckout', () => {
     await expect(service.createCheckout('u1', { planId: 'plan_1' })).rejects.toThrow('PSP fora');
   });
 
-  it('rejeita quando o endereço de cobrança está incompleto, antes de criar qualquer coisa', async () => {
+  it('rejeita quando os dados de cobrança estão incompletos, antes de criar qualquer coisa', async () => {
     const { service, provider, prisma, subscriptions } = setup();
     prisma.user.findUniqueOrThrow.mockResolvedValue({
       ...USER,
@@ -215,6 +225,16 @@ describe('BillingService.createCheckout', () => {
     expect(provider.createCustomer).not.toHaveBeenCalled();
   });
 
+  it('conta sem CPF (cadastro só com dados pessoais) não assina', async () => {
+    const { service, prisma, subscriptions } = setup();
+    prisma.user.findUniqueOrThrow.mockResolvedValue({ ...USER, individualProfile: null });
+
+    await expect(service.createCheckout('u1', { planId: 'plan_1' })).rejects.toThrow(
+      'Complete seus dados de cobrança em "Minha Conta" antes de assinar (faltando: CPF/CNPJ).',
+    );
+    expect(subscriptions.prepareCheckoutSubscription).not.toHaveBeenCalled();
+  });
+
   it('o que falta no cadastro é o que o PSP declara exigir', async () => {
     const { service, provider, prisma, subscriptions } = setup();
     // Um PSP que também exige o documento.
@@ -228,7 +248,7 @@ describe('BillingService.createCheckout', () => {
     });
 
     await expect(service.createCheckout('u1', { planId: 'plan_1' })).rejects.toThrow(
-      /faltando: CPF\/CNPJ, telefone/,
+      /faltando: CPF\/CNPJ, celular/,
     );
     expect(subscriptions.prepareCheckoutSubscription).not.toHaveBeenCalled();
   });
@@ -349,6 +369,79 @@ describe('BillingService.getSubscriptionState', () => {
     access.currentSubscription.mockResolvedValue({ id: 's1', status: 'active', plan: PLAN });
 
     expect((await service.getSubscriptionState('u1')).lastPaymentFailure).toBeNull();
+  });
+
+  describe('dados de cobrança que faltam (a tela bloqueia a assinatura com eles)', () => {
+    it('conta recém-criada: CPF e endereço, na ordem que o PSP declara', async () => {
+      const { service, prisma } = setup();
+      prisma.user.findUnique.mockResolvedValue({
+        ...USER,
+        individualProfile: null,
+        postalCode: null,
+        street: null,
+        addressNumber: null,
+        complement: null,
+        neighborhood: null,
+        city: null,
+        state: null,
+      });
+
+      expect((await service.getSubscriptionState('u1')).missingBillingFields).toEqual([
+        'document',
+        'postalCode',
+        'street',
+        'addressNumber',
+        'neighborhood',
+      ]);
+    });
+
+    it('cadastro completo: nada falta (cidade e UF não são exigidas)', async () => {
+      const { service, prisma } = setup();
+      prisma.user.findUnique.mockResolvedValue({ ...USER, city: null, state: null });
+
+      expect((await service.getSubscriptionState('u1')).missingBillingFields).toEqual([]);
+    });
+
+    it('com cliente já criado neste PSP, nada falta: o checkout o reusa', async () => {
+      const { service, prisma, access } = setup();
+      // Quem regulariza um pagamento atrasado não pode ser bloqueado por um
+      // cadastro antigo incompleto: o PSP já tem o cliente.
+      access.currentSubscription.mockResolvedValue({
+        id: 's1',
+        status: 'past_due',
+        plan: PLAN,
+        provider: 'asaas',
+        providerCustomerId: 'cus_1',
+      });
+      prisma.user.findUnique.mockResolvedValue({ ...USER, postalCode: null });
+
+      expect((await service.getSubscriptionState('u1')).missingBillingFields).toEqual([]);
+      // A cada carga do app: quem já assina não paga a leitura do cadastro.
+      expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('usuário que sumiu no meio da sessão: tudo falta, sem erro 500', async () => {
+      const { service, prisma } = setup();
+      prisma.user.findUnique.mockResolvedValue(null);
+
+      expect((await service.getSubscriptionState('u1')).missingBillingFields).toHaveLength(6);
+    });
+
+    it('cliente de outro PSP não conta: o cadastro precisa estar completo', async () => {
+      const { service, prisma, access } = setup();
+      access.currentSubscription.mockResolvedValue({
+        id: 's1',
+        status: 'canceled',
+        plan: PLAN,
+        provider: 'outro_psp',
+        providerCustomerId: 'cus_de_la',
+      });
+      prisma.user.findUnique.mockResolvedValue({ ...USER, postalCode: null });
+
+      expect((await service.getSubscriptionState('u1')).missingBillingFields).toEqual([
+        'postalCode',
+      ]);
+    });
   });
 });
 

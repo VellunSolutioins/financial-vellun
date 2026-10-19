@@ -99,6 +99,18 @@ export const PaymentFailureReason = {
 } as const;
 export type PaymentFailureReason = (typeof PaymentFailureReason)[keyof typeof PaymentFailureReason];
 
+/**
+ * Dado do cadastro que um provedor de pagamentos pode exigir para cobrar. A API
+ * diz quais faltam; a tela de assinatura os mostra ao usuário.
+ */
+export type CustomerProfileField =
+  | 'phone'
+  | 'document'
+  | 'postalCode'
+  | 'street'
+  | 'addressNumber'
+  | 'neighborhood';
+
 export const PaymentMethodType = {
   CREDIT_CARD: 'credit_card',
 } as const;

@@ -32,8 +32,12 @@ export class AuthService {
     if (exists) throw fieldConflict('email', 'Email já cadastrado');
 
     if (dto.profileType === ProfileType.individual) {
-      const cpfExists = await this.prisma.individualProfile.findUnique({ where: { cpf: dto.cpf } });
-      if (cpfExists) throw fieldConflict('cpf', 'CPF já cadastrado');
+      if (dto.cpf) {
+        const cpfExists = await this.prisma.individualProfile.findUnique({
+          where: { cpf: dto.cpf },
+        });
+        if (cpfExists) throw fieldConflict('cpf', 'CPF já cadastrado');
+      }
     } else {
       const cnpjExists = await this.prisma.businessProfile.findUnique({
         where: { cnpj: dto.cnpj },
@@ -60,14 +64,17 @@ export class AuthService {
         },
       });
 
+      // Sem CPF, o perfil PF nasce quando ele for informado em "Minha Conta".
       if (dto.profileType === ProfileType.individual) {
-        await tx.individualProfile.create({
-          data: {
-            userId: createdUser.id,
-            cpf: dto.cpf!,
-            birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined,
-          },
-        });
+        if (dto.cpf) {
+          await tx.individualProfile.create({
+            data: {
+              userId: createdUser.id,
+              cpf: dto.cpf,
+              birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined,
+            },
+          });
+        }
       } else {
         await tx.businessProfile.create({
           data: {

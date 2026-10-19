@@ -28,13 +28,14 @@ export async function register(data: {
   email: string;
   phone: string;
   password: string;
-  postalCode: string;
-  street: string;
-  addressNumber: string;
+  // Endereço e CPF são opcionais no cadastro: exigidos só ao assinar.
+  postalCode?: string;
+  street?: string;
+  addressNumber?: string;
   complement?: string;
-  neighborhood: string;
-  city: string;
-  state: string;
+  neighborhood?: string;
+  city?: string;
+  state?: string;
   profileType: 'individual' | 'business';
   cpf?: string;
   birthDate?: string;
