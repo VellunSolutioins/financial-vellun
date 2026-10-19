@@ -131,7 +131,20 @@ export class WebhookProcessor {
       return false;
     }
 
+    // Evento de outro PSP (gravado quando ele era o configurado): este adapter
+    // não sabe ler o payload, nem consultar as cobranças dele. Pode ser uma
+    // confirmação de pagamento, então fica no painel para tratar à mão.
+    if (event.provider !== this.provider.name) {
+      const reason =
+        `evento do PSP ${event.provider}, mas o configurado é ${this.provider.name}; ` +
+        'precisa ser tratado à mão';
+      this.logger.error(`Webhook ${eventId}: ${reason}`);
+      await this.events.markUnprocessable(eventId, reason);
+      return true;
+    }
+
     const normalized = this.provider.normalizeWebhookEvent({
+      provider: event.provider,
       providerEventId: event.providerEventId,
       eventType: event.eventType,
       payload: event.sanitizedPayload,
@@ -286,7 +299,7 @@ export class WebhookProcessor {
   private async applyCheckoutExpired(eventId: string, event: NormalizedWebhookEvent) {
     const subscription = event.providerCheckoutId
       ? await this.prisma.subscription.findFirst({
-          where: { providerCheckoutId: event.providerCheckoutId },
+          where: { provider: this.provider.name, providerCheckoutId: event.providerCheckoutId },
         })
       : null;
     if (!subscription) return this.close(eventId, null);
@@ -324,7 +337,7 @@ export class WebhookProcessor {
     const remote = await this.provider.getSubscription(event.providerSubscriptionId);
     const subscription = remote.providerCheckoutId
       ? await this.prisma.subscription.findFirst({
-          where: { providerCheckoutId: remote.providerCheckoutId },
+          where: { provider: this.provider.name, providerCheckoutId: remote.providerCheckoutId },
         })
       : null;
     if (!subscription) return this.close(eventId, null);
@@ -371,7 +384,7 @@ export class WebhookProcessor {
   ): Promise<SubscriptionWithPlan | null> {
     if (ref.providerSubscriptionId) {
       const bySub = await this.prisma.subscription.findFirst({
-        where: { providerSubscriptionId: ref.providerSubscriptionId },
+        where: { provider: this.provider.name, providerSubscriptionId: ref.providerSubscriptionId },
         include: { plan: true },
       });
       if (bySub) return bySub;
@@ -380,7 +393,11 @@ export class WebhookProcessor {
       // Só linha ainda sem assinatura do PSP: o checkout apresenta UMA
       // assinatura, e ela já teria sido achada acima se fosse a desta linha.
       const byCheckout = await this.prisma.subscription.findFirst({
-        where: { providerCheckoutId: ref.providerCheckoutId, providerSubscriptionId: null },
+        where: {
+          provider: this.provider.name,
+          providerCheckoutId: ref.providerCheckoutId,
+          providerSubscriptionId: null,
+        },
         include: { plan: true },
       });
       if (byCheckout) return byCheckout;
@@ -391,6 +408,7 @@ export class WebhookProcessor {
     // cliente faria a cobrança de uma assinatura duplicada mexer na válida.
     return this.prisma.subscription.findFirst({
       where: {
+        provider: this.provider.name,
         providerCustomerId: ref.providerCustomerId,
         providerSubscriptionId: null,
         // `expired` entra: é a tentativa cujo checkout venceu ou foi trocado, e

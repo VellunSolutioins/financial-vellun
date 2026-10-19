@@ -26,6 +26,7 @@ integration('webhook de billing: uma transação por evento (PostgreSQL)', () =>
   /** Cobranças como o PSP as devolveria, por id. */
   const remoteCharges = new Map<string, Record<string, unknown>>();
   const provider = {
+    name: 'asaas',
     // O payload de teste já vem no formato normalizado.
     normalizeWebhookEvent: (event: { payload: unknown }) => event.payload,
     getPayment: async (id: string) => remoteCharges.get(id),
@@ -97,6 +98,7 @@ integration('webhook de billing: uma transação por evento (PostgreSQL)', () =>
         userId,
         planId,
         status: 'pending',
+        provider: 'asaas',
         providerCustomerId: `cus_${randomUUID()}`,
         providerSubscriptionId,
       },
@@ -126,6 +128,7 @@ integration('webhook de billing: uma transação por evento (PostgreSQL)', () =>
   async function receivedEvent(providerPaymentId: string, providerSubscriptionId: string) {
     const event = await prisma.paymentWebhookEvent.create({
       data: {
+        provider: 'asaas',
         providerEventId: `evt_${randomUUID()}`,
         eventType: 'PAYMENT_CONFIRMED',
         status: 'received',

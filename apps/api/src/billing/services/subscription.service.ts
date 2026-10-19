@@ -11,6 +11,8 @@ export interface CreateSubscriptionInput {
   userId: string;
   planId: string;
   status?: SubscriptionStatus;
+  /** PSP envolvido; nulo quando nenhum (plano gratuito). */
+  provider?: string | null;
   providerCustomerId?: string | null;
   providerSubscriptionId?: string | null;
   trialEndsAt?: Date | null;
@@ -66,6 +68,7 @@ export class SubscriptionService {
         userId: input.userId,
         planId: input.planId,
         status,
+        provider: input.provider ?? null,
         providerCustomerId: input.providerCustomerId ?? null,
         providerSubscriptionId: input.providerSubscriptionId ?? null,
         trialEndsAt:
@@ -95,13 +98,13 @@ export class SubscriptionService {
   async prepareCheckoutSubscription(
     userId: string,
     planId: string,
+    provider: string,
     providerCustomerId: string | null,
   ) {
     const existing = await this.prisma.subscription.findFirst({
       where: { userId },
       orderBy: { createdAt: 'desc' },
     });
-    const customer = providerCustomerId ? { providerCustomerId } : {};
 
     // Só se reusa a tentativa que o PSP ainda não transformou em assinatura.
     // Com uma assinatura do PSP já ligada (o aviso de criação chega antes do
@@ -114,11 +117,15 @@ export class SubscriptionService {
         existing.status === SubscriptionStatus.expired);
 
     if (reusable) {
+      // O cliente gravado só vale no PSP que o criou: vindo de outro, sai.
+      const samePsp = !existing.provider || existing.provider === provider;
+      const customer = providerCustomerId || !samePsp ? { providerCustomerId } : {};
       // O checkout anterior sai da linha: os dados são dele, e o aviso de que
       // ele venceu ou foi cancelado, chegando agora, expiraria a tentativa nova.
       // Se ele ainda for pago, a cobrança acha a linha pelo cliente.
       const fresh = {
         planId,
+        provider,
         providerCheckoutId: null,
         checkoutExpiresAt: null,
         cancelAtPeriodEnd: false,
@@ -149,6 +156,7 @@ export class SubscriptionService {
       userId,
       planId,
       status: SubscriptionStatus.pending,
+      provider,
       providerCustomerId,
       actor: 'checkout',
     });

@@ -194,7 +194,7 @@ export class ChargeSyncService {
    */
   async settle(result: ChargeSyncResult): Promise<void> {
     for (const providerSubscriptionId of result.cancelAtGateway) {
-      await this.provider.cancelSubscription({ providerSubscriptionId, cancelAtPeriodEnd: false });
+      await this.provider.cancelSubscription({ providerSubscriptionId });
     }
   }
 
@@ -257,12 +257,25 @@ export class ChargeSyncService {
         providerSubscriptionId: { not: null },
         status: { notIn: [SubscriptionStatus.canceled, SubscriptionStatus.expired] },
       },
-      select: { id: true, providerSubscriptionId: true },
+      select: { id: true, provider: true, providerSubscriptionId: true },
     });
-    return older.filter(
-      (row): row is { id: string; providerSubscriptionId: string } =>
+    const live = older.filter(
+      (row): row is { id: string; provider: string | null; providerSubscriptionId: string } =>
         row.providerSubscriptionId !== null && row.providerSubscriptionId !== current,
     );
+
+    // Só as deste PSP podem ser canceladas aqui. As de outro seguem cobrando
+    // lá: ficam como estão, à vista, e o log pede o cancelamento à mão.
+    const foreign = live.filter((row) => row.provider !== this.provider.name);
+    for (const row of foreign) {
+      this.logger.error(
+        `Assinatura ${row.id} do usuário ${sub.userId} segue ativa no PSP ${row.provider}, ` +
+          `depois da ativação da ${sub.id}; cancele no painel daquele PSP.`,
+      );
+    }
+    return live
+      .filter((row) => row.provider === this.provider.name)
+      .map(({ id, providerSubscriptionId }) => ({ id, providerSubscriptionId }));
   }
 
   /**
@@ -330,7 +343,7 @@ export class ChargeSyncService {
     const now = context.now ?? new Date();
     const status = toPaymentStatus(charge.status);
     const dueAt = charge.dueAt ?? null;
-    const previous = await this.payments.findByProviderId(charge.id, db);
+    const previous = await this.payments.findByProviderId(this.provider.name, charge.id, db);
     const none = (outcome: ChargeSyncOutcome): Decision => ({
       status,
       previous,
@@ -439,6 +452,7 @@ export class ChargeSyncService {
     const { status, previous } = decision;
     const now = context.now ?? new Date();
     return {
+      provider: this.provider.name,
       userId: sub.userId,
       subscriptionId: sub.id,
       providerPaymentId: charge.id,

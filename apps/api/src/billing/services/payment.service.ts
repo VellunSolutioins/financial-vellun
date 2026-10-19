@@ -6,6 +6,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { DECISIVE_PAYMENT_STATUSES } from './subscription-state.service';
 
 export interface UpsertPaymentInput {
+  /** PSP da cobrança: o id dela só é único junto com ele. */
+  provider: string;
   userId: string;
   subscriptionId: string | null;
   providerPaymentId: string;
@@ -34,8 +36,10 @@ export class PaymentService {
   // Todos os métodos aceitam `db`: dentro da transação do evento, as leituras
   // precisam enxergar o que ela mesma gravou, e as escritas, entrar no commit dela.
 
-  findByProviderId(providerPaymentId: string, db: Db = this.prisma) {
-    return db.payment.findUnique({ where: { providerPaymentId } });
+  findByProviderId(provider: string, providerPaymentId: string, db: Db = this.prisma) {
+    return db.payment.findUnique({
+      where: { provider_providerPaymentId: { provider, providerPaymentId } },
+    });
   }
 
   /**
@@ -103,10 +107,16 @@ export class PaymentService {
     };
 
     return db.payment.upsert({
-      where: { providerPaymentId: input.providerPaymentId },
+      where: {
+        provider_providerPaymentId: {
+          provider: input.provider,
+          providerPaymentId: input.providerPaymentId,
+        },
+      },
       update: data,
       create: {
         userId: input.userId,
+        provider: input.provider,
         providerPaymentId: input.providerPaymentId,
         ...data,
       },

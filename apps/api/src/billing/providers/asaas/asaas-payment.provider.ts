@@ -1,12 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 
-import {
-  BadRequestException,
-  Injectable,
-  InternalServerErrorException,
-  Logger,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import {
@@ -14,6 +8,7 @@ import {
   CheckoutSession,
   CreateCheckoutInput,
   CreateCustomerInput,
+  CustomerProfileField,
   NormalizedWebhookEvent,
   PaymentProvider,
   ProviderCustomer,
@@ -24,6 +19,7 @@ import {
   VerifiedPaymentEvent,
   VerifyWebhookInput,
 } from '../payment-provider.interface';
+import { PaymentProviderError } from '../payment-provider.errors';
 import { AsaasApiError, AsaasHttpClient } from './asaas.http-client';
 import { mapPayment, mapSubscription, toAsaasCycle } from './asaas.mapper';
 import { normalizeAsaasWebhookEvent } from './asaas-webhook.mapper';
@@ -53,6 +49,16 @@ const APP_TIME_ZONE = 'America/Sao_Paulo';
  */
 @Injectable()
 export class AsaasPaymentProvider implements PaymentProvider {
+  readonly name = 'asaas';
+  /** O Asaas recusa criar cliente para cartão sem telefone e endereço completo. */
+  readonly requiredCustomerFields: readonly CustomerProfileField[] = [
+    'phone',
+    'postalCode',
+    'street',
+    'addressNumber',
+    'neighborhood',
+  ];
+
   private readonly logger = new Logger(AsaasPaymentProvider.name);
   private client?: AsaasHttpClient;
 
@@ -123,7 +129,7 @@ export class AsaasPaymentProvider implements PaymentProvider {
 
     const checkoutUrl = checkout.link ?? checkout.url;
     if (!checkoutUrl) {
-      throw new InternalServerErrorException('Asaas não retornou URL de checkout');
+      throw new PaymentProviderError('unavailable', 'Asaas não retornou URL de checkout');
     }
     return {
       checkoutUrl,
@@ -140,7 +146,7 @@ export class AsaasPaymentProvider implements PaymentProvider {
     } catch (error) {
       // Já removida: o objetivo (parar de cobrar) está cumprido. Sem isto, um
       // retry depois de um cancelamento que deu certo falharia para sempre.
-      if (error instanceof AsaasApiError && error.status === 404) return;
+      if (error instanceof PaymentProviderError && error.kind === 'not_found') return;
       throw error;
     }
   }
@@ -179,21 +185,22 @@ export class AsaasPaymentProvider implements PaymentProvider {
   async verifyWebhook(input: VerifyWebhookInput): Promise<VerifiedPaymentEvent> {
     const expected = this.config.get<string>('ASAAS_WEBHOOK_TOKEN');
     if (!expected) {
-      throw new InternalServerErrorException('ASAAS_WEBHOOK_TOKEN não configurado');
+      throw new PaymentProviderError('unavailable', 'ASAAS_WEBHOOK_TOKEN não configurado');
     }
 
     const provided =
       input.signature ?? (this.headerValue(input.headers, 'asaas-access-token') as string);
     if (!provided || !this.safeEqual(provided, expected)) {
-      throw new UnauthorizedException('Assinatura de webhook do Asaas inválida');
+      throw new PaymentProviderError('unauthorized', 'Assinatura de webhook do Asaas inválida');
     }
 
     const event = this.parseEvent(input.rawBody);
     if (!event.id || !event.event) {
-      throw new UnauthorizedException('Payload de webhook do Asaas inválido');
+      throw new PaymentProviderError('unauthorized', 'Payload de webhook do Asaas inválido');
     }
 
     return {
+      provider: this.name,
       providerEventId: event.id,
       eventType: event.event,
       payload: event,
@@ -228,17 +235,19 @@ export class AsaasPaymentProvider implements PaymentProvider {
   }
 
   /**
-   * Converte um erro do Asaas em uma exceção apropriada para o cliente. Erros de
-   * validação (4xx) viram `BadRequestException` com a(s) descrição(ões) do Asaas
-   * (sem segredos) — ex.: "O CPF/CNPJ informado é inválido." Demais erros sobem
-   * como estão (viram 5xx). Nunca loga corpos de requisição.
+   * Recusa de dados pelo Asaas vira `validation` com a(s) descrição(ões) dele
+   * (sem segredos) — ex.: "O CPF/CNPJ informado é inválido." —, que o usuário
+   * pode corrigir. As demais falhas sobem como vieram. Nunca loga corpos de
+   * requisição.
    */
   private rethrowAsClientError(error: unknown, action: string): never {
-    if (error instanceof AsaasApiError && error.status >= 400 && error.status < 500) {
+    if (error instanceof AsaasApiError && error.kind === 'validation') {
       const description = this.extractAsaasErrors(error.body);
       this.logger.warn(`Asaas recusou ${action} (HTTP ${error.status}): ${description ?? '—'}`);
-      throw new BadRequestException(
+      throw new PaymentProviderError(
+        'validation',
         description ?? `Não foi possível ${action}. Verifique os dados informados.`,
+        { cause: error, userFacing: true },
       );
     }
     throw error;
@@ -262,7 +271,7 @@ export class AsaasPaymentProvider implements PaymentProvider {
     const baseUrl = this.config.get<string>('ASAAS_API_URL');
     const apiKey = this.config.get<string>('ASAAS_API_KEY');
     if (!baseUrl || !apiKey) {
-      throw new InternalServerErrorException('Credenciais do Asaas não configuradas (Prompt 0)');
+      throw new PaymentProviderError('unavailable', 'Credenciais do Asaas não configuradas');
     }
 
     this.client = new AsaasHttpClient({ baseUrl, apiKey });
@@ -274,7 +283,7 @@ export class AsaasPaymentProvider implements PaymentProvider {
     try {
       return JSON.parse(text) as AsaasWebhookEvent;
     } catch {
-      throw new UnauthorizedException('Corpo do webhook do Asaas não é JSON válido');
+      throw new PaymentProviderError('unauthorized', 'Corpo do webhook do Asaas não é JSON válido');
     }
   }
 

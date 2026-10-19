@@ -1,16 +1,17 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Logger, NotFoundException } from '@nestjs/common';
 
 import { BillingService } from './billing.service';
 
 function setup(env: Record<string, string | undefined> = {}) {
   const provider = {
+    name: 'asaas',
+    requiredCustomerFields: ['phone', 'postalCode', 'street', 'addressNumber', 'neighborhood'],
     createCustomer: jest.fn().mockResolvedValue({ id: 'cus_1' }),
     createCheckout: jest.fn().mockResolvedValue({
       checkoutUrl: 'https://asaas/checkout/1',
       providerCheckoutId: 'chk_1',
       expiresAt: new Date('2026-10-13T13:00:00Z'),
     }),
-    createPaymentMethodUpdateSession: jest.fn(),
     cancelSubscription: jest.fn().mockResolvedValue(undefined),
   };
   const prisma = {
@@ -105,7 +106,13 @@ describe('BillingService.createCheckout', () => {
 
     await service.createCheckout('u1', { planId: 'plan_1' });
 
-    expect(subscriptions.prepareCheckoutSubscription).toHaveBeenCalledWith('u1', 'plan_1', null);
+    // A linha nasce já marcada com o PSP do checkout.
+    expect(subscriptions.prepareCheckoutSubscription).toHaveBeenCalledWith(
+      'u1',
+      'plan_1',
+      'asaas',
+      null,
+    );
     expect(subscriptions.attachCustomer).toHaveBeenCalledWith('s_new', 'cus_1');
     expect(subscriptions.attachCheckout).toHaveBeenCalledWith('s_new', {
       providerCheckoutId: 'chk_1',
@@ -127,6 +134,7 @@ describe('BillingService.createCheckout', () => {
   it('reusa providerCustomerId existente', async () => {
     const { service, provider, subscriptions, access } = setup();
     access.currentSubscription.mockResolvedValue({
+      provider: 'asaas',
       providerCustomerId: 'cus_existing',
       status: 'canceled',
     });
@@ -138,6 +146,7 @@ describe('BillingService.createCheckout', () => {
     expect(subscriptions.prepareCheckoutSubscription).toHaveBeenCalledWith(
       'u1',
       'plan_1',
+      'asaas',
       'cus_existing',
     );
     expect(provider.createCheckout).toHaveBeenCalledWith(
@@ -145,6 +154,27 @@ describe('BillingService.createCheckout', () => {
     );
   });
 
+  it('cliente de outro PSP não é reusado: cria um no configurado', async () => {
+    const { service, provider, subscriptions, access } = setup();
+    access.currentSubscription.mockResolvedValue({
+      provider: 'outro_psp',
+      providerCustomerId: 'cus_de_la',
+      status: 'canceled',
+    });
+
+    await service.createCheckout('u1', { planId: 'plan_1' });
+
+    expect(subscriptions.prepareCheckoutSubscription).toHaveBeenCalledWith(
+      'u1',
+      'plan_1',
+      'asaas',
+      null,
+    );
+    expect(provider.createCustomer).toHaveBeenCalled();
+    expect(provider.createCheckout).toHaveBeenCalledWith(
+      expect.objectContaining({ providerCustomerId: 'cus_1' }),
+    );
+  });
   it('falha ao abrir o checkout no PSP não deixa a assinatura presa em pending', async () => {
     const { service, provider, subscriptions } = setup();
     provider.createCheckout.mockRejectedValue(new Error('PSP fora'));
@@ -183,6 +213,24 @@ describe('BillingService.createCheckout', () => {
     );
     expect(subscriptions.prepareCheckoutSubscription).not.toHaveBeenCalled();
     expect(provider.createCustomer).not.toHaveBeenCalled();
+  });
+
+  it('o que falta no cadastro é o que o PSP declara exigir', async () => {
+    const { service, provider, prisma, subscriptions } = setup();
+    // Um PSP que também exige o documento.
+    provider.requiredCustomerFields = ['document', 'phone'];
+    prisma.user.findUniqueOrThrow.mockResolvedValue({
+      ...USER,
+      phone: null,
+      individualProfile: null,
+      // Endereço vazio não importa para este PSP.
+      postalCode: null,
+    });
+
+    await expect(service.createCheckout('u1', { planId: 'plan_1' })).rejects.toThrow(
+      /faltando: CPF\/CNPJ, telefone/,
+    );
+    expect(subscriptions.prepareCheckoutSubscription).not.toHaveBeenCalled();
   });
 
   it('rejeita quando já há assinatura ativa', async () => {
@@ -232,6 +280,8 @@ describe('BillingService.createCheckout', () => {
       // Recusado o pagamento, ele não bloqueia mais uma nova tentativa.
       where: {
         userId: 'u1',
+        // A de outro PSP ninguém mais resolve aqui: bloquearia para sempre.
+        provider: 'asaas',
         status: 'pending',
         providerSubscriptionId: { not: null },
         lastPaymentFailureAt: null,
@@ -306,6 +356,7 @@ describe('BillingService.cancel', () => {
   const current = {
     id: 's1',
     status: 'active',
+    provider: 'asaas',
     providerSubscriptionId: 'sub_1',
     cancelAtPeriodEnd: false,
   };
@@ -317,10 +368,7 @@ describe('BillingService.cancel', () => {
     await service.cancel('u1');
 
     expect(subscriptions.scheduleCancellation).toHaveBeenCalledWith('s1', 'user');
-    expect(provider.cancelSubscription).toHaveBeenCalledWith({
-      providerSubscriptionId: 'sub_1',
-      cancelAtPeriodEnd: true,
-    });
+    expect(provider.cancelSubscription).toHaveBeenCalledWith({ providerSubscriptionId: 'sub_1' });
     // O aviso de cancelamento do PSP não pode chegar com a flag ainda falsa.
     expect(order(subscriptions.scheduleCancellation)).toBeLessThan(
       order(provider.cancelSubscription),
@@ -351,6 +399,20 @@ describe('BillingService.cancel', () => {
     expect(provider.cancelSubscription).toHaveBeenCalledWith(
       expect.objectContaining({ providerSubscriptionId: 'sub_1' }),
     );
+  });
+
+  it('assinatura de outro PSP não vai para o configurado: agenda aqui e alerta', async () => {
+    const { service, provider, subscriptions, access } = setup();
+    access.currentSubscription.mockResolvedValue({ ...current, provider: 'outro_psp' });
+    const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+    await service.cancel('u1');
+
+    expect(subscriptions.scheduleCancellation).toHaveBeenCalledWith('s1', 'user');
+    // O 404 deste PSP seria lido como "já cancelada", e lá seguiria cobrando.
+    expect(provider.cancelSubscription).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('outro_psp'));
+    error.mockRestore();
   });
 
   it('assinatura sem vínculo no PSP só agenda aqui', async () => {

@@ -7,6 +7,7 @@ const NOW = new Date('2026-10-12T15:00:00Z');
 
 function setup() {
   const provider = {
+    name: 'asaas',
     getSubscription: jest.fn().mockResolvedValue({ status: 'active' }),
     listSubscriptionPayments: jest.fn().mockResolvedValue([]),
     cancelSubscription: jest.fn().mockResolvedValue(undefined),
@@ -501,10 +502,7 @@ describe('ReconciliationService.reconcileSubscription', () => {
       const outcome = await reconcileOne(localSub({ cancelAtPeriodEnd: true }));
 
       expect(outcome).toBe('corrected');
-      expect(provider.cancelSubscription).toHaveBeenCalledWith({
-        providerSubscriptionId: 'sub_a',
-        cancelAtPeriodEnd: true,
-      });
+      expect(provider.cancelSubscription).toHaveBeenCalledWith({ providerSubscriptionId: 'sub_a' });
       // O acesso segue até o fim do período: só o PSP é acertado.
       expect(subscriptions.transitionTo).not.toHaveBeenCalled();
       expect(provider.listSubscriptionPayments).toHaveBeenCalledTimes(1);
@@ -603,6 +601,21 @@ describe('ReconciliationService.reconcileSubscription', () => {
 });
 
 describe('ReconciliationService.reconcile', () => {
+  it('confere no PSP só as assinaturas dele; expira checkouts de qualquer um', async () => {
+    const { service, prisma } = setup();
+    prisma.subscription.findMany.mockResolvedValueOnce([]);
+
+    await service.reconcile();
+
+    expect(prisma.subscription.findMany.mock.calls[0][0].where).toMatchObject({
+      provider: 'asaas',
+      providerSubscriptionId: { not: null },
+    });
+    // Expirar checkout é só local: vale para qualquer PSP, e para as tentativas
+    // que nem chegaram a um (`provider` nulo).
+    expect(prisma.subscription.findMany.mock.calls[1][0].where).not.toHaveProperty('provider');
+  });
+
   it('percorre o lote e é resiliente a erro por item', async () => {
     const { service, provider, prisma } = setup();
     prisma.subscription.findMany.mockResolvedValueOnce([

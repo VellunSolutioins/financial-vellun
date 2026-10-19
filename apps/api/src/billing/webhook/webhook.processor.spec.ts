@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { PaymentStatus } from '@prisma/client';
 
 import { UncorrelatedPaymentEventError } from '../billing.errors';
@@ -14,6 +15,7 @@ const DUE_TODAY = new Date('2026-10-12T12:00:00Z');
 
 function setup() {
   const provider = {
+    name: 'asaas',
     normalizeWebhookEvent: jest.fn(),
     getPayment: jest.fn(),
     // Consultada na primeira ativação, para saber o ciclo contratado.
@@ -68,6 +70,7 @@ function setup() {
     // processo levou o evento, e o processamento para aí.
     markProcessing: jest.fn().mockResolvedValue(true),
     markFailed: jest.fn().mockResolvedValue({}),
+    markUnprocessable: jest.fn().mockResolvedValue({}),
     observeProcessed: jest.fn(),
     markProcessed: (id: string, subscriptionId: string | null, db: unknown) => {
       writes.push(db);
@@ -132,6 +135,7 @@ function persistedEvent(overrides: Record<string, unknown> = {}) {
     providerEventId: 'evt_1',
     eventType: 'PAYMENT_RECEIVED',
     status: 'received',
+    provider: 'asaas',
     sanitizedPayload: {},
     receivedAt: RECEIVED_AT,
     ...overrides,
@@ -390,7 +394,7 @@ describe('WebhookProcessor.process', () => {
       expect(ctx.prisma.subscription.findFirst).toHaveBeenCalledTimes(2);
       expect(ctx.prisma.subscription.findFirst).toHaveBeenLastCalledWith(
         expect.objectContaining({
-          where: { providerCheckoutId: 'chk_1', providerSubscriptionId: null },
+          where: { provider: 'asaas', providerCheckoutId: 'chk_1', providerSubscriptionId: null },
         }),
       );
       expect(ctx.subscriptions.transitionTo).toHaveBeenCalledWith(
@@ -418,7 +422,7 @@ describe('WebhookProcessor.process', () => {
       await ctx.processor.process('row_1');
 
       expect(ctx.prisma.subscription.findFirst).toHaveBeenCalledWith({
-        where: { providerCheckoutId: 'chk_1' },
+        where: { provider: 'asaas', providerCheckoutId: 'chk_1' },
       });
       expect(ctx.subscriptions.expireCheckout).toHaveBeenCalledWith(
         's1',
@@ -504,7 +508,7 @@ describe('WebhookProcessor.process', () => {
         // Checkout e cliente vêm da consulta ao PSP, não do payload.
         expect(ctx.provider.getSubscription).toHaveBeenCalledWith('sub_nova');
         expect(ctx.prisma.subscription.findFirst).toHaveBeenCalledWith({
-          where: { providerCheckoutId: 'chk_1' },
+          where: { provider: 'asaas', providerCheckoutId: 'chk_1' },
         });
         // Só preenche o que está vazio: reentrega não sobrescreve.
         expect(ctx.tx.subscription.updateMany).toHaveBeenCalledWith({
@@ -614,7 +618,7 @@ describe('WebhookProcessor.process', () => {
   });
 
   describe('assinaturas anteriores do mesmo usuário (regularização por novo checkout)', () => {
-    const OLD = { id: 's_old', providerSubscriptionId: 'sub_old' };
+    const OLD = { id: 's_old', provider: 'asaas', providerSubscriptionId: 'sub_old' };
     const order = (mock: jest.Mock, call = 0) => mock.mock.invocationCallOrder[call];
 
     it('ao ativar a nova, cancela a antiga no PSP e só depois a fecha aqui', async () => {
@@ -697,11 +701,29 @@ describe('WebhookProcessor.process', () => {
       expect(ctx.events.markProcessed).toHaveBeenCalledWith('row_1');
     });
 
+    it('a antiga de outro PSP fica aberta, com alerta: este não sabe cancelá-la', async () => {
+      const ctx = setup();
+      arrange(ctx, { intent: 'payment_succeeded' });
+      ctx.tx.subscription.findMany.mockResolvedValue([
+        { id: 's_la', provider: 'outro_psp', providerSubscriptionId: 'sub_la' },
+      ]);
+      const error = jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.provider.cancelSubscription).not.toHaveBeenCalled();
+      expect(ctx.subscriptions.transitionTo).toHaveBeenCalledTimes(1); // só a ativação
+      // Lá ela segue cobrando: em silêncio, o usuário pagaria em dobro.
+      expect(error).toHaveBeenCalledWith(expect.stringContaining('outro_psp'));
+      expect(ctx.events.markProcessed).toHaveBeenCalledWith('row_1');
+      error.mockRestore();
+    });
+
     it('não cancela a assinatura do PSP da própria cobrança', async () => {
       const ctx = setup();
       arrange(ctx, { intent: 'payment_succeeded' });
       ctx.tx.subscription.findMany.mockResolvedValue([
-        { id: 's_dup', providerSubscriptionId: 'sub_a' },
+        { id: 's_dup', provider: 'asaas', providerSubscriptionId: 'sub_a' },
       ]);
 
       await ctx.processor.process('row_1');
@@ -875,6 +897,25 @@ describe('WebhookProcessor.process', () => {
     expect(ctx.events.markProcessed).toHaveBeenCalledWith('row_1');
   });
 
+  it('evento gravado por outro PSP vai para o painel, sem processar', async () => {
+    const ctx = setup();
+    ctx.prisma.paymentWebhookEvent.findUniqueOrThrow.mockResolvedValue(
+      persistedEvent({ provider: 'outro_psp' }),
+    );
+
+    await ctx.processor.process('row_1');
+
+    // Este adapter não sabe ler o payload nem consultar as cobranças dele.
+    expect(ctx.provider.normalizeWebhookEvent).not.toHaveBeenCalled();
+    expect(ctx.provider.getPayment).not.toHaveBeenCalled();
+    // Pode ser uma confirmação de pagamento: `processed` a esconderia do painel.
+    expect(ctx.events.markProcessed).not.toHaveBeenCalled();
+    expect(ctx.events.markUnprocessable).toHaveBeenCalledWith(
+      'row_1',
+      expect.stringContaining('outro_psp'),
+    );
+  });
+
   it('é idempotente: não reprocessa evento já processado', async () => {
     const { processor, prisma, events, subscriptions } = setup();
     prisma.paymentWebhookEvent.findUniqueOrThrow.mockResolvedValue(
@@ -961,7 +1002,10 @@ describe('WebhookProcessor.process', () => {
 
       expect(ctx.prisma.subscription.findFirst).toHaveBeenCalledTimes(1);
       expect(ctx.prisma.subscription.findFirst).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { providerSubscriptionId: 'sub_real' } }),
+        // Só entre as assinaturas deste PSP: o id de outro pode coincidir.
+        expect.objectContaining({
+          where: { provider: 'asaas', providerSubscriptionId: 'sub_real' },
+        }),
       );
     });
 

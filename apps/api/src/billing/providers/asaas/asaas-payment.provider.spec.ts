@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
-
+import { PaymentProviderError } from '../payment-provider.errors';
 import { AsaasPaymentProvider } from './asaas-payment.provider';
 
 const WEBHOOK_TOKEN = 'super-secret-webhook-token';
@@ -29,6 +28,7 @@ describe('AsaasPaymentProvider.verifyWebhook', () => {
       headers: { 'asaas-access-token': WEBHOOK_TOKEN },
     });
     expect(result).toEqual({
+      provider: 'asaas',
       providerEventId: 'evt_123',
       eventType: 'PAYMENT_RECEIVED',
       payload: expect.objectContaining({ id: 'evt_123', event: 'PAYMENT_RECEIVED' }),
@@ -48,14 +48,14 @@ describe('AsaasPaymentProvider.verifyWebhook', () => {
     const provider = makeProvider();
     await expect(
       provider.verifyWebhook({ rawBody: eventBody, headers: { 'asaas-access-token': 'wrong' } }),
-    ).rejects.toBeInstanceOf(UnauthorizedException);
+    ).rejects.toMatchObject({ name: 'PaymentProviderError', kind: 'unauthorized' });
   });
 
   it('rejeita quando token não é configurado', async () => {
     const provider = makeProvider({ ASAAS_WEBHOOK_TOKEN: undefined });
     await expect(
       provider.verifyWebhook({ rawBody: eventBody, signature: WEBHOOK_TOKEN }),
-    ).rejects.toBeInstanceOf(InternalServerErrorException);
+    ).rejects.toMatchObject({ name: 'PaymentProviderError', kind: 'unavailable' });
   });
 
   it('rejeita corpo que não é JSON', async () => {
@@ -65,7 +65,7 @@ describe('AsaasPaymentProvider.verifyWebhook', () => {
         rawBody: 'não-json',
         headers: { 'asaas-access-token': WEBHOOK_TOKEN },
       }),
-    ).rejects.toBeInstanceOf(UnauthorizedException);
+    ).rejects.toMatchObject({ name: 'PaymentProviderError', kind: 'unauthorized' });
   });
 
   it('rejeita payload sem id/event', async () => {
@@ -75,16 +75,17 @@ describe('AsaasPaymentProvider.verifyWebhook', () => {
         rawBody: JSON.stringify({ foo: 'bar' }),
         headers: { 'asaas-access-token': WEBHOOK_TOKEN },
       }),
-    ).rejects.toBeInstanceOf(UnauthorizedException);
+    ).rejects.toMatchObject({ name: 'PaymentProviderError', kind: 'unauthorized' });
   });
 });
 
 describe('AsaasPaymentProvider — configuração e stubs', () => {
   it('chamadas HTTP falham com erro claro quando credenciais ausentes', async () => {
     const provider = makeProvider({ ASAAS_API_URL: undefined, ASAAS_API_KEY: undefined });
-    await expect(provider.getSubscription('sub_1')).rejects.toBeInstanceOf(
-      InternalServerErrorException,
-    );
+    await expect(provider.getSubscription('sub_1')).rejects.toMatchObject({
+      name: 'PaymentProviderError',
+      kind: 'unavailable',
+    });
   });
 });
 
@@ -206,7 +207,6 @@ describe('AsaasPaymentProvider — chamadas ao Asaas', () => {
     await expect(
       makeProvider(API).cancelSubscription({
         providerSubscriptionId: 'sub_1',
-        cancelAtPeriodEnd: true,
       }),
     ).resolves.toBeUndefined();
   });
@@ -217,9 +217,75 @@ describe('AsaasPaymentProvider — chamadas ao Asaas', () => {
     await expect(
       makeProvider(API).cancelSubscription({
         providerSubscriptionId: 'sub_1',
-        cancelAtPeriodEnd: true,
       }),
     ).rejects.toMatchObject({ name: 'AsaasApiError', status: 500 });
+  });
+});
+
+describe('AsaasPaymentProvider — falhas chegam ao domínio como PaymentProviderError', () => {
+  const API = { ASAAS_API_URL: 'https://asaas.test/v3', ASAAS_API_KEY: randomUUID() };
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it.each([
+    [404, 'not_found'],
+    [401, 'unavailable'], // a NOSSA chave foi recusada: configuração
+    [429, 'unavailable'], // limite de requisições: os dados estão certos
+    [500, 'unavailable'],
+  ])('HTTP %s vira %s', async (status, kind) => {
+    jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ errors: [] }), { status }));
+
+    const error = await makeProvider(API)
+      .getPayment('pay_1')
+      .catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(PaymentProviderError);
+    expect(error).toMatchObject({ kind });
+  });
+
+  it('dados recusados viram validation, com a descrição do Asaas para o usuário', async () => {
+    jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ errors: [{ description: 'O CPF/CNPJ informado é inválido.' }] }),
+          { status: 400 },
+        ),
+      );
+
+    await expect(
+      makeProvider(API).createCustomer({ userId: 'u1', name: 'Fulano', email: 'f@x.com' }),
+    ).rejects.toMatchObject({
+      name: 'PaymentProviderError',
+      kind: 'validation',
+      message: 'O CPF/CNPJ informado é inválido.',
+      userFacing: true,
+    });
+  });
+
+  it('rede fora do ar vira unavailable', async () => {
+    jest.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('fetch failed'));
+
+    await expect(
+      makeProvider(API).cancelSubscription({ providerSubscriptionId: 'sub_1' }),
+    ).rejects.toMatchObject({
+      name: 'PaymentProviderError',
+      kind: 'unavailable',
+    });
+  });
+
+  it('declara o nome e o que exige do cadastro', () => {
+    const provider = makeProvider();
+    expect(provider.name).toBe('asaas');
+    expect(provider.requiredCustomerFields).toEqual([
+      'phone',
+      'postalCode',
+      'street',
+      'addressNumber',
+      'neighborhood',
+    ]);
   });
 });
 

@@ -672,11 +672,14 @@ model Subscription {
   id                       String             @id @default(uuid())
   userId                   String             @map("user_id")
   planId                   String             @map("plan_id")
+  /// PSP com que a assinatura foi contratada; nulo quando nenhum participou
+  /// (plano gratuito). Os ids `provider*` so tem sentido junto com ele.
+  provider                 String?
   providerCustomerId       String?            @map("provider_customer_id")
-  providerSubscriptionId   String?            @unique @map("provider_subscription_id")
+  providerSubscriptionId   String?            @map("provider_subscription_id")
   /// Checkout hospedado em que esta assinatura foi contratada. E por ele que a
   /// primeira cobranca acha a linha: a assinatura do PSP so nasce no pagamento.
-  providerCheckoutId       String?            @unique @map("provider_checkout_id")
+  providerCheckoutId       String?            @map("provider_checkout_id")
   /// Quando o checkout deixa de aceitar pagamento. Passado isso, a assinatura
   /// `pending` e expirada, para a tela voltar a oferecer os planos.
   checkoutExpiresAt        DateTime?          @map("checkout_expires_at")
@@ -705,6 +708,9 @@ model Subscription {
   audits        SubscriptionAudit[]
   webhookEvents PaymentWebhookEvent[]
 
+  /// Ids de PSPs diferentes podem coincidir: a unicidade e por PSP.
+  @@unique([provider, providerSubscriptionId])
+  @@unique([provider, providerCheckoutId])
   @@index([userId])
   @@index([status])
   @@map("subscriptions")
@@ -714,7 +720,8 @@ model Payment {
   id                String            @id @default(uuid())
   userId            String            @map("user_id")
   subscriptionId    String?           @map("subscription_id")
-  providerPaymentId String?           @unique @map("provider_payment_id")
+  provider          String
+  providerPaymentId String?           @map("provider_payment_id")
   amount            Decimal           @db.Decimal(15, 2)
   currency          String            @default("BRL")
   status            PaymentStatus     @default(pending)
@@ -728,6 +735,7 @@ model Payment {
   user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   subscription Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
 
+  @@unique([provider, providerPaymentId])
   @@index([userId])
   @@index([subscriptionId])
   @@index([status])
@@ -736,7 +744,8 @@ model Payment {
 
 model PaymentWebhookEvent {
   id               String             @id @default(uuid())
-  providerEventId  String             @unique @map("provider_event_id")
+  provider         String
+  providerEventId  String             @map("provider_event_id")
   eventType        String             @map("event_type")
   status           WebhookEventStatus @default(received)
   attempts         Int                @default(0)
@@ -765,6 +774,8 @@ model PaymentWebhookEvent {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  /// Idempotencia da entrega: o mesmo evento do mesmo PSP entra uma vez so.
+  @@unique([provider, providerEventId])
   @@index([status])
   /// A varredura do cron: eventos vencidos, por status.
   @@index([status, nextRetryAt])

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Req, UseGuards, UseInterceptors } from '@nestjs/common';
 import { ApiCookieAuth, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { Request } from 'express';
@@ -6,6 +6,7 @@ import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { BillingService } from './billing.service';
 import { CreateCheckoutDto } from './dto/create-checkout.dto';
+import { PaymentProviderErrorInterceptor } from './payment-provider-error.interceptor';
 
 /**
  * Endpoints de billing. Permanecem acessíveis **sem** assinatura ativa (doc
@@ -14,6 +15,7 @@ import { CreateCheckoutDto } from './dto/create-checkout.dto';
 @ApiCookieAuth()
 @ApiTags('billing')
 @UseGuards(JwtAuthGuard)
+@UseInterceptors(PaymentProviderErrorInterceptor)
 @Controller('billing')
 export class BillingController {
   constructor(private readonly billingService: BillingService) {}

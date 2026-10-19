@@ -40,6 +40,7 @@ describe('WebhookEventService.ingest', () => {
   }
 
   const event = {
+    provider: 'asaas',
     providerEventId: 'evt_1',
     eventType: 'PAYMENT_RECEIVED',
     payload: { id: 'evt_1' },
@@ -53,7 +54,11 @@ describe('WebhookEventService.ingest', () => {
 
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ providerEventId: 'evt_1', status: 'received' }),
+        data: expect.objectContaining({
+          provider: 'asaas',
+          providerEventId: 'evt_1',
+          status: 'received',
+        }),
       }),
     );
     expect(result).toEqual({ duplicate: false, eventId: 'row_1' });
@@ -191,5 +196,21 @@ describe('WebhookEventService.markFailed', () => {
     const esgotado = setup(6);
     await esgotado.service.markFailed('evt-1', 'x');
     expect(esgotado.metrics.observePaymentWebhook).toHaveBeenCalledWith('exhausted');
+  });
+});
+
+describe('WebhookEventService.markUnprocessable', () => {
+  it('vai direto para exhausted, sem nova tentativa, e conta na métrica', async () => {
+    const update = jest.fn(async ({ data }: any) => ({ id: 'evt-1', ...data }));
+    const prisma = { paymentWebhookEvent: { update } } as any;
+    const metrics = { observePaymentWebhook: jest.fn() } as any;
+
+    const linha = await new WebhookEventService(prisma, metrics).markUnprocessable(
+      'evt-1',
+      'evento de outro PSP',
+    );
+
+    expect(linha).toMatchObject({ status: 'exhausted', nextRetryAt: null });
+    expect(metrics.observePaymentWebhook).toHaveBeenCalledWith('exhausted');
   });
 });

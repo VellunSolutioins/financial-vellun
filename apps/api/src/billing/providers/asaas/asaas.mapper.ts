@@ -1,6 +1,11 @@
 import { BillingInterval } from '@prisma/client';
 
-import { ProviderPayment, ProviderSubscription } from '../payment-provider.interface';
+import {
+  ProviderPayment,
+  ProviderPaymentStatus,
+  ProviderSubscription,
+  ProviderSubscriptionStatus,
+} from '../payment-provider.interface';
 import {
   AsaasCycle,
   AsaasPayment,
@@ -22,7 +27,10 @@ export function fromAsaasCycle(cycle: AsaasCycle | string | undefined): BillingI
 }
 
 /** Status interno normalizado de assinatura derivado do Asaas. */
-export function mapSubscriptionStatus(status: AsaasSubscriptionStatus, deleted?: boolean): string {
+export function mapSubscriptionStatus(
+  status: AsaasSubscriptionStatus,
+  deleted?: boolean,
+): ProviderSubscriptionStatus {
   if (deleted) return 'canceled';
   switch (status) {
     case 'ACTIVE':
@@ -36,7 +44,7 @@ export function mapSubscriptionStatus(status: AsaasSubscriptionStatus, deleted?:
 }
 
 /** Status interno normalizado de pagamento derivado do Asaas. */
-export function mapPaymentStatus(status: AsaasPaymentStatus): string {
+export function mapPaymentStatus(status: AsaasPaymentStatus): ProviderPaymentStatus {
   switch (status) {
     case 'CONFIRMED':
     case 'RECEIVED':

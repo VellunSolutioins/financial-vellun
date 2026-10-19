@@ -4,9 +4,23 @@ import { SubscriptionStatus } from '@prisma/client';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCheckoutDto } from './dto/create-checkout.dto';
-import { PAYMENT_PROVIDER, PaymentProvider } from './providers/payment-provider.interface';
+import {
+  CustomerProfileField,
+  PAYMENT_PROVIDER,
+  PaymentProvider,
+} from './providers/payment-provider.interface';
 import { SubscriptionAccessService } from './services/subscription-access.service';
 import { SubscriptionService } from './services/subscription.service';
+
+/** Nome de cada dado do cadastro, como aparece na mensagem ao usuário. */
+const PROFILE_FIELD_LABELS: Record<CustomerProfileField, string> = {
+  phone: 'telefone',
+  document: 'CPF/CNPJ',
+  postalCode: 'CEP',
+  street: 'logradouro',
+  addressNumber: 'número',
+  neighborhood: 'bairro',
+};
 
 /** Estados de uma assinatura em vigor — os únicos que se cancelam. */
 const CANCELABLE_STATUSES: SubscriptionStatus[] = [
@@ -81,6 +95,9 @@ export class BillingService {
     const awaitingPayment = await this.prisma.subscription.findFirst({
       where: {
         userId,
+        // A de outro PSP não tem mais quem a resolva aqui: nem webhook nem
+        // reconciliação a enxergam. Bloquear por ela seria para sempre.
+        provider: this.provider.name,
         status: SubscriptionStatus.pending,
         providerSubscriptionId: { not: null },
         // Recusado o pagamento, não há mais o que esperar dele.
@@ -116,16 +133,19 @@ export class BillingService {
       include: { individualProfile: true, businessProfile: true },
     });
 
-    let providerCustomerId = current?.providerCustomerId ?? null;
-    // O provedor de pagamentos exige telefone + endereço completo para
-    // checkout com cartão. Validamos aqui, antes de criar qualquer coisa, para
-    // devolver um erro acionável em vez de deixar o provedor recusar com uma
+    // O cliente só vale no PSP que o criou.
+    let providerCustomerId =
+      current?.provider === this.provider.name ? (current.providerCustomerId ?? null) : null;
+    // O PSP pode exigir dados do cadastro (o Asaas exige telefone e endereço
+    // completo para cartão). Validamos aqui, antes de criar qualquer coisa, para
+    // devolver um erro acionável em vez de deixar o PSP recusar com uma
     // mensagem genérica.
     if (!providerCustomerId) this.assertBillingProfileComplete(user);
 
     const subscription = await this.subscriptions.prepareCheckoutSubscription(
       userId,
       plan.id,
+      this.provider.name,
       providerCustomerId,
     );
 
@@ -197,8 +217,9 @@ export class BillingService {
   }
 
   /**
-   * Garante que o usuário tem telefone + endereço de cobrança completos antes de
-   * abrir o checkout. Sem isso, o provedor recusa a criação do cliente.
+   * Garante que o cadastro tem o que o PSP exige para criar o cliente
+   * (`requiredCustomerFields`). Sem isso, o PSP recusa com uma mensagem
+   * genérica; aqui o usuário fica sabendo o que falta.
    */
   private assertBillingProfileComplete(user: {
     phone: string | null;
@@ -206,13 +227,20 @@ export class BillingService {
     street: string | null;
     addressNumber: string | null;
     neighborhood: string | null;
+    individualProfile?: { cpf: string | null } | null;
+    businessProfile?: { cnpj: string | null } | null;
   }) {
-    const missing: string[] = [];
-    if (!user.phone) missing.push('telefone');
-    if (!user.postalCode) missing.push('CEP');
-    if (!user.street) missing.push('logradouro');
-    if (!user.addressNumber) missing.push('número');
-    if (!user.neighborhood) missing.push('bairro');
+    const values: Record<CustomerProfileField, string | null | undefined> = {
+      phone: user.phone,
+      document: user.individualProfile?.cpf ?? user.businessProfile?.cnpj,
+      postalCode: user.postalCode,
+      street: user.street,
+      addressNumber: user.addressNumber,
+      neighborhood: user.neighborhood,
+    };
+    const missing = this.provider.requiredCustomerFields
+      .filter((field) => !values[field])
+      .map((field) => PROFILE_FIELD_LABELS[field]);
 
     if (missing.length > 0) {
       throw new BadRequestException(
@@ -251,11 +279,19 @@ export class BillingService {
       await this.subscriptions.scheduleCancellation(current.id, 'user');
     }
 
-    if (current.providerSubscriptionId) {
+    if (current.providerSubscriptionId && current.provider !== this.provider.name) {
+      // O id é de outro PSP: mandá-lo a este daria 404, tratado como "já
+      // cancelada", e a cobrança lá continuaria. Nem a reconciliação o refaz,
+      // porque só enxerga as deste PSP.
+      this.logger.error(
+        `Cancelamento da assinatura ${current.id} agendado, mas ela é do PSP ` +
+          `${current.provider}, não do configurado (${this.provider.name}); ` +
+          'cancele no painel daquele PSP.',
+      );
+    } else if (current.providerSubscriptionId) {
       try {
         await this.provider.cancelSubscription({
           providerSubscriptionId: current.providerSubscriptionId,
-          cancelAtPeriodEnd: true,
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

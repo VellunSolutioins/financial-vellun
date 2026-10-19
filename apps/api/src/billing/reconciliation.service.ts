@@ -80,6 +80,8 @@ export class ReconciliationService {
   async reconcile(): Promise<ReconcileSummary> {
     const candidates = await this.prisma.subscription.findMany({
       where: {
+        // Só as do PSP configurado: os ids de outro não significam nada para ele.
+        provider: this.provider.name,
         providerSubscriptionId: { not: null },
         status: {
           in: [
@@ -140,6 +142,8 @@ export class ReconciliationService {
    */
   private async expireStaleCheckouts(now: Date = new Date()): Promise<number> {
     try {
+      // Sem filtro de PSP: expirar é só local, e as tentativas antigas sem PSP
+      // nenhum (`provider` nulo) também precisam sair de `pending`.
       const where = {
         status: SubscriptionStatus.pending,
         providerSubscriptionId: null,
@@ -277,7 +281,7 @@ export class ReconciliationService {
   /** Refaz no PSP o cancelamento que o usuário pediu. Falhar aqui não impede o resto. */
   private async redoCancellation(subscriptionId: string, providerSubscriptionId: string) {
     try {
-      await this.provider.cancelSubscription({ providerSubscriptionId, cancelAtPeriodEnd: true });
+      await this.provider.cancelSubscription({ providerSubscriptionId });
       this.alert(`Assinatura ${subscriptionId}: cancelamento pedido pelo usuário refeito no PSP.`);
       return true;
     } catch (error) {

@@ -46,6 +46,7 @@ export class WebhookEventService {
     try {
       const created = await this.prisma.paymentWebhookEvent.create({
         data: {
+          provider: event.provider,
           providerEventId: event.providerEventId,
           eventType: event.eventType,
           status: WebhookEventStatus.received,
@@ -158,6 +159,24 @@ export class WebhookEventService {
     this.metrics.observePaymentWebhook(
       atualizado.status === WebhookEventStatus.exhausted ? 'exhausted' : 'failed',
     );
+    return atualizado;
+  }
+
+  /**
+   * Evento que nenhuma nova tentativa vai resolver (ex.: de um PSP que não é
+   * mais o configurado). Vai direto para `exhausted`, onde o painel de
+   * operações o mostra, em vez de virar `processed` sem ter tido efeito.
+   */
+  async markUnprocessable(id: string, error: string) {
+    const atualizado = await this.prisma.paymentWebhookEvent.update({
+      where: { id },
+      data: {
+        status: WebhookEventStatus.exhausted,
+        lastError: error.slice(0, 1000),
+        nextRetryAt: null,
+      },
+    });
+    this.metrics.observePaymentWebhook('exhausted');
     return atualizado;
   }
 }

@@ -2,14 +2,15 @@ import type { PaymentFailureReason } from '@financial-vellun/shared';
 import { BillingInterval } from '@prisma/client';
 
 /**
- * Token de injeção do provider de pagamento. O bind para o adapter concreto
- * (ex.: AsaasPaymentProvider) acontece no billing.module no Prompt 3.
+ * Token de injeção do provider de pagamento. O adapter concreto é escolhido no
+ * billing.module pela variável `PAYMENT_PROVIDER`.
  */
 export const PAYMENT_PROVIDER = Symbol('PAYMENT_PROVIDER');
 
 // ── Tipos internos ──────────────────────────────────────────────────────────
 // Nenhum tipo do SDK/HTTP do PSP deve vazar para fora do adapter. A camada de
-// domínio trabalha apenas com os contratos abaixo.
+// domínio trabalha apenas com os contratos abaixo, e as falhas chegam como
+// `PaymentProviderError` (payment-provider.errors.ts).
 
 export interface ProviderCustomer {
   id: string;
@@ -49,14 +50,40 @@ export interface CheckoutSession {
   expiresAt?: Date | null;
 }
 
+/**
+ * Interrompe as cobranças futuras da assinatura no PSP. Manter o acesso até o
+ * fim do período pago é regra do domínio, não do PSP.
+ */
 export interface CancelSubscriptionInput {
   providerSubscriptionId: string;
-  cancelAtPeriodEnd: boolean;
 }
+
+/** Estado de uma assinatura no PSP, em termos do domínio. */
+export type ProviderSubscriptionStatus = 'active' | 'inactive' | 'canceled' | 'expired';
+
+/** Estado de uma cobrança no PSP, em termos do domínio (os mesmos do banco). */
+export type ProviderPaymentStatus =
+  | 'pending'
+  | 'processing'
+  | 'paid'
+  | 'failed'
+  | 'refunded'
+  | 'partially_refunded'
+  | 'chargeback'
+  | 'canceled';
+
+/** Dado do cadastro do cliente que um PSP pode exigir para cobrar no cartão. */
+export type CustomerProfileField =
+  | 'phone'
+  | 'document'
+  | 'postalCode'
+  | 'street'
+  | 'addressNumber'
+  | 'neighborhood';
 
 export interface ProviderSubscription {
   id: string;
-  status: string;
+  status: ProviderSubscriptionStatus;
   /**
    * Vencimento da próxima cobrança **a ser gerada** pelo PSP. Não é o fim do
    * período pago: o PSP pode gerar cobranças com antecedência (o Asaas gera
@@ -74,7 +101,7 @@ export interface ProviderSubscription {
 
 export interface ProviderPayment {
   id: string;
-  status: string;
+  status: ProviderPaymentStatus;
   amount: string;
   currency: string;
   dueAt?: Date | null;
@@ -103,6 +130,8 @@ export interface VerifyWebhookInput {
 }
 
 export interface VerifiedPaymentEvent {
+  /** PSP que mandou o evento (o `name` do adapter). */
+  provider: string;
   providerEventId: string;
   eventType: string;
   payload: unknown;
@@ -153,6 +182,14 @@ export interface NormalizedWebhookEvent {
  * Implementado pelo adapter do PSP (Prompt 3).
  */
 export interface PaymentProvider {
+  /** Identifica o PSP nas linhas que ele origina (`provider` no banco). */
+  readonly name: string;
+  /**
+   * Dados do cadastro que o PSP exige antes de criar o cliente. O domínio
+   * valida a partir desta lista, para devolver ao usuário o que falta em vez
+   * de uma recusa genérica do PSP.
+   */
+  readonly requiredCustomerFields: readonly CustomerProfileField[];
   /**
    * Devolve o cliente do usuário no PSP, criando se ainda não existir. Repetir
    * a chamada para o mesmo `userId` não pode criar um segundo cliente.
