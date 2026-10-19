@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma, SubscriptionStatus } from '@prisma/client';
 
+import { Db } from '../../common/db';
 import { PrismaService } from '../../prisma/prisma.service';
 
 export interface RecordAuditInput {
@@ -22,8 +23,9 @@ export interface RecordAuditInput {
 export class SubscriptionAuditService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async record(input: RecordAuditInput) {
-    return this.prisma.subscriptionAudit.create({
+  /** `db` é o `tx` quando a auditoria precisa entrar no mesmo commit do que ela registra. */
+  async record(input: RecordAuditInput, db: Db = this.prisma) {
+    return db.subscriptionAudit.create({
       data: {
         subscriptionId: input.subscriptionId,
         action: input.action,

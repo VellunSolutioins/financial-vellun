@@ -36,6 +36,15 @@ export async function lockCreditCard(tx: Db, creditCardId: string) {
   await tx.$queryRaw`SELECT "id" FROM "credit_cards" WHERE "id" = ${creditCardId} FOR UPDATE`;
 }
 
+/**
+ * Trava a assinatura: eventos de cobrança da mesma assinatura esperam a vez.
+ * Sem isto, dois webhooks em paralelo leem o mesmo estado e o último a gravar
+ * desfaz o que o outro aplicou.
+ */
+export async function lockSubscription(tx: Db, subscriptionId: string) {
+  await tx.$queryRaw`SELECT "id" FROM "subscriptions" WHERE "id" = ${subscriptionId} FOR UPDATE`;
+}
+
 /** Centavos de um `Decimal`, número ou texto, sem passar resíduo de float adiante. */
 export function cents(value: number | string | { toString(): string } | null | undefined) {
   if (value === null || value === undefined) return 0;

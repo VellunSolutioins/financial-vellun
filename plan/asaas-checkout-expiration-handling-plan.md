@@ -1,5 +1,7 @@
 # Plano — Tratamento de Checkout Expirado e Correlação de Webhooks Asaas
 
+> **Substituído** pela entrega 3 de [billing-correcoes-plan.md](billing-correcoes-plan.md), já implementada. A correlação ficou pelo id do checkout, não pelo `externalReference`, que a documentação dos eventos de checkout do Asaas não lista. Mantido como registro do caso que motivou a mudança.
+
 ## Summary
 
 Implementar correlação robusta entre checkout Asaas, assinatura local e webhooks para evitar assinaturas presas em `pending` quando o usuário inicia o checkout e não conclui o pagamento.

@@ -37,11 +37,43 @@ describe('WebhookRetryService', () => {
     await service.sweep();
 
     const [args] = prisma.paymentWebhookEvent.findMany.mock.calls[0];
-    expect(args.where.status).toBe(WebhookEventStatus.failed);
-    expect(args.where.nextRetryAt.lte).toEqual(agora);
+    expect(args.where.OR).toContainEqual({
+      status: WebhookEventStatus.failed,
+      nextRetryAt: { lte: agora },
+    });
     // Um evento que espera há duas horas não pode ficar atrás de um que acabou
     // de falhar.
-    expect(args.orderBy).toEqual({ nextRetryAt: 'asc' });
+    expect(args.orderBy).toEqual([
+      { nextRetryAt: { sort: 'asc', nulls: 'first' } },
+      { receivedAt: 'asc' },
+    ]);
+  });
+
+  it('pega também o órfão: recebido há mais de um minuto e nunca tentado', async () => {
+    jest.useFakeTimers().setSystemTime(agora);
+    const { service, prisma, processor } = setup([{ id: 'orfao' }]);
+
+    await service.sweep();
+
+    const [args] = prisma.paymentWebhookEvent.findMany.mock.calls[0];
+    // O limite de um minuto deixa de fora o evento que acabou de chegar e
+    // ainda está com a primeira tentativa, imediata, a caminho.
+    expect(args.where.OR).toContainEqual({
+      status: WebhookEventStatus.received,
+      receivedAt: { lt: new Date(agora.getTime() - 60 * 1000) },
+    });
+    // Passa pelo mesmo caminho dos demais: reivindicação atômica incluída.
+    expect(processor.attempt).toHaveBeenCalledWith('orfao');
+  });
+
+  it('não pega processing nem exhausted: um tem dono, o outro só volta pelo painel', async () => {
+    const { service, prisma } = setup();
+
+    await service.sweep();
+
+    const [args] = prisma.paymentWebhookEvent.findMany.mock.calls[0];
+    const statuses = args.where.OR.map((clause: { status: string }) => clause.status);
+    expect(statuses.sort()).toEqual([WebhookEventStatus.failed, WebhookEventStatus.received]);
   });
 
   it('devolve à fila o que ficou preso em processing', async () => {

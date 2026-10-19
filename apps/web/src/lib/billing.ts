@@ -1,3 +1,5 @@
+import type { PaymentFailureReason } from '@financial-vellun/shared';
+
 import { apiClient } from './api-client';
 
 export type BillingInterval = 'monthly' | 'annual';
@@ -30,6 +32,14 @@ export interface SubscriptionAccess {
   subscriptionId: string | null;
 }
 
+/** Explicação da recusa, para quem não conhece os termos da operadora. */
+export function paymentFailureText(reason: PaymentFailureReason | null): string {
+  if (reason === 'risk_rejected') {
+    return 'O pagamento não foi aprovado na análise de segurança da operadora do cartão.';
+  }
+  return 'O cartão foi recusado na última tentativa de cobrança.';
+}
+
 export interface SubscriptionState {
   status: SubscriptionStatus | null;
   plan: Plan | null;
@@ -39,6 +49,8 @@ export interface SubscriptionState {
   graceUntil: string | null;
   cancelAtPeriodEnd: boolean;
   canceledAt: string | null;
+  /** Última cobrança recusada; some quando um pagamento é aprovado. */
+  lastPaymentFailure: { at: string; reason: PaymentFailureReason | null } | null;
   access: SubscriptionAccess;
 }
 
@@ -48,9 +60,6 @@ export const getSubscription = () => apiClient.get<SubscriptionState>('/billing/
 
 export const createCheckout = (planId: string) =>
   apiClient.post<{ checkoutUrl: string }>('/billing/checkout', { planId });
-
-export const createPaymentMethodSession = () =>
-  apiClient.post<{ url: string }>('/billing/payment-method', {});
 
 export const cancelSubscription = () => apiClient.post<SubscriptionState>('/billing/cancel', {});
 

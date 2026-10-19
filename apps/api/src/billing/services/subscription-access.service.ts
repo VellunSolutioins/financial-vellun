@@ -13,6 +13,13 @@ export type SubscriptionAccessReason =
   | 'grace_expired'
   | 'inactive';
 
+/** Estados em que uma assinatura pode dar acesso (dependendo das datas). */
+const ACCESS_STATUSES: SubscriptionStatus[] = [
+  SubscriptionStatus.active,
+  SubscriptionStatus.trialing,
+  SubscriptionStatus.past_due,
+];
+
 /** Resultado tipado da regra central de acesso comercial. */
 export interface SubscriptionAccess {
   allowed: boolean;
@@ -42,13 +49,43 @@ export class SubscriptionAccessService {
   }
 
   async canUseProduct(userId: string, now: Date = new Date()): Promise<SubscriptionAccess> {
-    // Considera a assinatura mais recente do usuário como fonte de verdade.
-    const subscription = await this.prisma.subscription.findFirst({
+    return this.evaluate(await this.pick(userId, now), now);
+  }
+
+  /**
+   * A assinatura que vale para o usuário, com o plano: a que dá acesso hoje e,
+   * não havendo, a mais recente.
+   *
+   * Não é simplesmente a mais recente. Quem regulariza a inadimplência abre um
+   * checkout novo, e isso cria outra assinatura, `pending`, mais nova que a que
+   * ainda está no grace. Olhando só a mais nova, clicar em "regularizar"
+   * tiraria o acesso na hora — e desistir do checkout o tiraria de vez.
+   */
+  async currentSubscription(userId: string, now: Date = new Date()) {
+    const chosen = await this.pick(userId, now);
+    if (!chosen) return null;
+    return this.prisma.subscription.findUnique({
+      where: { id: chosen.id },
+      include: { plan: true },
+    });
+  }
+
+  /**
+   * Roda a cada requisição do produto (guard e canal interno): lê só as
+   * assinaturas que podem dar acesso, sem o plano, e só cai na mais recente
+   * de todas quando nenhuma delas dá.
+   */
+  private async pick(userId: string, now: Date) {
+    const candidates = await this.prisma.subscription.findMany({
+      where: { userId, status: { in: ACCESS_STATUSES } },
+      orderBy: { createdAt: 'desc' },
+    });
+    const allowed = candidates.find((subscription) => this.evaluate(subscription, now).allowed);
+    if (allowed) return allowed;
+    return this.prisma.subscription.findFirst({
       where: { userId },
       orderBy: { createdAt: 'desc' },
     });
-
-    return this.evaluate(subscription, now);
   }
 
   /** Avalia o acesso a partir de uma assinatura já carregada (sem I/O). */

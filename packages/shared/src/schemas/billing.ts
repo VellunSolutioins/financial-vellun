@@ -1,6 +1,12 @@
 import { z } from 'zod';
 
-import { BillingInterval, PaymentMethodType, PaymentStatus, SubscriptionStatus } from '../enums';
+import {
+  BillingInterval,
+  PaymentFailureReason,
+  PaymentMethodType,
+  PaymentStatus,
+  SubscriptionStatus,
+} from '../enums';
 
 export const PlanSchema = z.object({
   id: z.string().uuid(),
@@ -37,6 +43,11 @@ export const SubscriptionSchema = z.object({
   grace_until: z.coerce.date().nullable().optional(),
   cancel_at_period_end: z.boolean(),
   canceled_at: z.coerce.date().nullable().optional(),
+  last_payment_failure_at: z.coerce.date().nullable().optional(),
+  last_payment_failure_reason: z
+    .enum([PaymentFailureReason.CARD_REFUSED, PaymentFailureReason.RISK_REJECTED])
+    .nullable()
+    .optional(),
   created_at: z.coerce.date(),
   updated_at: z.coerce.date(),
 });
