@@ -1,4 +1,4 @@
-import type { PaymentFailureReason } from '@financial-vellun/shared';
+import type { CustomerProfileField, PaymentFailureReason } from '@financial-vellun/shared';
 import { BillingInterval } from '@prisma/client';
 
 /**
@@ -73,13 +73,7 @@ export type ProviderPaymentStatus =
   | 'canceled';
 
 /** Dado do cadastro do cliente que um PSP pode exigir para cobrar no cartão. */
-export type CustomerProfileField =
-  | 'phone'
-  | 'document'
-  | 'postalCode'
-  | 'street'
-  | 'addressNumber'
-  | 'neighborhood';
+export type { CustomerProfileField };
 
 export interface ProviderSubscription {
   id: string;

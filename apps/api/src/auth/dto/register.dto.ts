@@ -34,49 +34,59 @@ export class RegisterDto {
   @MinLength(8)
   password!: string;
 
-  // ── Endereço de cobrança (obrigatório — exigido pelo provedor de pagamentos) ──
-  @ApiProperty({ example: '80240-000' })
+  // ── Endereço de cobrança (opcional) ──
+  // O cadastro só pede os dados pessoais. Endereço e documento são exigidos ao
+  // assinar, pelo provedor de pagamentos, e preenchidos em "Minha Conta".
+  // Continuam aceitos aqui, validados quando vierem.
+  @ApiProperty({ required: false, example: '80240-000' })
+  @IsOptional()
   @IsString()
   @Matches(/^\d{5}-?\d{3}$/, { message: 'CEP inválido (formato: 00000-000)' })
-  postalCode!: string;
+  postalCode?: string;
 
-  @ApiProperty({ example: 'Rua das Flores' })
+  @ApiProperty({ required: false, example: 'Rua das Flores' })
+  @IsOptional()
   @IsString()
   @MinLength(2, { message: 'Logradouro obrigatório' })
-  street!: string;
+  street?: string;
 
-  @ApiProperty({ example: '123' })
+  @ApiProperty({ required: false, example: '123' })
+  @IsOptional()
   @IsString()
   @MinLength(1, { message: 'Número obrigatório' })
-  addressNumber!: string;
+  addressNumber?: string;
 
   @ApiProperty({ required: false, example: 'Apto 45' })
   @IsOptional()
   @IsString()
   complement?: string;
 
-  @ApiProperty({ example: 'Centro' })
+  @ApiProperty({ required: false, example: 'Centro' })
+  @IsOptional()
   @IsString()
   @MinLength(2, { message: 'Bairro obrigatório' })
-  neighborhood!: string;
+  neighborhood?: string;
 
-  @ApiProperty({ example: 'Curitiba' })
+  @ApiProperty({ required: false, example: 'Curitiba' })
+  @IsOptional()
   @IsString()
   @MinLength(2, { message: 'Cidade obrigatória' })
-  city!: string;
+  city?: string;
 
-  @ApiProperty({ example: 'PR' })
+  @ApiProperty({ required: false, example: 'PR' })
+  @IsOptional()
   @IsString()
   @Matches(/^[A-Za-z]{2}$/, { message: 'UF inválida (2 letras, ex.: PR)' })
-  state!: string;
+  state?: string;
 
   @ApiProperty({ enum: ProfileType })
   @IsEnum(ProfileType)
   profileType!: ProfileType;
 
-  // ── Pessoa Física (obrigatório quando profileType = individual) ──
+  // ── Pessoa Física (CPF opcional: exigido só ao assinar) ──
   @ApiProperty({ example: '123.456.789-09', required: false })
   @ValidateIf((o) => o.profileType === ProfileType.individual)
+  @IsOptional()
   @IsString()
   @Matches(/^\d{3}\.\d{3}\.\d{3}-\d{2}$/, { message: 'CPF inválido (formato: 000.000.000-00)' })
   @IsCpf({ message: 'CPF inválido (dígito verificador)' })

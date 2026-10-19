@@ -71,7 +71,8 @@ describe('ValidationPipe com a fábrica (configuração do main.ts)', () => {
 
     const error = await pipe
       .transform(
-        { name: 'Ana', email: 'nao-e-email', sobrando: 1 },
+        // CEP é opcional no cadastro, mas validado quando vem.
+        { name: 'Ana', email: 'nao-e-email', postalCode: '123', sobrando: 1 },
         { type: 'body', metatype: RegisterDto },
       )
       .catch((e: BadRequestException) => e);

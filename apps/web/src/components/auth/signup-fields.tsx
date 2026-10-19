@@ -5,8 +5,8 @@ import { maskPhone } from '@/lib/masks';
 import { FormField, fieldControlClass } from './form-field';
 import type { SignupFormApi } from './signup-schema';
 
-/** Etapa 1 — "Seus dados". */
-export function SignupStepAccount({ form }: { form: SignupFormApi }) {
+/** Campos do cadastro: só os dados pessoais. */
+export function SignupFields({ form }: { form: SignupFormApi }) {
   const {
     register,
     setValue,

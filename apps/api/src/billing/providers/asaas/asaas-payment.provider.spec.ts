@@ -280,6 +280,7 @@ describe('AsaasPaymentProvider — falhas chegam ao domínio como PaymentProvide
     const provider = makeProvider();
     expect(provider.name).toBe('asaas');
     expect(provider.requiredCustomerFields).toEqual([
+      'document',
       'phone',
       'postalCode',
       'street',

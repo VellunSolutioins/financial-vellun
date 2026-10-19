@@ -50,8 +50,13 @@ const APP_TIME_ZONE = 'America/Sao_Paulo';
 @Injectable()
 export class AsaasPaymentProvider implements PaymentProvider {
   readonly name = 'asaas';
-  /** O Asaas recusa criar cliente para cartão sem telefone e endereço completo. */
+  /**
+   * O Asaas exige CPF/CNPJ para criar o cliente. Telefone e endereço são
+   * opcionais no cadastro dele, mas os pedimos para não arriscar a recusa do
+   * cartão. A ordem é a da mensagem ao usuário.
+   */
   readonly requiredCustomerFields: readonly CustomerProfileField[] = [
+    'document',
     'phone',
     'postalCode',
     'street',
