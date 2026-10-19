@@ -13,8 +13,10 @@ function createPrismaMock() {
     subscription: {
       findFirst: jest.fn(),
       findUniqueOrThrow: jest.fn(),
+      findUnique: jest.fn(),
       create: jest.fn(),
       update: jest.fn(({ data }: any) => ({ id: 's1', ...data })),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
   };
   // A transação própria do serviço roda sobre o mesmo dublê.
@@ -59,6 +61,155 @@ describe('SubscriptionService', () => {
       const createArg = prisma.subscription.create.mock.calls[0][0];
       expect(createArg.data.status).toBe('pending');
       expect(createArg.data.trialEndsAt).toBeNull();
+    });
+  });
+
+  describe('prepareCheckoutSubscription', () => {
+    const fresh = {
+      planId: 'plan_2',
+      providerCheckoutId: null,
+      checkoutExpiresAt: null,
+      cancelAtPeriodEnd: false,
+    };
+
+    it('reusa a tentativa pending, trocando o plano e largando o checkout anterior', async () => {
+      prisma.subscription.findFirst.mockResolvedValue({
+        id: 's1',
+        status: 'pending',
+        providerSubscriptionId: null,
+      });
+      prisma.subscription.findUniqueOrThrow.mockResolvedValue({ id: 's1', status: 'pending' });
+
+      const result = await service.prepareCheckoutSubscription('u1', 'plan_2', 'cus_1');
+
+      // Condicional: só se a linha ainda estiver como foi lida.
+      expect(prisma.subscription.updateMany).toHaveBeenCalledWith({
+        where: { id: 's1', status: 'pending', providerSubscriptionId: null },
+        data: { ...fresh, providerCustomerId: 'cus_1' },
+      });
+      expect(result).toMatchObject({ id: 's1' });
+      expect(prisma.subscription.create).not.toHaveBeenCalled();
+    });
+
+    it('sem cliente do PSP ainda, não apaga o que a linha já tinha', async () => {
+      prisma.subscription.findFirst.mockResolvedValue({
+        id: 's1',
+        status: 'pending',
+        providerSubscriptionId: null,
+      });
+      prisma.subscription.findUniqueOrThrow.mockResolvedValue({ id: 's1', status: 'pending' });
+
+      await service.prepareCheckoutSubscription('u1', 'plan_2', null);
+
+      const [{ data }] = prisma.subscription.updateMany.mock.calls[0];
+      expect(data).not.toHaveProperty('providerCustomerId');
+    });
+
+    it('reabre a tentativa expirada que nunca foi paga, em vez de criar outra linha', async () => {
+      prisma.subscription.findFirst.mockResolvedValue({
+        id: 's1',
+        status: 'expired',
+        providerSubscriptionId: null,
+      });
+      prisma.subscription.findUniqueOrThrow.mockResolvedValue({ id: 's1', status: 'expired' });
+
+      await service.prepareCheckoutSubscription('u1', 'plan_2', 'cus_1');
+
+      expect(prisma.subscription.create).not.toHaveBeenCalled();
+      expect(prisma.subscription.update).toHaveBeenLastCalledWith({
+        where: { id: 's1', status: 'expired' },
+        data: { status: 'pending' },
+      });
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'transition:expired->pending', actor: 'checkout' }),
+        prisma,
+      );
+    });
+
+    it('se a linha mudou desde a leitura (expirada pela varredura, paga), nasce outra', async () => {
+      prisma.subscription.findFirst.mockResolvedValue({
+        id: 's1',
+        status: 'pending',
+        providerSubscriptionId: null,
+      });
+      prisma.subscription.updateMany.mockResolvedValue({ count: 0 });
+      prisma.subscription.create.mockImplementation(({ data }: any) => ({ id: 's2', ...data }));
+
+      const created = await service.prepareCheckoutSubscription('u1', 'plan_2', 'cus_1');
+
+      expect(created).toMatchObject({ id: 's2', status: 'pending' });
+    });
+
+    it.each([
+      [
+        'expirada que já teve assinatura no PSP',
+        { status: 'expired', providerSubscriptionId: 'sub_1' },
+      ],
+      // O aviso de criação da assinatura chega antes do pagamento.
+      [
+        'pending já ligada a uma assinatura do PSP',
+        { status: 'pending', providerSubscriptionId: 'sub_1' },
+      ],
+      ['inadimplente', { status: 'past_due', providerSubscriptionId: 'sub_1' }],
+      ['cancelada', { status: 'canceled', providerSubscriptionId: 'sub_1' }],
+    ])('cria uma linha nova quando a última é %s', async (_label, last) => {
+      prisma.subscription.findFirst.mockResolvedValue({ id: 's1', ...last });
+      prisma.subscription.create.mockImplementation(({ data }: any) => ({ id: 's2', ...data }));
+
+      const created = await service.prepareCheckoutSubscription('u1', 'plan_2', 'cus_1');
+
+      expect(created).toMatchObject({ id: 's2', status: 'pending', providerCustomerId: 'cus_1' });
+      expect(prisma.subscription.updateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  it('attachCheckout grava o checkout e o vencimento dele na assinatura', async () => {
+    const expiresAt = new Date('2026-10-13T13:00:00Z');
+
+    await service.attachCheckout('s1', { providerCheckoutId: 'chk_1', expiresAt });
+
+    expect(prisma.subscription.update).toHaveBeenCalledWith({
+      where: { id: 's1' },
+      data: { providerCheckoutId: 'chk_1', checkoutExpiresAt: expiresAt },
+    });
+  });
+
+  describe('expireCheckout', () => {
+    it('expira a assinatura pending e audita', async () => {
+      prisma.subscription.findUnique.mockResolvedValue({ id: 's1', status: 'pending' });
+      prisma.subscription.findUniqueOrThrow.mockResolvedValue({ id: 's1', status: 'pending' });
+
+      const expired = await service.expireCheckout('s1', 'reconciliation', 'checkout vencido');
+
+      expect(expired).toBe(true);
+      expect(audit.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'transition:pending->expired',
+          actor: 'reconciliation',
+          reason: 'checkout vencido',
+        }),
+        prisma,
+      );
+    });
+
+    it.each(['active', 'unpaid', 'expired'])('não mexe em assinatura %s', async (status) => {
+      prisma.subscription.findUnique.mockResolvedValue({ id: 's1', status });
+
+      expect(await service.expireCheckout('s1', 'reconciliation', 'x')).toBe(false);
+      expect(prisma.subscription.update).not.toHaveBeenCalled();
+    });
+
+    it('pagamento chegando entre a leitura e a escrita não é erro: só não expira', async () => {
+      prisma.subscription.findUnique.mockResolvedValue({ id: 's1', status: 'pending' });
+      prisma.subscription.findUniqueOrThrow.mockResolvedValue({ id: 's1', status: 'pending' });
+      prisma.subscription.update.mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError('não encontrado', {
+          code: 'P2025',
+          clientVersion: 'test',
+        }),
+      );
+
+      expect(await service.expireCheckout('s1', 'reconciliation', 'x')).toBe(false);
     });
   });
 

@@ -674,6 +674,12 @@ model Subscription {
   planId                 String             @map("plan_id")
   providerCustomerId     String?            @map("provider_customer_id")
   providerSubscriptionId String?            @unique @map("provider_subscription_id")
+  /// Checkout hospedado em que esta assinatura foi contratada. E por ele que a
+  /// primeira cobranca acha a linha: a assinatura do PSP so nasce no pagamento.
+  providerCheckoutId     String?            @unique @map("provider_checkout_id")
+  /// Quando o checkout deixa de aceitar pagamento. Passado isso, a assinatura
+  /// `pending` e expirada, para a tela voltar a oferecer os planos.
+  checkoutExpiresAt      DateTime?          @map("checkout_expires_at")
   status                 SubscriptionStatus @default(pending)
   currentPeriodStart     DateTime?          @map("current_period_start")
   currentPeriodEnd       DateTime?          @map("current_period_end")

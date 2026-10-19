@@ -37,21 +37,15 @@ export interface CreateCheckoutInput {
   currency: string;
   successUrl: string;
   cancelUrl: string;
+  /** Id da assinatura local, gravado no PSP para rastrear o checkout de volta. */
+  externalReference: string;
 }
 
 export interface CheckoutSession {
   checkoutUrl: string;
   providerCheckoutId?: string;
-}
-
-export interface PaymentMethodUpdateInput {
-  providerCustomerId: string;
-  providerSubscriptionId: string;
-  returnUrl: string;
-}
-
-export interface PaymentMethodUpdateSession {
-  url: string;
+  /** Até quando o checkout aceita pagamento. */
+  expiresAt?: Date | null;
 }
 
 export interface CancelSubscriptionInput {
@@ -70,6 +64,11 @@ export interface ProviderSubscription {
    */
   nextDueAt?: Date | null;
   cancelAtPeriodEnd?: boolean;
+  /** A quem a assinatura pertence e em que checkout foi contratada. */
+  providerCustomerId?: string | null;
+  providerCheckoutId?: string | null;
+  /** Ciclo de cobrança; nulo quando o PSP usa um que não oferecemos. */
+  interval?: BillingInterval | null;
 }
 
 export interface ProviderPayment {
@@ -82,10 +81,7 @@ export interface ProviderPayment {
   /** Vínculos da cobrança no PSP — é por eles que se acha a assinatura local. */
   providerSubscriptionId: string | null;
   providerCustomerId: string | null;
-  /**
-   * Checkout que originou a cobrança. Ainda não participa da correlação: a
-   * assinatura local não guarda o checkout em que foi contratada.
-   */
+  /** Checkout em que a assinatura foi contratada; vem em todas as cobranças dela. */
   providerCheckoutId: string | null;
 }
 
@@ -118,6 +114,8 @@ export type WebhookIntent =
   | 'payment_refunded'
   | 'payment_chargeback'
   | 'subscription_canceled'
+  | 'subscription_created'
+  | 'checkout_expired'
   | 'ignore';
 
 export interface NormalizedWebhookPayment {
@@ -137,6 +135,7 @@ export interface NormalizedWebhookEvent {
   intent: WebhookIntent;
   providerSubscriptionId: string | null;
   providerCustomerId: string | null;
+  providerCheckoutId: string | null;
   payment: NormalizedWebhookPayment | null;
 }
 
@@ -145,11 +144,12 @@ export interface NormalizedWebhookEvent {
  * Implementado pelo adapter do PSP (Prompt 3).
  */
 export interface PaymentProvider {
+  /**
+   * Devolve o cliente do usuário no PSP, criando se ainda não existir. Repetir
+   * a chamada para o mesmo `userId` não pode criar um segundo cliente.
+   */
   createCustomer(input: CreateCustomerInput): Promise<ProviderCustomer>;
   createCheckout(input: CreateCheckoutInput): Promise<CheckoutSession>;
-  createPaymentMethodUpdateSession(
-    input: PaymentMethodUpdateInput,
-  ): Promise<PaymentMethodUpdateSession>;
   cancelSubscription(input: CancelSubscriptionInput): Promise<void>;
   getSubscription(providerSubscriptionId: string): Promise<ProviderSubscription>;
   /**

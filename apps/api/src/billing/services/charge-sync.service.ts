@@ -1,8 +1,16 @@
-import { Inject, Injectable } from '@nestjs/common';
-import { Payment, PaymentStatus, Plan, Subscription, SubscriptionStatus } from '@prisma/client';
+import { Inject, Injectable, Logger } from '@nestjs/common';
+import {
+  BillingInterval,
+  Payment,
+  PaymentStatus,
+  Plan,
+  Subscription,
+  SubscriptionStatus,
+} from '@prisma/client';
 
 import { Db, FINANCIAL_TX_OPTIONS, cents, lockSubscription } from '../../common/db';
 import { PrismaService } from '../../prisma/prisma.service';
+import { InvalidSubscriptionTransitionError } from '../billing.errors';
 import {
   PAYMENT_PROVIDER,
   PaymentProvider,
@@ -38,15 +46,26 @@ export interface ChargeSyncContext {
   now?: Date;
   /** O PSP não tem cobrança posterior a esta. Só a reconciliação sabe dizer. */
   isLastGenerated?: boolean;
+  /**
+   * Ciclo da assinatura no PSP. Sem ele, um valor pago que não bate com o
+   * plano não troca o plano: o preço sozinho não diz qual foi contratado.
+   */
+  billingInterval?: BillingInterval | null;
 }
 
 export interface ChargeSyncResult {
   outcome: ChargeSyncOutcome;
   /**
-   * Assinatura do PSP a cancelar **depois do commit**, quando a cobrança foi
-   * estornada. Ver {@link ChargeSyncService.settle}.
+   * Assinaturas do PSP a cancelar **depois do commit**: a da cobrança
+   * estornada, ou as antigas que a ativação de uma nova substituiu. Ver
+   * {@link ChargeSyncService.settle}.
    */
-  cancelAtGateway: string | null;
+  cancelAtGateway: string[];
+  /**
+   * Assinaturas locais substituídas, a fechar depois que o PSP confirmar. Ver
+   * {@link ChargeSyncService.completeSupersession}.
+   */
+  superseded: Array<{ subscriptionId: string; reason: string }>;
 }
 
 interface Decision {
@@ -55,6 +74,8 @@ interface Decision {
   outcome: ChargeSyncOutcome;
   /** Diferente de `none` só quando `outcome` é `applied`. */
   effect: ChargeEffect;
+  /** Plano que a cobrança paga, quando não é o que a assinatura tinha. */
+  paidPlan?: Plan;
 }
 
 /**
@@ -70,6 +91,8 @@ interface Decision {
  */
 @Injectable()
 export class ChargeSyncService {
+  private readonly logger = new Logger(ChargeSyncService.name);
+
   constructor(
     @Inject(PAYMENT_PROVIDER) private readonly provider: PaymentProvider,
     private readonly prisma: PrismaService,
@@ -123,17 +146,28 @@ export class ChargeSyncService {
       include: { plan: true },
     });
 
+    const now = context.now ?? new Date();
     const decision = await this.decide(tx, sub, charge, source, context);
-    await this.applyEffect(tx, sub, charge, decision, source, context.now ?? new Date());
+    await this.applyEffect(tx, sub, charge, decision, source, now);
 
     const record = this.recordOf(sub, charge, decision, context);
     if (!this.alreadyRecorded(decision.previous, record)) {
       await this.payments.upsertFromProvider(record, tx);
     }
 
+    const refunded = this.refundCancellation(sub, charge, decision, source);
+    const superseded = await this.olderLiveSubscriptions(tx, sub, charge, decision, source);
+
     return {
       outcome: decision.outcome,
-      cancelAtGateway: this.gatewayCancellation(sub, charge, decision, source),
+      cancelAtGateway: [
+        ...(refunded ? [refunded] : []),
+        ...superseded.map((row) => row.providerSubscriptionId),
+      ],
+      superseded: superseded.map((row) => ({
+        subscriptionId: row.id,
+        reason: `substituída pela assinatura ${sub.id}, paga pela cobrança ${charge.id}`,
+      })),
     };
   }
 
@@ -142,11 +176,108 @@ export class ChargeSyncService {
    * aberto até isto dar certo: se o PSP falhar, o retry volta aqui.
    */
   async settle(result: ChargeSyncResult): Promise<void> {
-    if (!result.cancelAtGateway) return;
-    await this.provider.cancelSubscription({
-      providerSubscriptionId: result.cancelAtGateway,
-      cancelAtPeriodEnd: false,
+    for (const providerSubscriptionId of result.cancelAtGateway) {
+      await this.provider.cancelSubscription({ providerSubscriptionId, cancelAtPeriodEnd: false });
+    }
+  }
+
+  /**
+   * Fecha, aqui, as assinaturas que {@link settle} acabou de cancelar no PSP.
+   *
+   * Vem **depois** do PSP de propósito: enquanto ele não confirma, elas seguem
+   * abertas aqui, e é isso que faz o retry do evento encontrá-las de novo. Se
+   * fossem canceladas antes e o PSP falhasse, nada mais tentaria cancelar lá.
+   */
+  async completeSupersession(tx: Db, result: ChargeSyncResult, now: Date = new Date()) {
+    for (const { subscriptionId, reason } of result.superseded) {
+      try {
+        await lockSubscription(tx, subscriptionId);
+        await this.subscriptions.transitionTo(
+          subscriptionId,
+          SubscriptionStatus.canceled,
+          { actor: 'webhook:superseded', reason, data: { canceledAt: now } },
+          tx,
+        );
+      } catch (error) {
+        // Já foi cancelada por outro caminho — o aviso de exclusão do próprio
+        // PSP costuma chegar antes de chegarmos aqui.
+        if (error instanceof InvalidSubscriptionTransitionError) continue;
+        throw error;
+      }
+    }
+  }
+
+  /**
+   * Assinaturas **anteriores** do mesmo usuário que ainda cobram em outra
+   * assinatura do PSP, quando esta está paga e ativa. É o caso de quem
+   * regulariza a inadimplência por um checkout novo: sem cancelar a antiga, as
+   * duas seguiriam cobrando.
+   *
+   * Vale para toda cobrança paga da assinatura ativa, não só a que a ativou:
+   * é o que permite ao retry refazer o cancelamento que o PSP recusou. Só pelo
+   * webhook — a reconciliação não cancela no PSP por conta própria.
+   */
+  private async olderLiveSubscriptions(
+    tx: Db,
+    sub: SubscriptionWithPlan,
+    charge: ProviderPayment,
+    decision: Decision,
+    source: ChargeSource,
+  ): Promise<Array<{ id: string; providerSubscriptionId: string }>> {
+    if (source !== 'webhook' || decision.status !== PaymentStatus.paid) return [];
+    if (decision.outcome === 'superseded') return [];
+    const active =
+      decision.effect.kind === 'activate' ||
+      (decision.effect.kind === 'none' && sub.status === SubscriptionStatus.active);
+    if (!active) return [];
+
+    const current = charge.providerSubscriptionId ?? sub.providerSubscriptionId;
+    const older = await tx.subscription.findMany({
+      where: {
+        userId: sub.userId,
+        id: { not: sub.id },
+        createdAt: { lt: sub.createdAt },
+        providerSubscriptionId: { not: null },
+        status: { notIn: [SubscriptionStatus.canceled, SubscriptionStatus.expired] },
+      },
+      select: { id: true, providerSubscriptionId: true },
     });
+    return older.filter(
+      (row): row is { id: string; providerSubscriptionId: string } =>
+        row.providerSubscriptionId !== null && row.providerSubscriptionId !== current,
+    );
+  }
+
+  /**
+   * O plano que a cobrança paga, na primeira ativação da assinatura.
+   *
+   * A assinatura `pending` aponta para o último plano escolhido; se o usuário
+   * abriu dois checkouts e pagou o primeiro, ela diria "anual" tendo recebido o
+   * valor do mensal. Vale o que foi pago, conferido por preço **e** ciclo — só
+   * o preço pode coincidir com o de outro produto. Sem um plano ativo, e só um,
+   * com os dois, fica o plano da assinatura: o preço pode ter mudado entre o
+   * checkout e o pagamento, e isso não é motivo para negar o acesso.
+   */
+  private async planPaidFor(
+    db: Db,
+    sub: SubscriptionWithPlan,
+    charge: ProviderPayment,
+    interval: BillingInterval | null,
+  ) {
+    const firstActivation = sub.currentPeriodStart === null;
+    if (!firstActivation || cents(charge.amount) === cents(sub.plan.price)) return sub.plan;
+
+    const matches = interval
+      ? await db.plan.findMany({ where: { isActive: true, price: charge.amount, interval } })
+      : [];
+    if (matches.length === 1) return matches[0];
+
+    this.logger.warn(
+      `Cobrança ${charge.id} de ${charge.amount} não bate com o plano da assinatura ${sub.id} ` +
+        `(${sub.plan.code}, ${sub.plan.price.toString()}) nem com um único plano ativo de mesmo ` +
+        `ciclo (${interval ?? 'desconhecido'}); mantido o plano da assinatura.`,
+    );
+    return sub.plan;
   }
 
   /**
@@ -209,8 +340,13 @@ export class ChargeSyncService {
       return none('superseded');
     }
 
+    // O período é calculado com o ciclo do plano pago, que pode não ser o da assinatura.
+    const plan =
+      status === PaymentStatus.paid
+        ? await this.planPaidFor(db, sub, charge, context.billingInterval ?? null)
+        : sub.plan;
     const effect = this.state.effectOfCharge(
-      sub,
+      { ...sub, plan },
       { status, dueAt, paidAt: charge.paidAt ?? null },
       now,
       { isLastGenerated: context.isLastGenerated },
@@ -236,7 +372,13 @@ export class ChargeSyncService {
       return none('recorded');
     }
 
-    return { status, previous, outcome: 'applied', effect };
+    return {
+      status,
+      previous,
+      outcome: 'applied',
+      effect,
+      paidPlan: plan.id !== sub.planId ? plan : undefined,
+    };
   }
 
   /**
@@ -245,7 +387,7 @@ export class ChargeSyncService {
    * a assinatura cancelada — é o caso do PSP ter falhado na tentativa anterior,
    * depois do commit. Cancelar de novo lá é inofensivo.
    */
-  private gatewayCancellation(
+  private refundCancellation(
     sub: SubscriptionWithPlan,
     charge: ProviderPayment,
     decision: Decision,
@@ -325,8 +467,15 @@ export class ChargeSyncService {
           sub.id,
           SubscriptionStatus.active,
           {
-            ...origin('payment_succeeded'),
+            ...origin(
+              'payment_succeeded',
+              decision.paidPlan
+                ? `cobrança ${charge.id} em ${status}; plano ajustado de ${sub.plan.code} ` +
+                    `para ${decision.paidPlan.code}, o que o valor pago corresponde`
+                : undefined,
+            ),
             data: {
+              ...(decision.paidPlan ? { plan: { connect: { id: decision.paidPlan.id } } } : {}),
               providerSubscriptionId,
               currentPeriodStart: effect.currentPeriodStart,
               currentPeriodEnd: effect.currentPeriodEnd,

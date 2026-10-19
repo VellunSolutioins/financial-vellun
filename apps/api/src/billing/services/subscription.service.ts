@@ -31,6 +31,7 @@ export interface TransitionInput {
     | 'canceledAt'
     | 'providerCustomerId'
     | 'providerSubscriptionId'
+    | 'plan'
   >;
   metadata?: Prisma.InputJsonValue;
 }
@@ -52,14 +53,6 @@ export class SubscriptionService {
     return this.prisma.plan.findMany({
       where: { isActive: true },
       orderBy: { price: 'asc' },
-    });
-  }
-
-  getUserSubscription(userId: string) {
-    return this.prisma.subscription.findFirst({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-      include: { plan: true },
     });
   }
 
@@ -90,21 +83,64 @@ export class SubscriptionService {
   }
 
   /**
-   * Prepara a assinatura que será paga no checkout. Reusa a assinatura `pending`
-   * mais recente do usuário (atualizando plano/cliente) ou cria uma nova. Nunca
+   * Prepara a assinatura que será paga no checkout, **antes** de qualquer
+   * chamada ao PSP: é o id dela que vai como referência no checkout. Nunca
    * ativa — a ativação só ocorre por webhook validado.
+   *
+   * Reusa a tentativa anterior do usuário quando ela não chegou a virar
+   * assinatura no PSP (`pending` ou `expired`); senão cria uma nova.
    */
-  async prepareCheckoutSubscription(userId: string, planId: string, providerCustomerId: string) {
+  async prepareCheckoutSubscription(
+    userId: string,
+    planId: string,
+    providerCustomerId: string | null,
+  ) {
     const existing = await this.prisma.subscription.findFirst({
       where: { userId },
       orderBy: { createdAt: 'desc' },
     });
+    const customer = providerCustomerId ? { providerCustomerId } : {};
 
-    if (existing && existing.status === SubscriptionStatus.pending) {
-      return this.prisma.subscription.update({
-        where: { id: existing.id },
-        data: { planId, providerCustomerId },
+    // Só se reusa a tentativa que o PSP ainda não transformou em assinatura.
+    // Com uma assinatura do PSP já ligada (o aviso de criação chega antes do
+    // pagamento, que pode estar em análise), o pagamento do checkout novo
+    // viria de OUTRA assinatura e não acharia esta linha.
+    const reusable =
+      existing &&
+      !existing.providerSubscriptionId &&
+      (existing.status === SubscriptionStatus.pending ||
+        existing.status === SubscriptionStatus.expired);
+
+    if (reusable) {
+      // O checkout anterior sai da linha: os dados são dele, e o aviso de que
+      // ele venceu ou foi cancelado, chegando agora, expiraria a tentativa nova.
+      // Se ele ainda for pago, a cobrança acha a linha pelo cliente.
+      const fresh = {
+        planId,
+        providerCheckoutId: null,
+        checkoutExpiresAt: null,
+        cancelAtPeriodEnd: false,
+        ...customer,
+      };
+      // Condicional: se a varredura de checkouts vencidos ou um pagamento mudou
+      // a linha desde a leitura, ela não é mais reusável e nasce outra.
+      const { count } = await this.prisma.subscription.updateMany({
+        where: { id: existing.id, status: existing.status, providerSubscriptionId: null },
+        data: fresh,
       });
+      if (count === 1 && existing.status === SubscriptionStatus.pending) {
+        return this.prisma.subscription.findUniqueOrThrow({ where: { id: existing.id } });
+      }
+      if (count === 1) {
+        try {
+          return await this.transitionTo(existing.id, SubscriptionStatus.pending, {
+            actor: 'checkout',
+            reason: 'nova tentativa depois de checkout expirado',
+          });
+        } catch (error) {
+          if (!(error instanceof ConcurrentSubscriptionChangeError)) throw error;
+        }
+      }
     }
 
     return this.createSubscription({
@@ -114,6 +150,51 @@ export class SubscriptionService {
       providerCustomerId,
       actor: 'checkout',
     });
+  }
+
+  /**
+   * Grava o cliente do PSP assim que ele existe. Deixado para o fim do
+   * checkout, uma falha no meio perderia o vínculo com o cliente já criado.
+   */
+  attachCustomer(subscriptionId: string, providerCustomerId: string) {
+    return this.prisma.subscription.update({
+      where: { id: subscriptionId },
+      data: { providerCustomerId },
+    });
+  }
+
+  /** Liga a assinatura ao checkout aberto: é por ele que a primeira cobrança a encontra. */
+  attachCheckout(
+    subscriptionId: string,
+    checkout: { providerCheckoutId: string; expiresAt: Date | null },
+  ) {
+    return this.prisma.subscription.update({
+      where: { id: subscriptionId },
+      data: {
+        providerCheckoutId: checkout.providerCheckoutId,
+        checkoutExpiresAt: checkout.expiresAt,
+      },
+    });
+  }
+
+  /**
+   * Expira a tentativa de checkout que não vai mais receber pagamento. Só mexe
+   * em assinatura `pending`: se ela já saiu desse estado (o pagamento chegou),
+   * não há o que expirar. Devolve se expirou.
+   */
+  async expireCheckout(subscriptionId: string, actor: string, reason: string, db?: Db) {
+    const client = db ?? this.prisma;
+    const current = await client.subscription.findUnique({ where: { id: subscriptionId } });
+    if (current?.status !== SubscriptionStatus.pending) return false;
+
+    try {
+      await this.transitionTo(subscriptionId, SubscriptionStatus.expired, { actor, reason }, db);
+      return true;
+    } catch (error) {
+      // Pagou entre a leitura e a escrita: deixou de estar `pending`.
+      if (error instanceof ConcurrentSubscriptionChangeError) return false;
+      throw error;
+    }
   }
 
   /**

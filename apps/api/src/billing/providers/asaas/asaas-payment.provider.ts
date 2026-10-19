@@ -5,7 +5,6 @@ import {
   Injectable,
   InternalServerErrorException,
   Logger,
-  NotImplementedException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -16,8 +15,6 @@ import {
   CreateCheckoutInput,
   CreateCustomerInput,
   NormalizedWebhookEvent,
-  PaymentMethodUpdateInput,
-  PaymentMethodUpdateSession,
   PaymentProvider,
   ProviderCustomer,
   ProviderPayment,
@@ -40,6 +37,9 @@ import {
   AsaasWebhookEvent,
 } from './asaas.types';
 
+/** Por quanto tempo o checkout hospedado aceita pagamento. */
+const CHECKOUT_MINUTES_TO_EXPIRE = 60;
+
 /** Fuso horário de negócio da aplicação (datas de cobrança em horário do Brasil). */
 const APP_TIME_ZONE = 'America/Sao_Paulo';
 
@@ -60,6 +60,16 @@ export class AsaasPaymentProvider implements PaymentProvider {
 
   async createCustomer(input: CreateCustomerInput): Promise<ProviderCustomer> {
     try {
+      // O `externalReference` do cliente é o id do usuário. Procurar antes de
+      // criar é o que impede um segundo cliente quando a tentativa anterior
+      // criou o primeiro e falhou antes de o id ser gravado aqui.
+      const existing = await this.getClient().get<AsaasList<AsaasCustomer>>('/customers', {
+        // Mais de um: um cliente removido pode vir na frente de um ativo.
+        query: { externalReference: input.userId, limit: 10 },
+      });
+      const found = (existing.data ?? []).find((customer) => !customer.deleted);
+      if (found) return { id: found.id };
+
       const customer = await this.getClient().post<AsaasCustomer>('/customers', {
         name: input.name,
         email: input.email,
@@ -85,8 +95,9 @@ export class AsaasPaymentProvider implements PaymentProvider {
       checkout = await this.getClient().post<AsaasCheckout>('/checkouts', {
         billingTypes: ['CREDIT_CARD'],
         chargeTypes: ['RECURRENT'],
-        minutesToExpire: 60,
+        minutesToExpire: CHECKOUT_MINUTES_TO_EXPIRE,
         customer: input.providerCustomerId,
+        externalReference: input.externalReference,
         callback: {
           successUrl: input.successUrl,
           cancelUrl: input.cancelUrl,
@@ -114,18 +125,11 @@ export class AsaasPaymentProvider implements PaymentProvider {
     if (!checkoutUrl) {
       throw new InternalServerErrorException('Asaas não retornou URL de checkout');
     }
-    return { checkoutUrl, providerCheckoutId: checkout.id };
-  }
-
-  async createPaymentMethodUpdateSession(
-    _input: PaymentMethodUpdateInput,
-  ): Promise<PaymentMethodUpdateSession> {
-    // O fluxo seguro de atualização de cartão depende de confirmação do Asaas
-    // (doc 12.3 / Prompt 0). Será implementado quando o mecanismo for definido,
-    // sem nunca solicitar dados completos do cartão ao backend.
-    throw new NotImplementedException(
-      'Atualização de cartão pendente de definição do fluxo Asaas (Prompt 0)',
-    );
+    return {
+      checkoutUrl,
+      providerCheckoutId: checkout.id,
+      expiresAt: new Date(Date.now() + CHECKOUT_MINUTES_TO_EXPIRE * 60 * 1000),
+    };
   }
 
   async cancelSubscription(input: CancelSubscriptionInput): Promise<void> {

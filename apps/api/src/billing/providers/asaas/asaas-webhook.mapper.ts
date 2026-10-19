@@ -17,6 +17,8 @@ const CHARGEBACK_EVENTS = new Set([
   'PAYMENT_AWAITING_CHARGEBACK_REVERSAL',
 ]);
 const CANCEL_EVENTS = new Set(['SUBSCRIPTION_DELETED', 'SUBSCRIPTION_INACTIVATED']);
+/** Checkout que não vai mais receber pagamento: vencido ou cancelado pelo pagador. */
+const CHECKOUT_CLOSED_EVENTS = new Set(['CHECKOUT_EXPIRED', 'CHECKOUT_CANCELED']);
 
 function intentOf(eventType: string): WebhookIntent {
   if (SUCCESS_EVENTS.has(eventType)) return 'payment_succeeded';
@@ -24,6 +26,8 @@ function intentOf(eventType: string): WebhookIntent {
   if (REFUND_EVENTS.has(eventType)) return 'payment_refunded';
   if (CHARGEBACK_EVENTS.has(eventType)) return 'payment_chargeback';
   if (CANCEL_EVENTS.has(eventType)) return 'subscription_canceled';
+  if (eventType === 'SUBSCRIPTION_CREATED') return 'subscription_created';
+  if (CHECKOUT_CLOSED_EVENTS.has(eventType)) return 'checkout_expired';
   return 'ignore';
 }
 
@@ -46,12 +50,16 @@ export function normalizeAsaasWebhookEvent(
   payload: unknown,
 ): NormalizedWebhookEvent {
   const event = (payload ?? {}) as AsaasWebhookEvent;
-  const payment = event.payment;
+  const { payment, subscription, checkout } = event;
+  const checkoutCustomer =
+    typeof checkout?.customer === 'string' ? checkout.customer : checkout?.customer?.id;
 
   return {
     intent: intentOf(eventType),
-    providerSubscriptionId: payment?.subscription ?? event.subscription?.id ?? null,
-    providerCustomerId: payment?.customer ?? event.subscription?.customer ?? null,
+    providerSubscriptionId: payment?.subscription ?? subscription?.id ?? null,
+    providerCustomerId: payment?.customer ?? subscription?.customer ?? checkoutCustomer ?? null,
+    providerCheckoutId:
+      payment?.checkoutSession ?? subscription?.checkoutSession ?? checkout?.id ?? null,
     payment: toNormalizedPayment(payment),
   };
 }

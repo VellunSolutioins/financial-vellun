@@ -36,13 +36,6 @@ export class BillingController {
     return this.billingService.createCheckout(user.id, dto);
   }
 
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
-  @Post('payment-method')
-  createPaymentMethodSession(@Req() req: Request) {
-    const user = req.user as any;
-    return this.billingService.createPaymentMethodSession(user.id);
-  }
-
   @Post('cancel')
   cancel(@Req() req: Request) {
     const user = req.user as any;

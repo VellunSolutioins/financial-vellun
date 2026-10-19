@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { SubscriptionStatus } from '@prisma/client';
 
+import { lockSubscription } from '../common/db';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   PAYMENT_PROVIDER,
@@ -19,10 +20,24 @@ export interface ReconcileSummary {
   corrected: number;
   divergent: number;
   errors: number;
+  /** Tentativas de checkout que não foram pagas e foram expiradas. */
+  expiredCheckouts: number;
 }
 
 /** Quantas assinaturas verificar por execução. */
 const BATCH_SIZE = 200;
+
+/**
+ * Folga depois do vencimento do checkout antes de expirar a assinatura. O
+ * pagamento feito no último minuto ainda precisa do webhook para chegar.
+ */
+const CHECKOUT_EXPIRY_MARGIN_MS = 30 * 60 * 1000;
+
+/**
+ * Assinatura `pending` de antes de o vencimento do checkout ser gravado: sem a
+ * data, vale o tempo parada. Um dia é muito além dos 60 minutos do checkout.
+ */
+const LEGACY_PENDING_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Segunda linha de defesa contra divergências banco↔PSP (doc seção 7). Consulta
@@ -53,7 +68,8 @@ export class ReconciliationService {
       const summary = await this.reconcile();
       this.logger.log(
         `Reconciliação: ${summary.checked} verificadas, ${summary.corrected} corrigidas, ` +
-          `${summary.divergent} divergências manuais, ${summary.errors} erros.`,
+          `${summary.divergent} divergências manuais, ${summary.errors} erros, ` +
+          `${summary.expiredCheckouts} checkouts expirados.`,
       );
     } finally {
       this.running = false;
@@ -90,6 +106,7 @@ export class ReconciliationService {
       corrected: 0,
       divergent: 0,
       errors: 0,
+      expiredCheckouts: 0,
     };
 
     try {
@@ -109,7 +126,60 @@ export class ReconciliationService {
       await this.advanceCursor(candidates.map((candidate) => candidate.id));
     }
 
+    summary.expiredCheckouts = await this.expireStaleCheckouts();
     return summary;
+  }
+
+  /**
+   * Expira as tentativas de checkout que não foram pagas. O aviso de checkout
+   * vencido do PSP faz isso na hora; aqui é a rede de segurança para quando
+   * ele se perde. Sem isto a assinatura ficava `pending` para sempre, e a tela,
+   * em "pagamento em processamento".
+   *
+   * Pagamento que chegue depois ainda ativa: `expired` aceita voltar a `active`.
+   */
+  private async expireStaleCheckouts(now: Date = new Date()): Promise<number> {
+    try {
+      const where = {
+        status: SubscriptionStatus.pending,
+        providerSubscriptionId: null,
+        OR: [
+          { checkoutExpiresAt: { lt: new Date(now.getTime() - CHECKOUT_EXPIRY_MARGIN_MS) } },
+          {
+            checkoutExpiresAt: null,
+            updatedAt: { lt: new Date(now.getTime() - LEGACY_PENDING_MAX_AGE_MS) },
+          },
+        ],
+      };
+      const stale = await this.prisma.subscription.findMany({
+        where,
+        select: { id: true },
+        take: BATCH_SIZE,
+      });
+
+      let expired = 0;
+      for (const { id } of stale) {
+        // Com a linha travada, confere de novo se ela continua vencida: o
+        // usuário pode ter aberto outro checkout nela depois da consulta.
+        const done = await this.prisma.$transaction(async (tx) => {
+          await lockSubscription(tx, id);
+          const stillStale = await tx.subscription.count({ where: { id, ...where } });
+          if (stillStale === 0) return false;
+          return this.subscriptions.expireCheckout(
+            id,
+            'reconciliation',
+            'checkout vencido sem pagamento',
+            tx,
+          );
+        });
+        if (done) expired++;
+      }
+      return expired;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.alert(`Falha ao expirar checkouts vencidos: ${message}`);
+      return 0;
+    }
   }
 
   /**
@@ -156,11 +226,19 @@ export class ReconciliationService {
 
     if (terminal) return this.reconcileTerminal(local, terminal, remote.status);
 
+    // O usuário pediu o cancelamento e o PSP continua com a assinatura ativa:
+    // a chamada falhou, ou o processo caiu antes dela. A intenção gravada manda.
+    // As cobranças seguem sendo conferidas logo abaixo: enquanto o PSP recusar
+    // o cancelamento, uma cobrança vencida ainda tem de rebaixar a assinatura.
+    const cancelRedone = local.cancelAtPeriodEnd
+      ? await this.redoCancellation(local.id, candidate.providerSubscriptionId)
+      : false;
+
     // Assinatura `active` no PSP só quer dizer que ela continua gerando
     // cobranças — segue assim com cobrança vencida ou em chargeback. Quem diz
     // se o cliente está em dia são as cobranças.
     const charge = this.decidingCharge(charges);
-    if (!charge) return 'consistent';
+    if (!charge) return cancelRedone ? 'corrected' : 'consistent';
 
     // Disputa que já terminou no PSP e ainda consta aberta aqui bloquearia o
     // webhook de reativar; acerta o registro antes de decidir.
@@ -175,7 +253,10 @@ export class ReconciliationService {
         other.status !== 'canceled' && other.dueAt && chargeDueAt && other.dueAt > chargeDueAt,
     );
 
-    const outcome = await this.charges.sync(local, charge, 'reconciliation', { isLastGenerated });
+    const outcome = await this.charges.sync(local, charge, 'reconciliation', {
+      isLastGenerated,
+      billingInterval: remote.interval ?? null,
+    });
     if (outcome === 'applied') {
       this.alert(
         `Assinatura ${local.id} corrigida por reconciliação a partir da cobrança ` +
@@ -190,7 +271,22 @@ export class ReconciliationService {
       );
       return 'divergent';
     }
-    return 'consistent';
+    return cancelRedone ? 'corrected' : 'consistent';
+  }
+
+  /** Refaz no PSP o cancelamento que o usuário pediu. Falhar aqui não impede o resto. */
+  private async redoCancellation(subscriptionId: string, providerSubscriptionId: string) {
+    try {
+      await this.provider.cancelSubscription({ providerSubscriptionId, cancelAtPeriodEnd: true });
+      this.alert(`Assinatura ${subscriptionId}: cancelamento pedido pelo usuário refeito no PSP.`);
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.alert(
+        `Assinatura ${subscriptionId}: o PSP recusou de novo o cancelamento pedido (${message}).`,
+      );
+      return false;
+    }
   }
 
   /** Assinatura encerrada no PSP: o estado local acompanha. */

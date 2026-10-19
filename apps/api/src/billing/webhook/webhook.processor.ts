@@ -147,9 +147,18 @@ export class WebhookProcessor {
 
   /** Aplica a intenção e fecha o evento no mesmo commit dos efeitos que ele causou. */
   private async apply(eventId: string, event: NormalizedWebhookEvent): Promise<void> {
-    if (event.intent === 'ignore') return this.close(eventId, null);
-    if (event.intent === 'subscription_canceled') return this.applyCanceled(eventId, event);
-    return this.applyCharge(eventId, event);
+    switch (event.intent) {
+      case 'ignore':
+        return this.close(eventId, null);
+      case 'subscription_canceled':
+        return this.applyCanceled(eventId, event);
+      case 'subscription_created':
+        return this.applySubscriptionCreated(eventId, event);
+      case 'checkout_expired':
+        return this.applyCheckoutExpired(eventId, event);
+      default:
+        return this.applyCharge(eventId, event);
+    }
   }
 
   /**
@@ -210,19 +219,32 @@ export class WebhookProcessor {
       return this.close(eventId, null);
     }
 
+    // Primeira ativação: o ciclo da assinatura do PSP diz que plano foi pago
+    // quando o valor não bate com o da assinatura local. Consultado aqui, fora
+    // da transação.
+    const firstActivation = paid && subscription.currentPeriodStart === null;
+    const billingInterval =
+      firstActivation && charge.providerSubscriptionId
+        ? ((await this.provider.getSubscription(charge.providerSubscriptionId)).interval ?? null)
+        : null;
+
     let result!: ChargeSyncResult;
     await this.prisma.$transaction(async (tx) => {
-      result = await this.charges.applyInTransaction(tx, subscription.id, charge, 'webhook');
+      result = await this.charges.applyInTransaction(tx, subscription.id, charge, 'webhook', {
+        billingInterval,
+      });
       // Com cancelamento pendente no PSP, o evento fica aberto: se o PSP
       // falhar, é o retry dele que tenta de novo.
-      if (!result.cancelAtGateway) {
+      if (result.cancelAtGateway.length === 0) {
         await this.events.markProcessed(eventId, subscription.id, tx);
       }
     }, FINANCIAL_TX_OPTIONS);
 
-    if (result.cancelAtGateway) {
+    if (result.cancelAtGateway.length > 0) {
       await this.charges.settle(result);
-      await this.close(eventId, subscription.id);
+      await this.close(eventId, subscription.id, (tx) =>
+        this.charges.completeSupersession(tx, result),
+      );
     }
   }
 
@@ -241,17 +263,94 @@ export class WebhookProcessor {
   }
 
   /**
-   * Acha a assinatura local pela assinatura do PSP.
+   * Checkout vencido ou cancelado pelo pagador: a tentativa `pending` que ele
+   * abriu é expirada, para a tela voltar a oferecer os planos. Se a assinatura
+   * já saiu de `pending` (o pagamento chegou antes), o evento não muda nada.
+   */
+  private async applyCheckoutExpired(eventId: string, event: NormalizedWebhookEvent) {
+    const subscription = event.providerCheckoutId
+      ? await this.prisma.subscription.findFirst({
+          where: { providerCheckoutId: event.providerCheckoutId },
+        })
+      : null;
+    if (!subscription) return this.close(eventId, null);
+
+    await this.close(eventId, subscription.id, async (tx) => {
+      await lockSubscription(tx, subscription.id);
+      // Sob a trava, a linha ainda tem de ser deste checkout: o usuário pode ter
+      // aberto outro nela enquanto o aviso esperava, e aí quem expiraria seria
+      // a tentativa nova.
+      const current = await tx.subscription.findUnique({ where: { id: subscription.id } });
+      if (current?.providerCheckoutId !== event.providerCheckoutId) return;
+      await this.subscriptions.expireCheckout(
+        subscription.id,
+        'webhook:checkout_expired',
+        'checkout encerrado no PSP sem pagamento',
+        tx,
+      );
+    });
+  }
+
+  /**
+   * Assinatura criada no PSP: grava o vínculo na linha do checkout que a
+   * originou. **Não concede acesso** — isso é da cobrança paga. Serve para a
+   * reconciliação já enxergar a assinatura se o aviso de pagamento se perder.
    *
-   * `byCustomer` liga o plano B: quando a assinatura do PSP ainda é
-   * desconhecida aqui, casar pelo cliente com uma linha que espera o vínculo.
-   * Só serve para a primeira cobrança **paga** de um checkout — é ela que
-   * apresenta a assinatura nova. Aceitar o plano B para qualquer evento
-   * deixaria uma cobrança vencida, ou o cancelamento, de uma assinatura antiga
-   * e desconhecida do mesmo cliente tomar a linha do checkout em andamento.
+   * O evento só diz **qual** assinatura nasceu; de que checkout e de que
+   * cliente ela é, quem diz é o PSP. A reconciliação concede acesso pelas
+   * cobranças da assinatura vinculada, então aceitar o vínculo do payload seria
+   * deixar quem tivesse o token do webhook ligar a assinatura paga de outra
+   * pessoa a uma linha `pending` sua.
+   */
+  private async applySubscriptionCreated(eventId: string, event: NormalizedWebhookEvent) {
+    if (!event.providerSubscriptionId) return this.close(eventId, null);
+
+    const remote = await this.provider.getSubscription(event.providerSubscriptionId);
+    const subscription = remote.providerCheckoutId
+      ? await this.prisma.subscription.findFirst({
+          where: { providerCheckoutId: remote.providerCheckoutId },
+        })
+      : null;
+    if (!subscription) return this.close(eventId, null);
+
+    const sameCustomer =
+      !subscription.providerCustomerId ||
+      subscription.providerCustomerId === remote.providerCustomerId;
+    if (!sameCustomer) {
+      this.logger.warn(
+        `Assinatura ${remote.id} do PSP é de outro cliente que o da assinatura ` +
+          `${subscription.id}; vínculo recusado.`,
+      );
+      return this.close(eventId, null);
+    }
+
+    await this.close(eventId, subscription.id, async (tx) => {
+      // Só preenche o que está vazio: reentrega, ou a cobrança paga chegando
+      // antes, já terão gravado o vínculo.
+      await tx.subscription.updateMany({
+        where: { id: subscription.id, providerSubscriptionId: null },
+        data: { providerSubscriptionId: remote.id },
+      });
+    });
+  }
+
+  /**
+   * Acha a assinatura local: pela assinatura do PSP e, se ela ainda não é
+   * conhecida aqui, pelo checkout em que foi contratada.
+   *
+   * `byCustomer` liga o último recurso: casar pelo cliente com uma linha que
+   * espera o vínculo. Existe para as assinaturas abertas antes de o checkout
+   * ser gravado, e só serve para a primeira cobrança **paga** — é ela que
+   * apresenta a assinatura nova. Aceitá-lo para qualquer evento deixaria uma
+   * cobrança vencida, ou o cancelamento, de uma assinatura antiga e
+   * desconhecida do mesmo cliente tomar a linha do checkout em andamento.
    */
   private async locate(
-    ref: { providerSubscriptionId: string | null; providerCustomerId: string | null },
+    ref: {
+      providerSubscriptionId: string | null;
+      providerCheckoutId: string | null;
+      providerCustomerId: string | null;
+    },
     options: { byCustomer: boolean },
   ): Promise<SubscriptionWithPlan | null> {
     if (ref.providerSubscriptionId) {
@@ -261,6 +360,15 @@ export class WebhookProcessor {
       });
       if (bySub) return bySub;
     }
+    if (ref.providerCheckoutId) {
+      // Só linha ainda sem assinatura do PSP: o checkout apresenta UMA
+      // assinatura, e ela já teria sido achada acima se fosse a desta linha.
+      const byCheckout = await this.prisma.subscription.findFirst({
+        where: { providerCheckoutId: ref.providerCheckoutId, providerSubscriptionId: null },
+        include: { plan: true },
+      });
+      if (byCheckout) return byCheckout;
+    }
     if (!options.byCustomer || !ref.providerCustomerId) return null;
 
     // Uma linha já vinculada a OUTRA assinatura do PSP não serve — casar por
@@ -269,7 +377,10 @@ export class WebhookProcessor {
       where: {
         providerCustomerId: ref.providerCustomerId,
         providerSubscriptionId: null,
-        status: { notIn: [SubscriptionStatus.canceled, SubscriptionStatus.expired] },
+        // `expired` entra: é a tentativa cujo checkout venceu ou foi trocado, e
+        // o pagamento dele ainda pode chegar. Linha sem assinatura do PSP
+        // nunca foi paga, então não há cancelamento de verdade a respeitar.
+        status: { not: SubscriptionStatus.canceled },
       },
       orderBy: { createdAt: 'desc' },
       include: { plan: true },

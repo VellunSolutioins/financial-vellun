@@ -52,7 +52,13 @@ describe('asaas.mapper', () => {
       value: 49.9,
       nextDueDate: '2026-07-15',
     });
-    expect(result).toMatchObject({ id: 'sub_1', status: 'active', cancelAtPeriodEnd: false });
+    expect(result).toMatchObject({
+      id: 'sub_1',
+      status: 'active',
+      cancelAtPeriodEnd: false,
+      providerCustomerId: 'cus_1',
+      providerCheckoutId: null,
+    });
     // Data "date-only" ancorada ao meio-dia UTC (preserva o dia em UTC-3).
     expect(result.nextDueAt).toEqual(new Date('2026-07-15T12:00:00Z'));
   });

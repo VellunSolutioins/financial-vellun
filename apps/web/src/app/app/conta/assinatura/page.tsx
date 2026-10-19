@@ -6,13 +6,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/components/ui/toast';
 import { useConfirm } from '@/components/ui/confirm';
 import { useAuth } from '@/contexts/auth-context';
-import { ApiClientError } from '@/lib/api-client';
 import {
   type Plan,
   type SubscriptionState,
   cancelSubscription,
   createCheckout,
-  createPaymentMethodSession,
   formatBRL,
   formatDate,
   getPlans,
@@ -35,6 +33,10 @@ export default function AssinaturaPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [returnStatus, setReturnStatus] = useState<ReturnStatus>(null);
+  // Abre a lista de planos fora do caminho normal: para quem saiu do checkout
+  // sem pagar (sem esperar a tentativa expirar) e para quem vai regularizar um
+  // plano que não é mais oferecido.
+  const [choosingAgain, setChoosingAgain] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -68,21 +70,6 @@ export default function AssinaturaPage() {
     }
   };
 
-  const handleUpdateCard = async () => {
-    setBusy(true);
-    try {
-      const { url } = await createPaymentMethodSession();
-      window.location.assign(url);
-    } catch (e) {
-      if (e instanceof ApiClientError && e.statusCode === 501) {
-        toast.error('Atualização de cartão indisponível no momento.');
-      } else {
-        toast.error(e instanceof Error ? e.message : 'Não foi possível atualizar o cartão.');
-      }
-      setBusy(false);
-    }
-  };
-
   const handleCancel = async () => {
     const ok = await confirm({
       title: 'Cancelar assinatura',
@@ -109,7 +96,7 @@ export default function AssinaturaPage() {
 
   const status = state?.status ?? null;
   const showManagement = !!state?.plan && !!status && MANAGED_STATUSES.includes(status);
-  const showPending = status === 'pending';
+  const showPending = status === 'pending' && !choosingAgain;
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -128,13 +115,27 @@ export default function AssinaturaPage() {
         <ManagementCard
           state={state!}
           busy={busy}
-          onUpdateCard={handleUpdateCard}
+          onRegularize={() =>
+            state!.plan!.isActive ? handleSubscribe(state!.plan!.id) : setChoosingAgain(true)
+          }
           onCancel={handleCancel}
         />
       ) : showPending ? (
-        <PendingCard busy={busy} onRefresh={load} />
+        <PendingCard busy={busy} onRefresh={load} onChooseAgain={() => setChoosingAgain(true)} />
       ) : (
-        <PlansList plans={plans} busy={busy} onSubscribe={handleSubscribe} />
+        <>
+          <StatusNotice status={status} />
+          <PlansList plans={plans} busy={busy} onSubscribe={handleSubscribe} />
+        </>
+      )}
+
+      {!loading && showManagement && choosingAgain && (
+        <>
+          <div className="rounded-md border border-gray-300 bg-gray-50 px-4 py-3 text-sm text-gray-700">
+            O seu plano atual não é mais oferecido. Escolha um dos planos abaixo para regularizar.
+          </div>
+          <PlansList plans={plans} busy={busy} onSubscribe={handleSubscribe} />
+        </>
       )}
     </div>
   );
@@ -166,15 +167,36 @@ function ReturnNotice({ status }: { status: ReturnStatus }) {
   return null;
 }
 
+/** Por que a tela voltou a oferecer os planos, quando isso não é óbvio. */
+function StatusNotice({ status }: { status: SubscriptionState['status'] }) {
+  if (status === 'expired') {
+    return (
+      <div className="rounded-md border border-gray-300 bg-gray-50 px-4 py-3 text-sm text-gray-700">
+        A última tentativa de assinatura não foi concluída e nada foi cobrado. Escolha um plano para
+        tentar de novo.
+      </div>
+    );
+  }
+  if (status === 'unpaid') {
+    return (
+      <div className="rounded-md border border-yellow-300 bg-yellow-50 px-4 py-3 text-sm text-yellow-900">
+        Não conseguimos confirmar o seu pagamento. Escolha um plano para regularizar e voltar a usar
+        o produto.
+      </div>
+    );
+  }
+  return null;
+}
+
 function ManagementCard({
   state,
   busy,
-  onUpdateCard,
+  onRegularize,
   onCancel,
 }: {
   state: SubscriptionState;
   busy: boolean;
-  onUpdateCard: () => void;
+  onRegularize: () => void;
   onCancel: () => void;
 }) {
   const meta = statusMeta(state.status);
@@ -194,8 +216,9 @@ function ManagementCard({
       <CardContent className="space-y-4">
         {state.status === 'past_due' && (
           <div className="rounded-md border border-yellow-300 bg-yellow-50 px-3 py-2 text-sm text-yellow-900">
-            Seu último pagamento não foi confirmado. Atualize o cartão para manter o acesso
-            {state.graceUntil ? ` (acesso garantido até ${formatDate(state.graceUntil)})` : ''}.
+            Seu último pagamento não foi confirmado. Regularize para manter o acesso
+            {state.graceUntil ? ` (garantido até ${formatDate(state.graceUntil)})` : ''}. Você
+            informa o cartão de novo e a cobrança anterior é cancelada.
           </div>
         )}
         {state.cancelAtPeriodEnd && (
@@ -212,9 +235,11 @@ function ManagementCard({
         </dl>
 
         <div className="flex flex-col gap-2 sm:flex-row">
-          <Button variant="outline" onClick={onUpdateCard} disabled={busy}>
-            Atualizar cartão
-          </Button>
+          {state.status === 'past_due' && (
+            <Button onClick={onRegularize} disabled={busy}>
+              Regularizar pagamento
+            </Button>
+          )}
           {!state.cancelAtPeriodEnd && (
             <Button variant="destructive" onClick={onCancel} disabled={busy}>
               Cancelar assinatura
@@ -226,7 +251,15 @@ function ManagementCard({
   );
 }
 
-function PendingCard({ busy, onRefresh }: { busy: boolean; onRefresh: () => void }) {
+function PendingCard({
+  busy,
+  onRefresh,
+  onChooseAgain,
+}: {
+  busy: boolean;
+  onRefresh: () => void;
+  onChooseAgain: () => void;
+}) {
   return (
     <Card>
       <CardHeader>
@@ -237,9 +270,14 @@ function PendingCard({ busy, onRefresh }: { busy: boolean; onRefresh: () => void
           Estamos aguardando a confirmação do pagamento. Assim que for aprovado, sua assinatura é
           ativada automaticamente.
         </p>
-        <Button variant="outline" onClick={onRefresh} disabled={busy}>
-          Atualizar status
-        </Button>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button variant="outline" onClick={onRefresh} disabled={busy}>
+            Atualizar status
+          </Button>
+          <Button variant="ghost" onClick={onChooseAgain} disabled={busy}>
+            Não paguei, escolher plano
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );

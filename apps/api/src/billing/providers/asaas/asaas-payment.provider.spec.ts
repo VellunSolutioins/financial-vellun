@@ -1,10 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import {
-  InternalServerErrorException,
-  NotImplementedException,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
 
 import { AsaasPaymentProvider } from './asaas-payment.provider';
 
@@ -84,17 +80,6 @@ describe('AsaasPaymentProvider.verifyWebhook', () => {
 });
 
 describe('AsaasPaymentProvider — configuração e stubs', () => {
-  it('createPaymentMethodUpdateSession sinaliza pendência (Prompt 0)', async () => {
-    const provider = makeProvider();
-    await expect(
-      provider.createPaymentMethodUpdateSession({
-        providerCustomerId: 'cus_1',
-        providerSubscriptionId: 'sub_1',
-        returnUrl: 'https://app/return',
-      }),
-    ).rejects.toBeInstanceOf(NotImplementedException);
-  });
-
   it('chamadas HTTP falham com erro claro quando credenciais ausentes', async () => {
     const provider = makeProvider({ ASAAS_API_URL: undefined, ASAAS_API_KEY: undefined });
     await expect(provider.getSubscription('sub_1')).rejects.toBeInstanceOf(
@@ -114,6 +99,72 @@ describe('AsaasPaymentProvider — chamadas ao Asaas', () => {
   }
 
   afterEach(() => jest.restoreAllMocks());
+
+  describe('createCustomer', () => {
+    const input = { userId: 'u1', name: 'Fulano', email: 'f@x.com' };
+
+    it('reusa o cliente já criado para o usuário, sem criar outro', async () => {
+      const fetchMock = mockFetch(200, { data: [{ id: 'cus_existente' }] });
+
+      const result = await makeProvider(API).createCustomer(input);
+
+      expect(result).toEqual({ id: 'cus_existente' });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][0]).toBe(
+        'https://asaas.test/v3/customers?externalReference=u1&limit=10',
+      );
+    });
+
+    it('passa pelo cliente removido e reusa o ativo que vem depois dele', async () => {
+      mockFetch(200, { data: [{ id: 'cus_velho', deleted: true }, { id: 'cus_ativo' }] });
+
+      expect(await makeProvider(API).createCustomer(input)).toEqual({ id: 'cus_ativo' });
+    });
+
+    it('cria quando não existe, ou quando o que existe foi removido', async () => {
+      const fetchMock = jest
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ data: [{ id: 'cus_velho', deleted: true }] })),
+        )
+        .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'cus_novo' })));
+
+      const result = await makeProvider(API).createCustomer(input);
+
+      expect(result).toEqual({ id: 'cus_novo' });
+      const [, init] = fetchMock.mock.calls[1];
+      expect(init?.method).toBe('POST');
+      expect(JSON.parse(String(init?.body))).toMatchObject({ externalReference: 'u1' });
+    });
+  });
+
+  it('createCheckout manda a referência da assinatura local e devolve id e vencimento', async () => {
+    jest.useFakeTimers({ now: new Date('2026-10-13T12:00:00Z') });
+    const fetchMock = mockFetch(200, { id: 'chk_1', link: 'https://asaas.test/c/chk_1' });
+
+    const result = await makeProvider(API).createCheckout({
+      userId: 'u1',
+      planCode: 'vellun-mensal',
+      providerCustomerId: 'cus_1',
+      interval: 'monthly',
+      amount: '49.90',
+      currency: 'BRL',
+      successUrl: 'https://app/ok',
+      cancelUrl: 'https://app/cancel',
+      externalReference: 's_new',
+    });
+    jest.useRealTimers();
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
+      externalReference: 's_new',
+      minutesToExpire: 60,
+    });
+    expect(result).toEqual({
+      checkoutUrl: 'https://asaas.test/c/chk_1',
+      providerCheckoutId: 'chk_1',
+      expiresAt: new Date('2026-10-13T13:00:00Z'),
+    });
+  });
 
   it('getPayment consulta a cobrança e devolve o estado e os vínculos dela', async () => {
     const fetchMock = mockFetch(200, {

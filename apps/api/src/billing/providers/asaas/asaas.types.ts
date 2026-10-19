@@ -9,6 +9,7 @@ export interface AsaasCustomer {
   name?: string;
   email?: string;
   cpfCnpj?: string;
+  deleted?: boolean;
 }
 
 /** Ciclos de cobrança aceitos pelo Asaas. */
@@ -26,6 +27,8 @@ export interface AsaasSubscription {
   nextDueDate?: string | null;
   endDate?: string | null;
   deleted?: boolean;
+  /** Checkout hospedado em que a assinatura foi contratada. */
+  checkoutSession?: string | null;
 }
 
 /** Status de cobrança no Asaas. */
@@ -74,6 +77,9 @@ export interface AsaasCheckout {
   /** URL hospedada do checkout para redirecionar o usuário. */
   link?: string;
   url?: string;
+  status?: string;
+  /** Cliente do checkout. A documentação não diz se vem o id ou o objeto; aceitamos os dois. */
+  customer?: string | { id?: string } | null;
 }
 
 export interface AsaasRefund {
@@ -87,4 +93,5 @@ export interface AsaasWebhookEvent {
   event: string;
   payment?: AsaasPayment;
   subscription?: AsaasSubscription;
+  checkout?: AsaasCheckout;
 }

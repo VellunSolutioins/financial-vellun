@@ -14,11 +14,14 @@ function setup() {
   const provider = {
     normalizeWebhookEvent: jest.fn(),
     getPayment: jest.fn(),
+    // Consultada na primeira ativação, para saber o ciclo contratado.
+    getSubscription: jest.fn().mockResolvedValue({ interval: 'monthly' }),
     cancelSubscription: jest.fn().mockResolvedValue(undefined),
   };
   const prisma: any = {
     paymentWebhookEvent: { findUniqueOrThrow: jest.fn() },
     subscription: { findFirst: jest.fn() },
+    plan: { findMany: jest.fn().mockResolvedValue([]) },
   };
   // Cliente da transação do evento. Por padrão, a releitura sob a trava devolve a
   // mesma linha que a correlação achou; o teste troca quando quer simular uma
@@ -32,7 +35,17 @@ function setup() {
         );
         return located.filter(Boolean).pop();
       }),
+      findUnique: jest.fn(async () => {
+        const located = await Promise.all(
+          prisma.subscription.findFirst.mock.results.map((result: any) => result.value),
+        );
+        return located.filter(Boolean).pop();
+      }),
+      // Assinaturas anteriores do usuário ainda abertas: nenhuma, salvo o teste dizer.
+      findMany: jest.fn().mockResolvedValue([]),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
+    plan: { findMany: jest.fn().mockResolvedValue([]) },
   };
   prisma.$transaction = jest.fn(async (work: (client: typeof tx) => unknown) => work(tx));
 
@@ -42,6 +55,7 @@ function setup() {
     transitionTo: jest.fn().mockResolvedValue({}),
     upsertFromProvider: jest.fn().mockResolvedValue({}),
     markProcessed: jest.fn().mockResolvedValue({}),
+    expireCheckout: jest.fn().mockResolvedValue(true),
     /** Assinatura a que o evento foi ligado ao ser fechado. */
     linkedTo: jest.fn(),
   };
@@ -62,6 +76,10 @@ function setup() {
     transitionTo: (id: string, to: string, input: unknown, db: unknown) => {
       writes.push(db);
       return spies.transitionTo(id, to, input);
+    },
+    expireCheckout: (id: string, actor: string, _reason: string, db: unknown) => {
+      writes.push(db);
+      return spies.expireCheckout(id, actor);
     },
   };
   const payments = {
@@ -100,7 +118,7 @@ function setup() {
     tx,
     writes,
     events: { ...events, markProcessed: spies.markProcessed, linkedTo: spies.linkedTo },
-    subscriptions: { transitionTo: spies.transitionTo },
+    subscriptions: { transitionTo: spies.transitionTo, expireCheckout: spies.expireCheckout },
     payments: { ...payments, upsertFromProvider: spies.upsertFromProvider },
   };
 }
@@ -122,9 +140,13 @@ const subscription = {
   status: 'pending',
   providerSubscriptionId: null,
   providerCustomerId: 'cus_a',
+  providerCheckoutId: null,
+  currentPeriodStart: null,
   currentPeriodEnd: null,
   cancelAtPeriodEnd: false,
-  plan: { interval: 'monthly' },
+  createdAt: new Date('2026-10-12T14:00:00Z'),
+  planId: 'plan_m',
+  plan: { id: 'plan_m', code: 'vellun-mensal', interval: 'monthly', price: '49.90' },
 };
 
 /** Evento normalizado de cobrança: o processador só usa o id da cobrança. */
@@ -348,6 +370,356 @@ describe('WebhookProcessor.process', () => {
     });
   });
 
+  describe('correlação pelo checkout', () => {
+    it('acha pela linha do checkout quando a assinatura do PSP ainda é desconhecida aqui', async () => {
+      const ctx = setup();
+      arrange(ctx, { intent: 'payment_succeeded', remote: { providerCheckoutId: 'chk_1' } });
+      ctx.prisma.subscription.findFirst
+        .mockReset()
+        .mockResolvedValueOnce(null) // nenhuma linha com sub_a
+        .mockResolvedValueOnce({ ...subscription, providerCheckoutId: 'chk_1' });
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.prisma.subscription.findFirst).toHaveBeenCalledTimes(2);
+      expect(ctx.prisma.subscription.findFirst).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          where: { providerCheckoutId: 'chk_1', providerSubscriptionId: null },
+        }),
+      );
+      expect(ctx.subscriptions.transitionTo).toHaveBeenCalledWith(
+        's1',
+        'active',
+        expect.anything(),
+      );
+    });
+
+    it('checkout vencido expira a tentativa pending que ele abriu', async () => {
+      const ctx = setup();
+      ctx.prisma.paymentWebhookEvent.findUniqueOrThrow.mockResolvedValue(persistedEvent());
+      ctx.provider.normalizeWebhookEvent.mockReturnValue({
+        intent: 'checkout_expired',
+        providerSubscriptionId: null,
+        providerCustomerId: 'cus_a',
+        providerCheckoutId: 'chk_1',
+        payment: null,
+      });
+      ctx.prisma.subscription.findFirst.mockResolvedValue({
+        ...subscription,
+        providerCheckoutId: 'chk_1',
+      });
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.prisma.subscription.findFirst).toHaveBeenCalledWith({
+        where: { providerCheckoutId: 'chk_1' },
+      });
+      expect(ctx.subscriptions.expireCheckout).toHaveBeenCalledWith(
+        's1',
+        'webhook:checkout_expired',
+      );
+      // Expiração e fechamento do evento no mesmo commit, com a assinatura travada.
+      expect(ctx.writes).toEqual([ctx.tx, ctx.tx]);
+      expect(ctx.tx.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(ctx.events.linkedTo).toHaveBeenCalledWith('s1');
+    });
+
+    it('aviso atrasado de um checkout que a linha já trocou por outro não expira a tentativa nova', async () => {
+      const ctx = setup();
+      ctx.prisma.paymentWebhookEvent.findUniqueOrThrow.mockResolvedValue(persistedEvent());
+      ctx.provider.normalizeWebhookEvent.mockReturnValue({
+        intent: 'checkout_expired',
+        providerSubscriptionId: null,
+        providerCustomerId: 'cus_a',
+        providerCheckoutId: 'chk_1',
+        payment: null,
+      });
+      ctx.prisma.subscription.findFirst.mockResolvedValue({
+        ...subscription,
+        providerCheckoutId: 'chk_1',
+      });
+      // Sob a trava, a linha já foi reaberta para outro checkout.
+      ctx.tx.subscription.findUnique.mockResolvedValue({
+        ...subscription,
+        providerCheckoutId: null,
+      });
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.subscriptions.expireCheckout).not.toHaveBeenCalled();
+      expect(ctx.events.markProcessed).toHaveBeenCalledWith('row_1');
+    });
+
+    it('checkout vencido que não é de nenhuma assinatura só fecha o evento', async () => {
+      const ctx = setup();
+      ctx.prisma.paymentWebhookEvent.findUniqueOrThrow.mockResolvedValue(persistedEvent());
+      ctx.provider.normalizeWebhookEvent.mockReturnValue({
+        intent: 'checkout_expired',
+        providerSubscriptionId: null,
+        providerCustomerId: null,
+        providerCheckoutId: 'chk_alheio',
+        payment: null,
+      });
+      ctx.prisma.subscription.findFirst.mockResolvedValue(null);
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.subscriptions.expireCheckout).not.toHaveBeenCalled();
+      expect(ctx.events.markProcessed).toHaveBeenCalledWith('row_1');
+    });
+
+    describe('assinatura criada no PSP', () => {
+      /** O payload aponta para uma assinatura; o que vale é o que o PSP diz dela. */
+      function arrangeCreated(ctx: ReturnType<typeof setup>, remote: Record<string, unknown>) {
+        ctx.prisma.paymentWebhookEvent.findUniqueOrThrow.mockResolvedValue(persistedEvent());
+        ctx.provider.normalizeWebhookEvent.mockReturnValue({
+          intent: 'subscription_created',
+          providerSubscriptionId: 'sub_nova',
+          providerCustomerId: 'cus_do_payload',
+          providerCheckoutId: 'chk_do_payload',
+          payment: null,
+        });
+        ctx.provider.getSubscription.mockResolvedValue({
+          id: 'sub_nova',
+          status: 'active',
+          providerCustomerId: 'cus_a',
+          providerCheckoutId: 'chk_1',
+          ...remote,
+        });
+        ctx.prisma.subscription.findFirst.mockResolvedValue({ ...subscription });
+      }
+
+      it('grava o vínculo na linha do checkout, sem conceder acesso', async () => {
+        const ctx = setup();
+        arrangeCreated(ctx, {});
+
+        await ctx.processor.process('row_1');
+
+        // Checkout e cliente vêm da consulta ao PSP, não do payload.
+        expect(ctx.provider.getSubscription).toHaveBeenCalledWith('sub_nova');
+        expect(ctx.prisma.subscription.findFirst).toHaveBeenCalledWith({
+          where: { providerCheckoutId: 'chk_1' },
+        });
+        // Só preenche o que está vazio: reentrega não sobrescreve.
+        expect(ctx.tx.subscription.updateMany).toHaveBeenCalledWith({
+          where: { id: 's1', providerSubscriptionId: null },
+          data: { providerSubscriptionId: 'sub_nova' },
+        });
+        expect(ctx.subscriptions.transitionTo).not.toHaveBeenCalled();
+        expect(ctx.events.markProcessed).toHaveBeenCalledWith('row_1');
+      });
+
+      it('recusa o vínculo quando a assinatura do PSP é de outro cliente', async () => {
+        const ctx = setup();
+        arrangeCreated(ctx, { providerCustomerId: 'cus_outro' });
+
+        await ctx.processor.process('row_1');
+
+        expect(ctx.tx.subscription.updateMany).not.toHaveBeenCalled();
+        expect(ctx.events.markProcessed).toHaveBeenCalledWith('row_1');
+      });
+
+      it('assinatura que o PSP não liga a nenhum checkout nosso é só fechada', async () => {
+        const ctx = setup();
+        arrangeCreated(ctx, { providerCheckoutId: null });
+
+        await ctx.processor.process('row_1');
+
+        expect(ctx.prisma.subscription.findFirst).not.toHaveBeenCalled();
+        expect(ctx.tx.subscription.updateMany).not.toHaveBeenCalled();
+      });
+    });
+  });
+
+  describe('valor pago x plano, na primeira ativação', () => {
+    const ANUAL = { id: 'plan_a', code: 'vellun-anual', interval: 'annual', price: '499.00' };
+
+    it('pagou o valor de outro plano: a assinatura passa a ser desse plano, com o ciclo dele', async () => {
+      const ctx = setup();
+      arrange(ctx, { intent: 'payment_succeeded', remote: { amount: '499.00' } });
+      ctx.provider.getSubscription.mockResolvedValue({ interval: 'annual' });
+      ctx.tx.plan.findMany.mockResolvedValue([ANUAL]);
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.provider.getSubscription).toHaveBeenCalledWith('sub_a');
+      // Preço e ciclo juntos: só o preço pode coincidir com o de outro produto.
+      expect(ctx.tx.plan.findMany).toHaveBeenCalledWith({
+        where: { isActive: true, price: '499.00', interval: 'annual' },
+      });
+      expect(ctx.subscriptions.transitionTo).toHaveBeenCalledWith(
+        's1',
+        'active',
+        expect.objectContaining({
+          reason: expect.stringContaining('vellun-anual'),
+          data: expect.objectContaining({
+            plan: { connect: { id: 'plan_a' } },
+            currentPeriodEnd: new Date('2027-10-12T12:00:00Z'),
+          }),
+        }),
+      );
+    });
+
+    it('sem o ciclo da assinatura do PSP, não troca o plano', async () => {
+      const ctx = setup();
+      arrange(ctx, { intent: 'payment_succeeded', remote: { amount: '499.00' } });
+      ctx.provider.getSubscription.mockResolvedValue({ interval: null });
+      ctx.tx.plan.findMany.mockResolvedValue([ANUAL]);
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.tx.plan.findMany).not.toHaveBeenCalled();
+      const [, , input] = ctx.subscriptions.transitionTo.mock.calls[0];
+      expect(input.data).not.toHaveProperty('plan');
+    });
+
+    it('sem um plano ativo com aquele valor, ativa com o plano da assinatura', async () => {
+      const ctx = setup();
+      arrange(ctx, { intent: 'payment_succeeded', remote: { amount: '39.90' } });
+
+      await ctx.processor.process('row_1');
+
+      const [, , input] = ctx.subscriptions.transitionTo.mock.calls[0];
+      expect(input.data).not.toHaveProperty('plan');
+      expect(input.data.currentPeriodEnd).toEqual(new Date('2026-11-12T12:00:00Z'));
+    });
+
+    it('renovação com valor diferente não mexe no plano (o preço pode ter mudado para novos)', async () => {
+      const ctx = setup();
+      arrange(ctx, {
+        intent: 'payment_succeeded',
+        local: {
+          status: 'active',
+          providerSubscriptionId: 'sub_a',
+          currentPeriodStart: new Date('2026-09-12T12:00:00Z'),
+          currentPeriodEnd: new Date('2026-10-12T12:00:00Z'),
+        },
+        remote: { amount: '39.90' },
+      });
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.tx.plan.findMany).not.toHaveBeenCalled();
+      // Renovação: nem consulta o ciclo no PSP.
+      expect(ctx.provider.getSubscription).not.toHaveBeenCalled();
+      const [, , input] = ctx.subscriptions.transitionTo.mock.calls[0];
+      expect(input.data).not.toHaveProperty('plan');
+    });
+  });
+
+  describe('assinaturas anteriores do mesmo usuário (regularização por novo checkout)', () => {
+    const OLD = { id: 's_old', providerSubscriptionId: 'sub_old' };
+    const order = (mock: jest.Mock, call = 0) => mock.mock.invocationCallOrder[call];
+
+    it('ao ativar a nova, cancela a antiga no PSP e só depois a fecha aqui', async () => {
+      const ctx = setup();
+      arrange(ctx, { intent: 'payment_succeeded' });
+      ctx.tx.subscription.findMany.mockResolvedValue([OLD]);
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.provider.cancelSubscription).toHaveBeenCalledWith(
+        expect.objectContaining({ providerSubscriptionId: 'sub_old' }),
+      );
+      expect(ctx.subscriptions.transitionTo).toHaveBeenLastCalledWith(
+        's_old',
+        'canceled',
+        expect.objectContaining({ actor: 'webhook:superseded' }),
+      );
+      // nova ativada → antiga cancelada no PSP → antiga fechada aqui → evento fechado
+      expect(order(ctx.subscriptions.transitionTo, 0)).toBeLessThan(
+        order(ctx.provider.cancelSubscription),
+      );
+      expect(order(ctx.provider.cancelSubscription)).toBeLessThan(
+        order(ctx.subscriptions.transitionTo, 1),
+      );
+      expect(order(ctx.subscriptions.transitionTo, 1)).toBeLessThan(
+        order(ctx.events.markProcessed),
+      );
+    });
+
+    it('só olha para as criadas antes desta e ainda abertas, com assinatura no PSP', async () => {
+      const ctx = setup();
+      arrange(ctx, { intent: 'payment_succeeded' });
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.tx.subscription.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            userId: 'u1',
+            id: { not: 's1' },
+            createdAt: { lt: subscription.createdAt },
+            providerSubscriptionId: { not: null },
+            status: { notIn: ['canceled', 'expired'] },
+          },
+        }),
+      );
+    });
+
+    it('se o PSP falha, o evento fica aberto e a antiga continua aberta aqui', async () => {
+      const ctx = setup();
+      arrange(ctx, { intent: 'payment_succeeded' });
+      ctx.tx.subscription.findMany.mockResolvedValue([OLD]);
+      ctx.provider.cancelSubscription.mockRejectedValue(new Error('PSP fora'));
+
+      await expect(ctx.processor.process('row_1')).rejects.toThrow('PSP fora');
+
+      expect(ctx.subscriptions.transitionTo).toHaveBeenCalledTimes(1); // só a ativação
+      expect(ctx.events.markProcessed).not.toHaveBeenCalled();
+    });
+
+    it('no retry, com a cobrança já registrada e a nova já ativa, ainda cancela a antiga', async () => {
+      const ctx = setup();
+      arrange(ctx, {
+        intent: 'payment_succeeded',
+        local: { status: 'active', providerSubscriptionId: 'sub_a' },
+      });
+      ctx.payments.findByProviderId.mockResolvedValue({ status: 'paid' });
+      ctx.tx.subscription.findMany.mockResolvedValue([OLD]);
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.provider.cancelSubscription).toHaveBeenCalledWith(
+        expect.objectContaining({ providerSubscriptionId: 'sub_old' }),
+      );
+      expect(ctx.subscriptions.transitionTo).toHaveBeenCalledWith(
+        's_old',
+        'canceled',
+        expect.anything(),
+      );
+      expect(ctx.events.markProcessed).toHaveBeenCalledWith('row_1');
+    });
+
+    it('não cancela a assinatura do PSP da própria cobrança', async () => {
+      const ctx = setup();
+      arrange(ctx, { intent: 'payment_succeeded' });
+      ctx.tx.subscription.findMany.mockResolvedValue([
+        { id: 's_dup', providerSubscriptionId: 'sub_a' },
+      ]);
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.provider.cancelSubscription).not.toHaveBeenCalled();
+      expect(ctx.subscriptions.transitionTo).toHaveBeenCalledTimes(1);
+    });
+
+    it('cobrança que não está paga não cancela ninguém', async () => {
+      const ctx = setup();
+      arrange(ctx, {
+        intent: 'payment_failed',
+        local: { status: 'active' },
+        remote: { status: 'failed', paidAt: null },
+      });
+      ctx.tx.subscription.findMany.mockResolvedValue([OLD]);
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.tx.subscription.findMany).not.toHaveBeenCalled();
+      expect(ctx.provider.cancelSubscription).not.toHaveBeenCalled();
+    });
+  });
+
   it('é idempotente: não reprocessa evento já processado', async () => {
     const { processor, prisma, events, subscriptions } = setup();
     prisma.paymentWebhookEvent.findUniqueOrThrow.mockResolvedValue(
@@ -453,6 +825,8 @@ describe('WebhookProcessor.process', () => {
           where: expect.objectContaining({
             providerCustomerId: 'cus_a',
             providerSubscriptionId: null,
+            // Inclui a tentativa expirada: o checkout trocado ainda pode ser pago.
+            status: { not: 'canceled' },
           }),
         }),
       );

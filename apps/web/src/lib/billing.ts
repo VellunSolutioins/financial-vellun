@@ -49,9 +49,6 @@ export const getSubscription = () => apiClient.get<SubscriptionState>('/billing/
 export const createCheckout = (planId: string) =>
   apiClient.post<{ checkoutUrl: string }>('/billing/checkout', { planId });
 
-export const createPaymentMethodSession = () =>
-  apiClient.post<{ url: string }>('/billing/payment-method', {});
-
 export const cancelSubscription = () => apiClient.post<SubscriptionState>('/billing/cancel', {});
 
 /** Formata valor monetário em R$ (pt-BR). */

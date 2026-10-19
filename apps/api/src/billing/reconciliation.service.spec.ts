@@ -13,7 +13,8 @@ function setup() {
   };
   const prisma: any = {
     subscription: {
-      findMany: jest.fn(),
+      // Duas consultas por execução: as candidatas e os checkouts vencidos.
+      findMany: jest.fn().mockResolvedValue([]),
       findUnique: jest.fn(),
       updateMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
@@ -26,12 +27,15 @@ function setup() {
       findUniqueOrThrow: jest.fn(
         async () => prisma.subscription.findUnique.mock.results.at(-1)?.value,
       ),
+      // Reconfere, com a linha travada, se o checkout continua vencido.
+      count: jest.fn().mockResolvedValue(1),
     },
   };
   prisma.$transaction = jest.fn(async (work: (client: typeof tx) => unknown) => work(tx));
 
   const spies = {
     transitionTo: jest.fn().mockResolvedValue({}),
+    expireCheckout: jest.fn().mockResolvedValue(true),
     upsertFromProvider: jest.fn().mockResolvedValue({}),
   };
   // Cliente de banco de cada transição: `tx` nas que vêm da cobrança.
@@ -41,6 +45,7 @@ function setup() {
       transitionDbs.push(db);
       return spies.transitionTo(id, to, input);
     },
+    expireCheckout: (id: string, actor: string) => spies.expireCheckout(id, actor),
   };
   const payments = {
     findByProviderId: jest.fn().mockResolvedValue(null),
@@ -80,7 +85,7 @@ function setup() {
     prisma,
     tx,
     transitionDbs,
-    subscriptions: { transitionTo: spies.transitionTo },
+    subscriptions: { transitionTo: spies.transitionTo, expireCheckout: spies.expireCheckout },
     payments: { ...payments, upsertFromProvider: spies.upsertFromProvider },
     reconcileOne,
   };
@@ -489,6 +494,44 @@ describe('ReconciliationService.reconcileSubscription', () => {
     });
   });
 
+  describe('cancelamento pedido pelo usuário que o PSP não aplicou', () => {
+    it('refaz o cancelamento no PSP enquanto a assinatura continuar ativa lá', async () => {
+      const { provider, subscriptions, reconcileOne } = setup();
+
+      const outcome = await reconcileOne(localSub({ cancelAtPeriodEnd: true }));
+
+      expect(outcome).toBe('corrected');
+      expect(provider.cancelSubscription).toHaveBeenCalledWith({
+        providerSubscriptionId: 'sub_a',
+        cancelAtPeriodEnd: true,
+      });
+      // O acesso segue até o fim do período: só o PSP é acertado.
+      expect(subscriptions.transitionTo).not.toHaveBeenCalled();
+      expect(provider.listSubscriptionPayments).toHaveBeenCalledTimes(1);
+    });
+
+    it('com o PSP recusando o cancelamento, ainda confere as cobranças', async () => {
+      const { provider, subscriptions, reconcileOne } = setup();
+      provider.cancelSubscription.mockRejectedValue(new Error('PSP fora'));
+      provider.listSubscriptionPayments.mockResolvedValue([
+        charge('pay_set', 'failed', '2026-09-15'),
+      ]);
+
+      const outcome = await reconcileOne(localSub({ cancelAtPeriodEnd: true }));
+
+      expect(outcome).toBe('corrected');
+      expect(subscriptions.transitionTo).toHaveBeenCalledWith('s1', 'past_due', expect.anything());
+    });
+
+    it('sem pedido de cancelamento, não toca na assinatura do PSP', async () => {
+      const { provider, reconcileOne } = setup();
+
+      await reconcileOne(localSub());
+
+      expect(provider.cancelSubscription).not.toHaveBeenCalled();
+    });
+  });
+
   describe('assinatura encerrada no PSP', () => {
     it('corrige status divergente de forma auditável (remoto canceled)', async () => {
       const { provider, subscriptions, reconcileOne } = setup();
@@ -562,7 +605,7 @@ describe('ReconciliationService.reconcileSubscription', () => {
 describe('ReconciliationService.reconcile', () => {
   it('percorre o lote e é resiliente a erro por item', async () => {
     const { service, provider, prisma } = setup();
-    prisma.subscription.findMany.mockResolvedValue([
+    prisma.subscription.findMany.mockResolvedValueOnce([
       { id: 's1', providerSubscriptionId: 'sub_a' },
       { id: 's2', providerSubscriptionId: 'sub_b' },
     ]);
@@ -573,12 +616,18 @@ describe('ReconciliationService.reconcile', () => {
 
     const summary = await service.reconcile();
 
-    expect(summary).toEqual({ checked: 2, corrected: 1, divergent: 0, errors: 1 });
+    expect(summary).toEqual({
+      checked: 2,
+      corrected: 1,
+      divergent: 0,
+      errors: 1,
+      expiredCheckouts: 0,
+    });
   });
 
   it('faz rodízio: ordena pelo cursor e o avança no lote inteiro, inclusive em quem deu erro', async () => {
     const { service, provider, prisma } = setup();
-    prisma.subscription.findMany.mockResolvedValue([
+    prisma.subscription.findMany.mockResolvedValueOnce([
       { id: 's1', providerSubscriptionId: 'sub_a' }, // consistente: nada muda nela
       { id: 's2', providerSubscriptionId: 'sub_b' },
     ]);
@@ -603,21 +652,103 @@ describe('ReconciliationService.reconcile', () => {
 
   it('falha ao avançar o cursor não derruba a reconciliação', async () => {
     const { service, prisma } = setup();
-    prisma.subscription.findMany.mockResolvedValue([{ id: 's1', providerSubscriptionId: 'sub_a' }]);
+    prisma.subscription.findMany.mockResolvedValueOnce([
+      { id: 's1', providerSubscriptionId: 'sub_a' },
+    ]);
     prisma.subscription.findUnique.mockResolvedValue(localSub({ id: 's1' }));
     prisma.subscription.updateMany.mockRejectedValue(new Error('banco fora'));
 
     const summary = await service.reconcile();
 
-    expect(summary).toEqual({ checked: 1, corrected: 0, divergent: 0, errors: 0 });
+    expect(summary).toEqual({
+      checked: 1,
+      corrected: 0,
+      divergent: 0,
+      errors: 0,
+      expiredCheckouts: 0,
+    });
   });
 
   it('lote vazio não escreve nada', async () => {
     const { service, prisma } = setup();
-    prisma.subscription.findMany.mockResolvedValue([]);
+    prisma.subscription.findMany.mockResolvedValueOnce([]);
 
     await service.reconcile();
 
     expect(prisma.subscription.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('ReconciliationService: checkouts que não foram pagos', () => {
+  const NOW_MS = new Date('2026-10-12T15:00:00Z').getTime();
+
+  beforeEach(() => jest.useFakeTimers({ now: NOW_MS }));
+  afterEach(() => jest.useRealTimers());
+
+  it('expira pending sem assinatura no PSP: checkout vencido há mais de 30 min, ou parada há um dia', async () => {
+    const { service, prisma, subscriptions } = setup();
+    prisma.subscription.findMany
+      .mockResolvedValueOnce([]) // candidatas
+      .mockResolvedValueOnce([{ id: 'p1' }, { id: 'p2' }]);
+
+    const summary = await service.reconcile();
+
+    const [args] = prisma.subscription.findMany.mock.calls[1];
+    expect(args.where).toEqual({
+      status: 'pending',
+      providerSubscriptionId: null,
+      OR: [
+        { checkoutExpiresAt: { lt: new Date(NOW_MS - 30 * 60 * 1000) } },
+        { checkoutExpiresAt: null, updatedAt: { lt: new Date(NOW_MS - 24 * 60 * 60 * 1000) } },
+      ],
+    });
+    expect(subscriptions.expireCheckout).toHaveBeenCalledWith('p1', 'reconciliation');
+    expect(subscriptions.expireCheckout).toHaveBeenCalledWith('p2', 'reconciliation');
+    expect(summary.expiredCheckouts).toBe(2);
+  });
+
+  it('não conta a que foi paga entre a consulta e a escrita', async () => {
+    const { service, prisma, subscriptions } = setup();
+    prisma.subscription.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 'p1' }, { id: 'p2' }]);
+    subscriptions.expireCheckout.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+
+    expect((await service.reconcile()).expiredCheckouts).toBe(1);
+  });
+
+  it('pula a que deixou de estar vencida entre a consulta e a escrita (novo checkout na mesma linha)', async () => {
+    const { service, prisma, tx, subscriptions } = setup();
+    prisma.subscription.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ id: 'p1' }, { id: 'p2' }]);
+    tx.subscription.count.mockResolvedValueOnce(0).mockResolvedValueOnce(1);
+
+    const summary = await service.reconcile();
+
+    expect(subscriptions.expireCheckout).toHaveBeenCalledTimes(1);
+    expect(subscriptions.expireCheckout).toHaveBeenCalledWith('p2', 'reconciliation');
+    expect(summary.expiredCheckouts).toBe(1);
+  });
+
+  it('confere de novo com a linha travada, uma transação por linha', async () => {
+    const { service, prisma, tx } = setup();
+    prisma.subscription.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([{ id: 'p1' }]);
+
+    await service.reconcile();
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tx.subscription.count.mock.invocationCallOrder[0]).toBeGreaterThan(
+      tx.$queryRaw.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('falha ao expirar não derruba a reconciliação', async () => {
+    const { service, prisma, subscriptions } = setup();
+    prisma.subscription.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([{ id: 'p1' }]);
+    subscriptions.expireCheckout.mockRejectedValue(new Error('banco fora'));
+
+    await expect(service.reconcile()).resolves.toMatchObject({ expiredCheckouts: 0 });
   });
 });

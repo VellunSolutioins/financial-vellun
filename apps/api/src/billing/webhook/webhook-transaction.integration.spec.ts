@@ -29,6 +29,8 @@ integration('webhook de billing: uma transação por evento (PostgreSQL)', () =>
     // O payload de teste já vem no formato normalizado.
     normalizeWebhookEvent: (event: { payload: unknown }) => event.payload,
     getPayment: async (id: string) => remoteCharges.get(id),
+    // Consultada na primeira ativação, para saber o ciclo contratado.
+    getSubscription: async () => ({ interval: 'monthly' }),
     cancelSubscription: jest.fn().mockResolvedValue(undefined),
   };
 

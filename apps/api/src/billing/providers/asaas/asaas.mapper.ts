@@ -14,6 +14,13 @@ export function toAsaasCycle(interval: BillingInterval): AsaasCycle {
   return interval === BillingInterval.annual ? 'YEARLY' : 'MONTHLY';
 }
 
+/** Ciclo do Asaas para a periodicidade interna; nulo para os que não oferecemos. */
+export function fromAsaasCycle(cycle: AsaasCycle | string | undefined): BillingInterval | null {
+  if (cycle === 'MONTHLY') return BillingInterval.monthly;
+  if (cycle === 'YEARLY') return BillingInterval.annual;
+  return null;
+}
+
 /** Status interno normalizado de assinatura derivado do Asaas. */
 export function mapSubscriptionStatus(status: AsaasSubscriptionStatus, deleted?: boolean): string {
   if (deleted) return 'canceled';
@@ -79,6 +86,9 @@ export function mapSubscription(sub: AsaasSubscription): ProviderSubscription {
     status: mapSubscriptionStatus(sub.status, sub.deleted),
     nextDueAt: parseDate(sub.nextDueDate),
     cancelAtPeriodEnd: sub.deleted ?? false,
+    providerCustomerId: sub.customer ?? null,
+    providerCheckoutId: sub.checkoutSession ?? null,
+    interval: fromAsaasCycle(sub.cycle),
   };
 }
 
