@@ -34,7 +34,7 @@ Confirmadas pelo Bruno em 12/10/2026.
 | 2       | Implementada no mesmo branch. O teste de integração com Postgres (`webhook-transaction.integration.spec.ts`) passou no banco de validação local. Falta a verificação com webhook real. |
 | 3       | Implementada no mesmo branch, com a tela de assinatura conferida em celular, tablet e desktop. Falta a verificação com webhook real.                                                   |
 | 4       | Implementada no mesmo branch, com a tela conferida. Falta a verificação com webhook real.                                                                                              |
-| 5       | Pendente.                                                                                                                                                                              |
+| 5       | Implementada no mesmo branch, com a migration aplicada no banco local e no de validação. Sem mudança de tela.                                                                          |
 
 Desvios da entrega 1 em relação ao texto abaixo, todos motivados pelo sandbox:
 
@@ -118,6 +118,19 @@ Desvios da entrega 4 em relação ao texto abaixo, já com os ajustes da revisã
 - **`PAYMENT_REFUND_IN_PROGRESS` continua ignorado**, e estorno pedido ou em andamento segue como cobrança paga: pode ser negado, e até concluir o dinheiro está conosco.
 - **Aviso de alteração de cobrança paga sem assinatura local** é só fechado; o erro de pagamento sem dono vale apenas para o aviso de pagamento.
 - **O motivo da recusa** (`PaymentFailureReason`) foi para `@financial-vellun/shared`, usado pela API e pela web.
+
+Desvios da entrega 5 em relação ao texto abaixo, já com os ajustes da revisão de código:
+
+- **`provider` em `subscriptions` aceita nulo**: é a assinatura que nunca chegou a um PSP (plano gratuito, checkout que falhou antes do cliente). As antigas com algum vínculo no PSP foram preenchidas com `asaas`. Em `payments` e `payment_webhook_events` a coluna é obrigatória e **sem valor padrão**: o padrão só existiu para preencher as linhas antigas, e uma gravação que esquecesse o PSP falha em vez de virar `asaas` em silêncio.
+- **Tradução para HTTP num interceptor** (`PaymentProviderErrorInterceptor`), aplicado nos dois controllers de billing, e não no `BillingService`: a exceção traduzida segue para o filtro global, que já loga e sanitiza. O interceptor loga o motivo real, que a resposta não leva.
+- **`AsaasApiError` virou subclasse de `PaymentProviderError`**, com o `kind` derivado do status HTTP (404 → `not_found`; 401, 403, 429 e 5xx → `unavailable`; demais 4xx → `validation`). Só a mensagem marcada como escrita para o usuário (`userFacing`, a descrição do Asaas sobre os dados) sai numa resposta 400; a técnica fica no log.
+- **Linhas de outro PSP.** Só há um adapter, mas as consultas já separam por PSP, e o que é de outro não é mandado ao configurado nem esquecido em silêncio:
+  - evento gravado por outro PSP vai direto para `exhausted`, visível no painel;
+  - cancelar uma assinatura de outro PSP grava a intenção aqui e loga erro pedindo o cancelamento à mão lá;
+  - a assinatura antiga de outro PSP, numa regularização, fica aberta, com erro em log;
+  - o cliente de outro PSP não é reusado no checkout, e a tentativa de outro PSP não bloqueia um checkout novo;
+  - a expiração de checkouts parados vale para qualquer PSP, inclusive `provider` nulo, porque é só local.
+- **Fora do escopo**, como decidido: registro de vários adapters e rota `/billing/webhook/:provider`. `PAYMENT_PROVIDER` com valor sem adapter derruba a API na subida.
 
 ## Entrega 0 — Reprodução no sandbox do Asaas
 
