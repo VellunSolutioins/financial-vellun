@@ -33,7 +33,8 @@ Confirmadas pelo Bruno em 12/10/2026.
 | 1       | Implementada no branch `fix/billing-acesso-sem-pagamento`. Falta a verificação com webhook real.                                                                                       |
 | 2       | Implementada no mesmo branch. O teste de integração com Postgres (`webhook-transaction.integration.spec.ts`) passou no banco de validação local. Falta a verificação com webhook real. |
 | 3       | Implementada no mesmo branch, com a tela de assinatura conferida em celular, tablet e desktop. Falta a verificação com webhook real.                                                   |
-| 4 e 5   | Pendentes.                                                                                                                                                                             |
+| 4       | Implementada no mesmo branch, com a tela conferida. Falta a verificação com webhook real.                                                                                              |
+| 5       | Pendente.                                                                                                                                                                              |
 
 Desvios da entrega 1 em relação ao texto abaixo, todos motivados pelo sandbox:
 
@@ -109,6 +110,14 @@ Limitações conhecidas depois da entrega 3:
 
 - O cliente já existente no PSP é reusado sem atualização: CPF/CNPJ e endereço corrigidos depois não chegam lá.
 - Quem abre dois checkouts e paga os dois fica com duas assinaturas até a segunda cobrança paga cancelar a mais antiga.
+
+Desvios da entrega 4 em relação ao texto abaixo, já com os ajustes da revisão de código:
+
+- **A recusa só anota, não muda o estado.** O plano previa levar a tentativa `pending` a `unpaid`. Mas o aviso de recusa não é confirmável na consulta da cobrança (ela segue pendente no PSP), e mudar o estado a partir dele seria confiar no payload. A anotação fica na assinatura (`last_payment_failure_at` e `_reason`, migration nova); quem muda o estado continua sendo o vencimento da cobrança. A tela mostra "Pagamento não aprovado" e deixa escolher o plano de novo, e um checkout novo deixa de ser bloqueado quando o pagamento anterior foi recusado.
+- **A recusa entra na mesma regra de efeito da cobrança.** Não vale para cobrança superada, paga numa nova tentativa, estornada ou removida, e a hora registrada é a de chegada do aviso, que não muda em retry.
+- **`PAYMENT_REFUND_IN_PROGRESS` continua ignorado**, e estorno pedido ou em andamento segue como cobrança paga: pode ser negado, e até concluir o dinheiro está conosco.
+- **Aviso de alteração de cobrança paga sem assinatura local** é só fechado; o erro de pagamento sem dono vale apenas para o aviso de pagamento.
+- **O motivo da recusa** (`PaymentFailureReason`) foi para `@financial-vellun/shared`, usado pela API e pela web.
 
 ## Entrega 0 — Reprodução no sandbox do Asaas
 
