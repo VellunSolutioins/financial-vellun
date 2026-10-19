@@ -34,8 +34,9 @@ describe('asaas.mapper', () => {
       ['OVERDUE', 'failed'],
       ['REFUNDED', 'refunded'],
       // Estorno ainda não concluído não pode disparar o cancelamento.
-      ['REFUND_REQUESTED', 'processing'],
-      ['REFUND_IN_PROGRESS', 'processing'],
+      // Estorno não concluído pode ser negado: até lá, a cobrança segue paga.
+      ['REFUND_REQUESTED', 'paid'],
+      ['REFUND_IN_PROGRESS', 'paid'],
       ['PARTIALLY_REFUNDED', 'partially_refunded'],
       ['CHARGEBACK_REQUESTED', 'chargeback'],
     ] as const)('%s → %s', (asaas, internal) => {

@@ -32,6 +32,8 @@ export interface TransitionInput {
     | 'providerCustomerId'
     | 'providerSubscriptionId'
     | 'plan'
+    | 'lastPaymentFailureAt'
+    | 'lastPaymentFailureReason'
   >;
   metadata?: Prisma.InputJsonValue;
 }

@@ -229,7 +229,13 @@ describe('BillingService.createCheckout', () => {
     );
 
     expect(prisma.subscription.findFirst).toHaveBeenCalledWith({
-      where: { userId: 'u1', status: 'pending', providerSubscriptionId: { not: null } },
+      // Recusado o pagamento, ele não bloqueia mais uma nova tentativa.
+      where: {
+        userId: 'u1',
+        status: 'pending',
+        providerSubscriptionId: { not: null },
+        lastPaymentFailureAt: null,
+      },
       select: { id: true },
     });
     expect(subscriptions.prepareCheckoutSubscription).not.toHaveBeenCalled();
@@ -268,6 +274,31 @@ describe('BillingService.createCheckout', () => {
       );
       expect(subscriptions.activateFreeSubscription).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('BillingService.getSubscriptionState', () => {
+  it('devolve a última recusa de pagamento, para a tela explicar', async () => {
+    const { service, access } = setup();
+    const at = new Date('2026-10-19T12:00:00Z');
+    access.currentSubscription.mockResolvedValue({
+      id: 's1',
+      status: 'unpaid',
+      plan: PLAN,
+      lastPaymentFailureAt: at,
+      lastPaymentFailureReason: 'card_refused',
+    });
+
+    const state = await service.getSubscriptionState('u1');
+
+    expect(state.lastPaymentFailure).toEqual({ at, reason: 'card_refused' });
+  });
+
+  it('sem recusa registrada, é nulo', async () => {
+    const { service, access } = setup();
+    access.currentSubscription.mockResolvedValue({ id: 's1', status: 'active', plan: PLAN });
+
+    expect((await service.getSubscriptionState('u1')).lastPaymentFailure).toBeNull();
   });
 });
 

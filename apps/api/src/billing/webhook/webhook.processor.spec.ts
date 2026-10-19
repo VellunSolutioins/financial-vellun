@@ -7,6 +7,8 @@ import { WebhookProcessor } from './webhook.processor';
 
 /** "Agora" dos testes: 12/10/2026, meio-dia em Brasília. */
 const NOW = new Date('2026-10-12T15:00:00Z');
+/** Quando o aviso chegou: anterior ao processamento, que pode ser um retry. */
+const RECEIVED_AT = new Date('2026-10-12T14:40:00Z');
 /** Vencimento de hoje, ancorado ao meio-dia UTC como o adapter faz. */
 const DUE_TODAY = new Date('2026-10-12T12:00:00Z');
 
@@ -41,6 +43,7 @@ function setup() {
         );
         return located.filter(Boolean).pop();
       }),
+      update: jest.fn().mockResolvedValue({}),
       // Assinaturas anteriores do usuário ainda abertas: nenhuma, salvo o teste dizer.
       findMany: jest.fn().mockResolvedValue([]),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
@@ -130,6 +133,7 @@ function persistedEvent(overrides: Record<string, unknown> = {}) {
     eventType: 'PAYMENT_RECEIVED',
     status: 'received',
     sanitizedPayload: {},
+    receivedAt: RECEIVED_AT,
     ...overrides,
   };
 }
@@ -219,6 +223,8 @@ describe('WebhookProcessor.process', () => {
           currentPeriodStart: DUE_TODAY,
           currentPeriodEnd: new Date('2026-11-12T12:00:00Z'),
           graceUntil: null,
+          lastPaymentFailureAt: null,
+          lastPaymentFailureReason: null,
         },
       }),
     );
@@ -718,6 +724,155 @@ describe('WebhookProcessor.process', () => {
       expect(ctx.tx.subscription.findMany).not.toHaveBeenCalled();
       expect(ctx.provider.cancelSubscription).not.toHaveBeenCalled();
     });
+  });
+
+  describe('cobrança recusada (cartão, análise de risco)', () => {
+    /** Evento de recusa; a cobrança, no PSP, segue pendente salvo o teste dizer. */
+    function arrangeRefused(
+      ctx: ReturnType<typeof setup>,
+      scenario: { local?: Record<string, unknown>; remote?: Record<string, unknown> } = {},
+      reason = 'card_refused',
+    ) {
+      arrange(ctx, {
+        intent: 'payment_refused',
+        local: { providerSubscriptionId: 'sub_a', ...scenario.local },
+        remote: { status: 'pending', paidAt: null, ...scenario.remote },
+      });
+      ctx.provider.normalizeWebhookEvent.mockReturnValue({
+        ...chargeEvent('payment_refused'),
+        providerCheckoutId: null,
+        paymentFailureReason: reason,
+      });
+    }
+    const noted = (reason = 'card_refused') => ({
+      lastPaymentFailureAt: RECEIVED_AT,
+      lastPaymentFailureReason: reason,
+    });
+
+    it('só anota o motivo: o PSP não confirma a recusa, então o estado não muda por ela', async () => {
+      const ctx = setup();
+      arrangeRefused(ctx);
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.subscriptions.transitionTo).not.toHaveBeenCalled();
+      expect(ctx.tx.subscription.update).toHaveBeenCalledWith({
+        where: { id: 's1' },
+        data: noted(),
+      });
+      // Mesma transação do registro da cobrança e do fechamento do evento.
+      expect(ctx.writes.every((db) => db === ctx.tx)).toBe(true);
+      expect(ctx.events.markProcessed).toHaveBeenCalledWith('row_1');
+    });
+
+    it('anota mesmo com a cobrança já registrada como pendente: é o aviso que traz a recusa', async () => {
+      const ctx = setup();
+      arrangeRefused(ctx);
+      ctx.payments.findByProviderId.mockResolvedValue({ status: 'pending' });
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.tx.subscription.update).toHaveBeenCalledWith({
+        where: { id: 's1' },
+        data: noted(),
+      });
+    });
+
+    it('na renovação, também só anota: quem rebaixa é o vencimento', async () => {
+      const ctx = setup();
+      arrangeRefused(
+        ctx,
+        {
+          local: {
+            status: 'active',
+            currentPeriodStart: new Date('2026-09-12T12:00:00Z'),
+            currentPeriodEnd: new Date('2026-10-12T12:00:00Z'),
+          },
+        },
+        'risk_rejected',
+      );
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.subscriptions.transitionTo).not.toHaveBeenCalled();
+      expect(ctx.tx.subscription.update).toHaveBeenCalledWith({
+        where: { id: 's1' },
+        data: noted('risk_rejected'),
+      });
+    });
+
+    it('com a cobrança já vencida no PSP, efeito e anotação vão na mesma transição', async () => {
+      const ctx = setup();
+      arrangeRefused(ctx, { remote: { status: 'failed' } });
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.subscriptions.transitionTo).toHaveBeenCalledTimes(1);
+      expect(ctx.subscriptions.transitionTo).toHaveBeenCalledWith(
+        's1',
+        'unpaid',
+        expect.objectContaining({
+          data: { providerSubscriptionId: 'sub_a', ...noted() },
+        }),
+      );
+      expect(ctx.tx.subscription.update).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ['paga numa nova tentativa', { status: 'paid', paidAt: DUE_TODAY }],
+      ['removida', { status: 'canceled' }],
+      ['estornada', { status: 'refunded' }],
+    ])('recusa de cobrança já %s não é anotada', async (_label, remote) => {
+      const ctx = setup();
+      arrangeRefused(ctx, { local: { status: 'active' }, remote });
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.tx.subscription.update).not.toHaveBeenCalled();
+      for (const [, , input] of ctx.subscriptions.transitionTo.mock.calls) {
+        // Ativar limpa a recusa (nulo); anotar seria gravar um motivo.
+        expect(input.data.lastPaymentFailureReason ?? null).toBeNull();
+      }
+    });
+
+    it('recusa de uma cobrança superada por outra mais nova não é anotada', async () => {
+      const ctx = setup();
+      arrangeRefused(ctx, { local: { status: 'active' } });
+      ctx.payments.hasNewerDecisiveCharge.mockResolvedValue(true);
+
+      await ctx.processor.process('row_1');
+
+      expect(ctx.tx.subscription.update).not.toHaveBeenCalled();
+    });
+  });
+
+  it('cobrança alterada no PSP (removida, restaurada...) passa pela mesma sincronização', async () => {
+    const ctx = setup();
+    arrange(ctx, {
+      intent: 'payment_updated',
+      local: { status: 'active', providerSubscriptionId: 'sub_a' },
+      remote: { status: 'canceled', paidAt: null },
+    });
+
+    await ctx.processor.process('row_1');
+
+    expect(ctx.provider.getPayment).toHaveBeenCalledWith('pay_1');
+    expect(ctx.payments.upsertFromProvider).toHaveBeenCalledWith(
+      expect.objectContaining({ providerPaymentId: 'pay_1', status: PaymentStatus.canceled }),
+    );
+    // Cobrança removida não decide nada sobre a assinatura.
+    expect(ctx.subscriptions.transitionTo).not.toHaveBeenCalled();
+  });
+
+  it('aviso de alteração de uma cobrança paga sem assinatura local só fecha o evento', async () => {
+    const ctx = setup();
+    arrange(ctx, { intent: 'payment_updated' });
+    ctx.prisma.subscription.findFirst.mockReset().mockResolvedValue(null);
+
+    await ctx.processor.process('row_1');
+
+    // Não é o pagamento sem dono: esse erro é só para o aviso de pagamento.
+    expect(ctx.events.markProcessed).toHaveBeenCalledWith('row_1');
   });
 
   it('é idempotente: não reprocessa evento já processado', async () => {

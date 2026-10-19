@@ -16,6 +16,7 @@ import {
   getPlans,
   getSubscription,
   intervalLabel,
+  paymentFailureText,
   statusMeta,
 } from '@/lib/billing';
 
@@ -121,10 +122,15 @@ export default function AssinaturaPage() {
           onCancel={handleCancel}
         />
       ) : showPending ? (
-        <PendingCard busy={busy} onRefresh={load} onChooseAgain={() => setChoosingAgain(true)} />
+        <PendingCard
+          busy={busy}
+          failure={state?.lastPaymentFailure ?? null}
+          onRefresh={load}
+          onChooseAgain={() => setChoosingAgain(true)}
+        />
       ) : (
         <>
-          <StatusNotice status={status} />
+          <StatusNotice status={status} failure={state?.lastPaymentFailure ?? null} />
           <PlansList plans={plans} busy={busy} onSubscribe={handleSubscribe} />
         </>
       )}
@@ -168,7 +174,13 @@ function ReturnNotice({ status }: { status: ReturnStatus }) {
 }
 
 /** Por que a tela voltou a oferecer os planos, quando isso não é óbvio. */
-function StatusNotice({ status }: { status: SubscriptionState['status'] }) {
+function StatusNotice({
+  status,
+  failure,
+}: {
+  status: SubscriptionState['status'];
+  failure: SubscriptionState['lastPaymentFailure'];
+}) {
   if (status === 'expired') {
     return (
       <div className="rounded-md border border-gray-300 bg-gray-50 px-4 py-3 text-sm text-gray-700">
@@ -180,8 +192,9 @@ function StatusNotice({ status }: { status: SubscriptionState['status'] }) {
   if (status === 'unpaid') {
     return (
       <div className="rounded-md border border-yellow-300 bg-yellow-50 px-4 py-3 text-sm text-yellow-900">
-        Não conseguimos confirmar o seu pagamento. Escolha um plano para regularizar e voltar a usar
-        o produto.
+        {failure
+          ? `${paymentFailureText(failure.reason)} Escolha um plano para tentar de novo, se possível com outro cartão.`
+          : 'Não conseguimos confirmar o seu pagamento. Escolha um plano para regularizar e voltar a usar o produto.'}
       </div>
     );
   }
@@ -221,6 +234,17 @@ function ManagementCard({
             informa o cartão de novo e a cobrança anterior é cancelada.
           </div>
         )}
+        {state.lastPaymentFailure &&
+          (state.status === 'past_due' ? (
+            <p className="text-sm text-muted-foreground">
+              {paymentFailureText(state.lastPaymentFailure.reason)}
+            </p>
+          ) : (
+            <div className="rounded-md border border-yellow-300 bg-yellow-50 px-3 py-2 text-sm text-yellow-900">
+              {paymentFailureText(state.lastPaymentFailure.reason)} Confira o cartão com o banco
+              antes do próximo vencimento.
+            </div>
+          ))}
         {state.cancelAtPeriodEnd && (
           <div className="rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-700">
             Cancelamento programado. Seu acesso continua até {formatDate(state.currentPeriodEnd)}.
@@ -253,29 +277,34 @@ function ManagementCard({
 
 function PendingCard({
   busy,
+  failure,
   onRefresh,
   onChooseAgain,
 }: {
   busy: boolean;
+  failure: SubscriptionState['lastPaymentFailure'];
   onRefresh: () => void;
   onChooseAgain: () => void;
 }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Pagamento em processamento</CardTitle>
+        <CardTitle className="text-base">
+          {failure ? 'Pagamento não aprovado' : 'Pagamento em processamento'}
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">
-          Estamos aguardando a confirmação do pagamento. Assim que for aprovado, sua assinatura é
-          ativada automaticamente.
+          {failure
+            ? `${paymentFailureText(failure.reason)} Você pode escolher o plano de novo e tentar com outro cartão.`
+            : 'Estamos aguardando a confirmação do pagamento. Assim que for aprovado, sua assinatura é ativada automaticamente.'}
         </p>
         <div className="flex flex-col gap-2 sm:flex-row">
           <Button variant="outline" onClick={onRefresh} disabled={busy}>
             Atualizar status
           </Button>
-          <Button variant="ghost" onClick={onChooseAgain} disabled={busy}>
-            Não paguei, escolher plano
+          <Button variant={failure ? 'default' : 'ghost'} onClick={onChooseAgain} disabled={busy}>
+            {failure ? 'Escolher plano de novo' : 'Não paguei, escolher plano'}
           </Button>
         </div>
       </CardContent>

@@ -1,6 +1,7 @@
 import {
   NormalizedWebhookEvent,
   NormalizedWebhookPayment,
+  PaymentFailureReason,
   WebhookIntent,
 } from '../payment-provider.interface';
 import { mapPayment } from './asaas.mapper';
@@ -19,6 +20,23 @@ const CHARGEBACK_EVENTS = new Set([
 const CANCEL_EVENTS = new Set(['SUBSCRIPTION_DELETED', 'SUBSCRIPTION_INACTIVATED']);
 /** Checkout que não vai mais receber pagamento: vencido ou cancelado pelo pagador. */
 const CHECKOUT_CLOSED_EVENTS = new Set(['CHECKOUT_EXPIRED', 'CHECKOUT_CANCELED']);
+/** Cobrança recusada, e o motivo que a tela mostra. */
+const REFUSED_EVENTS = new Map<string, PaymentFailureReason>([
+  ['PAYMENT_CREDIT_CARD_CAPTURE_REFUSED', 'card_refused'],
+  ['PAYMENT_REPROVED_BY_RISK_ANALYSIS', 'risk_rejected'],
+]);
+/**
+ * Mudanças na cobrança que não são pagamento nem vencimento. O estado de
+ * verdade vem da consulta ao PSP; o efeito na assinatura, das regras de sempre.
+ * `PAYMENT_CREATED` fica de fora de propósito: as cobranças são geradas semanas
+ * antes do vencimento, e criar não muda nada.
+ */
+const UPDATED_EVENTS = new Set([
+  'PAYMENT_UPDATED',
+  'PAYMENT_DELETED',
+  'PAYMENT_RESTORED',
+  'PAYMENT_RECEIVED_IN_CASH_UNDONE',
+]);
 
 function intentOf(eventType: string): WebhookIntent {
   if (SUCCESS_EVENTS.has(eventType)) return 'payment_succeeded';
@@ -28,6 +46,8 @@ function intentOf(eventType: string): WebhookIntent {
   if (CANCEL_EVENTS.has(eventType)) return 'subscription_canceled';
   if (eventType === 'SUBSCRIPTION_CREATED') return 'subscription_created';
   if (CHECKOUT_CLOSED_EVENTS.has(eventType)) return 'checkout_expired';
+  if (REFUSED_EVENTS.has(eventType)) return 'payment_refused';
+  if (UPDATED_EVENTS.has(eventType)) return 'payment_updated';
   return 'ignore';
 }
 
@@ -61,5 +81,6 @@ export function normalizeAsaasWebhookEvent(
     providerCheckoutId:
       payment?.checkoutSession ?? subscription?.checkoutSession ?? checkout?.id ?? null,
     payment: toNormalizedPayment(payment),
+    paymentFailureReason: REFUSED_EVENTS.get(eventType) ?? null,
   };
 }

@@ -45,6 +45,12 @@ export class BillingService {
       graceUntil: subscription?.graceUntil ?? null,
       cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd ?? false,
       canceledAt: subscription?.canceledAt ?? null,
+      lastPaymentFailure: subscription?.lastPaymentFailureAt
+        ? {
+            at: subscription.lastPaymentFailureAt,
+            reason: subscription.lastPaymentFailureReason,
+          }
+        : null,
       access,
     };
   }
@@ -70,13 +76,15 @@ export class BillingService {
     }
 
     // Um checkout anterior já virou assinatura no PSP e o pagamento dele ainda
-    // está em análise. Abrir outro agora cobraria duas vezes — e, aprovado o
+    // está em análise, sem recusa. Abrir outro agora cobraria duas vezes — e, aprovado o
     // segundo, a primeira assinatura seria cancelada sem estorno do que cobrou.
     const awaitingPayment = await this.prisma.subscription.findFirst({
       where: {
         userId,
         status: SubscriptionStatus.pending,
         providerSubscriptionId: { not: null },
+        // Recusado o pagamento, não há mais o que esperar dele.
+        lastPaymentFailureAt: null,
       },
       select: { id: true },
     });

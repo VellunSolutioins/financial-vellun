@@ -47,11 +47,12 @@ export function mapPaymentStatus(status: AsaasPaymentStatus): string {
       return 'pending';
     case 'OVERDUE':
       return 'failed';
-    // Estorno pedido ou em andamento ainda pode ser negado. `refunded` cancela
-    // a assinatura no PSP, e isso não se desfaz — só o estorno concluído conta.
+    // Estorno pedido ou em andamento ainda pode ser negado, e o dinheiro segue
+    // conosco até ser concluído: a cobrança continua paga. `refunded` cancela a
+    // assinatura no PSP, e isso não se desfaz — só o estorno concluído conta.
     case 'REFUND_REQUESTED':
     case 'REFUND_IN_PROGRESS':
-      return 'processing';
+      return 'paid';
     case 'REFUNDED':
       return 'refunded';
     case 'PARTIALLY_REFUNDED':

@@ -13,6 +13,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { InvalidSubscriptionTransitionError } from '../billing.errors';
 import {
   PAYMENT_PROVIDER,
+  PaymentFailureReason,
   PaymentProvider,
   ProviderPayment,
 } from '../providers/payment-provider.interface';
@@ -21,6 +22,13 @@ import { ChargeEffect, SubscriptionStateService } from './subscription-state.ser
 import { SubscriptionService } from './subscription.service';
 
 export type SubscriptionWithPlan = Subscription & { plan: Plan };
+
+/** Status em que uma cobrança ainda pode estar recusada. */
+const REFUSABLE_STATUSES: PaymentStatus[] = [
+  PaymentStatus.pending,
+  PaymentStatus.processing,
+  PaymentStatus.failed,
+];
 
 /**
  * - `unchanged`: a cobrança já estava registrada neste status; nada a fazer.
@@ -51,6 +59,13 @@ export interface ChargeSyncContext {
    * plano não troca o plano: o preço sozinho não diz qual foi contratado.
    */
   billingInterval?: BillingInterval | null;
+  /**
+   * O aviso diz que a cobrança foi recusada (cartão, análise de risco), e
+   * quando chegou. O PSP não tem como confirmar isso na consulta da cobrança,
+   * então a recusa só é anotada para a tela: o estado da assinatura continua
+   * mudando só pelo que o PSP confirma (o vencimento da cobrança).
+   */
+  refusal?: { reason: PaymentFailureReason; at: Date } | null;
 }
 
 export interface ChargeSyncResult {
@@ -76,6 +91,8 @@ interface Decision {
   effect: ChargeEffect;
   /** Plano que a cobrança paga, quando não é o que a assinatura tinha. */
   paidPlan?: Plan;
+  /** Recusa a anotar na assinatura. */
+  refusal?: { reason: PaymentFailureReason; at: Date };
 }
 
 /**
@@ -326,7 +343,9 @@ export class ChargeSyncService {
     // chegando depois ainda precisa revogar o acesso. Não há risco em
     // reavaliar — em assinatura já cancelada o efeito é nenhum.
     const isRefund = status === PaymentStatus.refunded;
-    if (source === 'webhook' && previous?.status === status && !isRefund) {
+    // A recusa também: o aviso dela pode chegar com a cobrança já registrada
+    // como pendente, e é o aviso que traz a informação nova.
+    if (source === 'webhook' && previous?.status === status && !isRefund && !context.refusal) {
       return none('unchanged');
     }
 
@@ -351,7 +370,14 @@ export class ChargeSyncService {
       now,
       { isLastGenerated: context.isLastGenerated },
     );
-    if (effect.kind === 'none') return none('recorded');
+    // Recusa só conta enquanto a cobrança não foi resolvida de outro jeito:
+    // paga numa nova tentativa, estornada ou removida, o aviso é passado. E,
+    // como acima, a de uma cobrança superada já parou no `superseded`.
+    const refusal =
+      context.refusal && REFUSABLE_STATUSES.includes(status) ? context.refusal : undefined;
+    if (effect.kind === 'none') {
+      return refusal ? { ...none('applied'), refusal } : none('recorded');
+    }
 
     if (effect.kind === 'cancel' && source === 'reconciliation') {
       // Estorno revoga o acesso quando o aviso chega pelo webhook. A
@@ -378,6 +404,7 @@ export class ChargeSyncService {
       outcome: 'applied',
       effect,
       paidPlan: plan.id !== sub.planId ? plan : undefined,
+      refusal,
     };
   }
 
@@ -458,8 +485,18 @@ export class ChargeSyncService {
     // vínculo ficaria fora da reconciliação e sem como achar as cobranças seguintes.
     const providerSubscriptionId = charge.providerSubscriptionId ?? sub.providerSubscriptionId;
 
+    // A recusa vai na mesma escrita do efeito, quando há um.
+    const failure = decision.refusal
+      ? {
+          lastPaymentFailureAt: decision.refusal.at,
+          lastPaymentFailureReason: decision.refusal.reason,
+        }
+      : {};
+
     switch (effect.kind) {
       case 'none':
+        if (decision.refusal)
+          await tx.subscription.update({ where: { id: sub.id }, data: failure });
         return;
 
       case 'activate':
@@ -480,6 +517,9 @@ export class ChargeSyncService {
               currentPeriodStart: effect.currentPeriodStart,
               currentPeriodEnd: effect.currentPeriodEnd,
               graceUntil: null,
+              // Pagou: a recusa anterior não explica mais nada.
+              lastPaymentFailureAt: null,
+              lastPaymentFailureReason: null,
             },
           },
           tx,
@@ -497,7 +537,7 @@ export class ChargeSyncService {
                   `período pago pela cobrança ${charge.id} terminou sem nova cobrança no PSP`,
                 )
               : origin('payment_failed')),
-            data: { providerSubscriptionId, graceUntil: effect.graceUntil },
+            data: { providerSubscriptionId, graceUntil: effect.graceUntil, ...failure },
           },
           tx,
         );
@@ -511,7 +551,7 @@ export class ChargeSyncService {
             ...origin(
               status === PaymentStatus.chargeback ? 'payment_chargeback' : 'payment_failed',
             ),
-            data: { providerSubscriptionId },
+            data: { providerSubscriptionId, ...failure },
           },
           tx,
         );

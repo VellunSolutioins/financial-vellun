@@ -137,7 +137,7 @@ export class WebhookProcessor {
       payload: event.sanitizedPayload,
     });
 
-    await this.apply(eventId, normalized);
+    await this.apply(eventId, normalized, event.receivedAt);
 
     // Só aqui, depois do commit: contar antes faria a métrica divergir do banco
     // quando a transação falha.
@@ -146,7 +146,11 @@ export class WebhookProcessor {
   }
 
   /** Aplica a intenção e fecha o evento no mesmo commit dos efeitos que ele causou. */
-  private async apply(eventId: string, event: NormalizedWebhookEvent): Promise<void> {
+  private async apply(
+    eventId: string,
+    event: NormalizedWebhookEvent,
+    receivedAt: Date,
+  ): Promise<void> {
     switch (event.intent) {
       case 'ignore':
         return this.close(eventId, null);
@@ -157,7 +161,7 @@ export class WebhookProcessor {
       case 'checkout_expired':
         return this.applyCheckoutExpired(eventId, event);
       default:
-        return this.applyCharge(eventId, event);
+        return this.applyCharge(eventId, event, receivedAt);
     }
   }
 
@@ -191,7 +195,11 @@ export class WebhookProcessor {
    * A consulta ao PSP vem antes da transação, e o que a decisão exigir dele
    * (cancelar, num estorno), depois do commit. Dentro dela, só banco.
    */
-  private async applyCharge(eventId: string, event: NormalizedWebhookEvent): Promise<void> {
+  private async applyCharge(
+    eventId: string,
+    event: NormalizedWebhookEvent,
+    receivedAt: Date,
+  ): Promise<void> {
     if (!event.payment) {
       this.logger.warn(`Webhook de cobrança sem cobrança no payload (intent=${event.intent})`);
       return this.close(eventId, null);
@@ -212,7 +220,11 @@ export class WebhookProcessor {
       // Pagou e não há a quem dar acesso: tem de aparecer. As demais (vencida,
       // estornada...) de uma assinatura que não conhecemos não mudam nada aqui;
       // fazê-las falhar encheria o painel de eventos que nunca vão correlacionar.
-      if (paid) throw new UncorrelatedPaymentEventError(charge.id, charge.providerSubscriptionId);
+      // Só o aviso de pagamento: um aviso de alteração de uma cobrança paga e
+      // desconhecida (descrição, vencimento) não é o pagamento sem dono.
+      if (paid && event.intent === 'payment_succeeded') {
+        throw new UncorrelatedPaymentEventError(charge.id, charge.providerSubscriptionId);
+      }
       this.logger.warn(
         `Cobrança ${charge.id} (${charge.status}) sem assinatura local correlacionável; ignorada`,
       );
@@ -232,6 +244,10 @@ export class WebhookProcessor {
     await this.prisma.$transaction(async (tx) => {
       result = await this.charges.applyInTransaction(tx, subscription.id, charge, 'webhook', {
         billingInterval,
+        // Hora em que o aviso chegou: retry e reprocessamento não a deslocam.
+        refusal: event.paymentFailureReason
+          ? { reason: event.paymentFailureReason, at: receivedAt }
+          : null,
       });
       // Com cancelamento pendente no PSP, o evento fica aberto: se o PSP
       // falhar, é o retry dele que tenta de novo.

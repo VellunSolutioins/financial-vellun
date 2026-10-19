@@ -1,3 +1,4 @@
+import type { PaymentFailureReason } from '@financial-vellun/shared';
 import { BillingInterval } from '@prisma/client';
 
 /**
@@ -116,7 +117,13 @@ export type WebhookIntent =
   | 'subscription_canceled'
   | 'subscription_created'
   | 'checkout_expired'
+  /** Cobrança recusada (cartão, análise de risco). Ver `paymentFailureReason`. */
+  | 'payment_refused'
+  /** Cobrança alterada, removida ou restaurada: só espelha o estado do PSP. */
+  | 'payment_updated'
   | 'ignore';
+
+export type { PaymentFailureReason };
 
 export interface NormalizedWebhookPayment {
   providerPaymentId: string;
@@ -137,6 +144,8 @@ export interface NormalizedWebhookEvent {
   providerCustomerId: string | null;
   providerCheckoutId: string | null;
   payment: NormalizedWebhookPayment | null;
+  /** Só em `payment_refused`. */
+  paymentFailureReason: PaymentFailureReason | null;
 }
 
 /**
