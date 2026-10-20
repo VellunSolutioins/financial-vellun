@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils';
+import { Reveal } from './reveal';
 import { container } from './styles';
 
 const STEPS = [
@@ -22,16 +23,18 @@ const STEPS = [
 export function HowItWorks() {
   return (
     <section id="como-funciona" className="scroll-mt-16 bg-surface">
-      <div className={cn(container, 'py-14 lg:py-24')}>
-        <h2 className="text-3xl font-bold tracking-tight text-ink sm:text-4xl">Como funciona</h2>
-        <p className="mt-3 max-w-2xl text-lg leading-relaxed text-ink-muted">
-          Três passos entre a sua mensagem e o seu painel.
-        </p>
+      <Reveal className={cn(container, 'py-14 lg:py-24')}>
+        <div className="reveal">
+          <h2 className="text-3xl font-bold tracking-tight text-ink sm:text-4xl">Como funciona</h2>
+          <p className="mt-3 max-w-2xl text-lg leading-relaxed text-ink-muted">
+            Três passos entre a sua mensagem e o seu painel.
+          </p>
+        </div>
         <ol className="mt-8 grid gap-4 md:grid-cols-3 md:gap-6 lg:mt-12">
           {STEPS.map((step, index) => (
             <li
               key={step.title}
-              className="flex gap-4 rounded-3xl border bg-card p-5 shadow-soft md:flex-col md:p-6"
+              className="reveal flex gap-4 rounded-3xl border bg-card p-5 shadow-soft md:flex-col md:p-6"
             >
               <span
                 aria-hidden
@@ -46,7 +49,7 @@ export function HowItWorks() {
             </li>
           ))}
         </ol>
-      </div>
+      </Reveal>
     </section>
   );
 }

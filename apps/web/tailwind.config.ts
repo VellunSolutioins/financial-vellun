@@ -57,15 +57,6 @@ const config: Config = {
         soft: 'var(--shadow-soft)',
         card: 'var(--shadow-card)',
       },
-      keyframes: {
-        'demo-in': {
-          from: { opacity: '0', transform: 'translateY(8px)' },
-          to: { opacity: '1', transform: 'translateY(0)' },
-        },
-      },
-      animation: {
-        'demo-in': 'demo-in 0.5s ease-out both',
-      },
     },
   },
   plugins: [],
