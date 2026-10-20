@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Reveal } from './reveal';
 import { container, focusRing } from './styles';
 
 /** Só perguntas com resposta verificável no produto. Preço fica de fora até haver oferta pública. */
@@ -49,13 +50,13 @@ const QUESTIONS: { question: string; answer: React.ReactNode }[] = [
 export function Faq() {
   return (
     <section className="bg-surface">
-      <div className={cn(container, 'py-14 lg:py-24')}>
-        <h2 className="text-3xl font-bold tracking-tight text-ink sm:text-4xl">
+      <Reveal className={cn(container, 'py-14 lg:py-24')}>
+        <h2 className="reveal text-3xl font-bold tracking-tight text-ink sm:text-4xl">
           Perguntas frequentes
         </h2>
         <div className="mt-8 max-w-3xl space-y-3">
           {QUESTIONS.map((item) => (
-            <details key={item.question} className="group rounded-2xl border bg-card">
+            <details key={item.question} className="reveal group rounded-2xl border bg-card">
               <summary
                 className={cn(
                   'flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 rounded-2xl px-5 py-3 text-base font-semibold text-ink [&::-webkit-details-marker]:hidden',
@@ -72,7 +73,7 @@ export function Faq() {
             </details>
           ))}
         </div>
-      </div>
+      </Reveal>
     </section>
   );
 }

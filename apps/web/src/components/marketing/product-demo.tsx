@@ -1,5 +1,6 @@
 import { ArrowDown, CheckCheck, ShoppingCart } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Reveal } from './reveal';
 import {
   demoCategories,
   demoChat,
@@ -7,9 +8,6 @@ import {
   formatDemoCurrency,
   formatDemoPercent,
 } from './demo-data';
-
-/** Entrada em sequência; com movimento reduzido, tudo já aparece no estado final. */
-const stage = 'animate-demo-in motion-reduce:animate-none';
 
 function ChatPanel() {
   return (
@@ -27,12 +25,7 @@ function ChatPanel() {
         </div>
       </div>
       <div className="space-y-3 bg-surface p-4">
-        <div
-          className={cn(
-            stage,
-            'ml-auto w-fit max-w-[85%] rounded-2xl rounded-br-[6px] bg-emerald-100 px-3.5 py-2.5 [animation-delay:150ms]',
-          )}
-        >
+        <div className="reveal ml-auto w-fit max-w-[85%] rounded-2xl rounded-br-[6px] bg-emerald-100 px-3.5 py-2.5 [--reveal-delay:150ms]">
           <p className="text-[15px] leading-snug text-ink">
             <span className="sr-only">Você: </span>
             {demoChat.userMessage}
@@ -42,12 +35,7 @@ function ChatPanel() {
             <CheckCheck aria-hidden className="h-3.5 w-3.5 text-primary" />
           </p>
         </div>
-        <div
-          className={cn(
-            stage,
-            'mr-auto w-fit max-w-[85%] rounded-2xl rounded-bl-[6px] border bg-card px-3.5 py-2.5 [animation-delay:900ms]',
-          )}
-        >
+        <div className="reveal mr-auto w-fit max-w-[85%] rounded-2xl rounded-bl-[6px] border bg-card px-3.5 py-2.5 [--reveal-delay:900ms]">
           <p className="text-[15px] leading-snug text-ink">
             <span className="sr-only">Financial Vellun: </span>
             {demoChat.botReply}
@@ -61,9 +49,7 @@ function ChatPanel() {
 
 function EntryPanel() {
   return (
-    <div
-      className={cn(stage, 'rounded-3xl border bg-card p-4 shadow-card [animation-delay:1700ms]')}
-    >
+    <div className="reveal rounded-3xl border bg-card p-4 shadow-card [--reveal-delay:1700ms]">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm font-semibold text-ink">Lançamentos</p>
         <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
@@ -107,23 +93,26 @@ function EntryPanel() {
 
 /**
  * Demonstração "mensagem → confirmação → lançamento". É só HTML e CSS com dados
- * locais (`demo-data.ts`): não chama API nem envia mensagem.
+ * locais (`demo-data.ts`): não chama API nem envia mensagem. A sequência começa
+ * quando a demo entra na tela (no mobile ela fica abaixo dos botões).
  */
 export function ProductDemo({ className }: { className?: string }) {
   return (
-    <figure className={cn('mx-auto w-full max-w-md', className)}>
-      <ChatPanel />
-      <div
-        aria-hidden
-        className={cn(stage, 'flex justify-center py-2 text-primary [animation-delay:1700ms]')}
-      >
-        <ArrowDown className="h-5 w-5" />
-      </div>
-      <EntryPanel />
-      <figcaption className="mt-3 text-center text-sm text-ink-muted">
-        Demonstração com dados fictícios
-      </figcaption>
-    </figure>
+    <Reveal group className={cn('mx-auto w-full max-w-md', className)}>
+      <figure>
+        <ChatPanel />
+        <div
+          aria-hidden
+          className="reveal flex justify-center py-2 text-primary [--reveal-delay:1700ms]"
+        >
+          <ArrowDown className="h-5 w-5" />
+        </div>
+        <EntryPanel />
+        <figcaption className="mt-3 text-center text-sm text-ink-muted">
+          Demonstração com dados fictícios
+        </figcaption>
+      </figure>
+    </Reveal>
   );
 }
 
