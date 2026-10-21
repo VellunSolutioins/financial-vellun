@@ -264,6 +264,7 @@ model User {
   subscriptions           Subscription[]
   payments                Payment[]
   sessions                UserSession[]
+  passwordResetTokens     PasswordResetToken[]
   securityEvents          UserSecurityEvent[]
   phoneVerifications      PhoneVerification[]
   creditCardInvoices      CreditCardInvoice[]
@@ -314,7 +315,8 @@ model UserSession {
 model UserSecurityEvent {
   id        String   @id @default(uuid())
   userId    String   @map("user_id")
-  /// `password_changed`, `email_changed`, `phone_verified`, `sessions_revoked`.
+  /// `password_changed`, `password_reset_requested`, `password_reset`, `email_changed`,
+  /// `phone_verified`, `sessions_revoked`.
   type      String
   ip        String?
   userAgent String?  @map("user_agent")
@@ -325,6 +327,24 @@ model UserSecurityEvent {
 
   @@index([userId, createdAt])
   @@map("user_security_events")
+}
+
+/// Link de redefinição de senha ("esqueci minha senha"). Guarda só o SHA-256 do
+/// token: quem lê o banco não consegue redefinir a senha de ninguém. Uso único
+/// (`usedAt`) e curta duração (`expiresAt`); pedir um link novo apaga os
+/// anteriores ainda não usados.
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("password_reset_tokens")
 }
 
 // Desafio de posse do número de WhatsApp (reverse OTP): o usuário envia o

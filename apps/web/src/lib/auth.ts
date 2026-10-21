@@ -50,6 +50,19 @@ export async function login(data: { email: string; password: string }): Promise<
   return apiClient.post<User>('/auth/login', data);
 }
 
+/** Pede o link de redefinição de senha. A resposta é a mesma, exista a conta ou não. */
+export async function forgotPassword(email: string): Promise<{ message: string }> {
+  return apiClient.post<{ message: string }>('/auth/forgot-password', { email });
+}
+
+/** Troca a senha pelo token do link. Encerra todas as sessões da conta. */
+export async function resetPassword(data: {
+  token: string;
+  newPassword: string;
+}): Promise<{ message: string }> {
+  return apiClient.post<{ message: string }>('/auth/reset-password', data);
+}
+
 export async function logout(): Promise<void> {
   await apiClient.post('/auth/logout', {});
 }

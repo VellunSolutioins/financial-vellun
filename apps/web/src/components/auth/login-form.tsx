@@ -86,6 +86,11 @@ export function LoginForm() {
             />
           )}
         </FormField>
+        <div className="-mt-3 flex justify-end">
+          <Link href="/esqueci-senha" className={`${textLink} text-sm`}>
+            Esqueci minha senha
+          </Link>
+        </div>
 
         <FormAlert messages={formErrors} />
 

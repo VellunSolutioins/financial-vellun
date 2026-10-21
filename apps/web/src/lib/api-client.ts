@@ -4,8 +4,16 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
 // Endpoints de autenticação não devem disparar refresh-em-401:
 // - login/register: 401 = credenciais inválidas (deve aparecer ao usuário);
-// - refresh/logout: 401 = sessão realmente encerrada.
-const NO_REFRESH_PATHS = ['/auth/login', '/auth/register', '/auth/refresh', '/auth/logout'];
+// - refresh/logout: 401 = sessão realmente encerrada;
+// - forgot/reset-password: rotas públicas, não dependem de sessão.
+const NO_REFRESH_PATHS = [
+  '/auth/login',
+  '/auth/register',
+  '/auth/refresh',
+  '/auth/logout',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+];
 
 export class ApiClientError extends Error {
   /** Mensagens uma a uma; `message` é a junção delas, para exibir em uma linha. */

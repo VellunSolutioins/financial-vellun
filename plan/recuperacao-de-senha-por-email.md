@@ -1,18 +1,24 @@
 # Plano — Recuperação de senha por e-mail
 
-> **Lembrete (2026-10-10): não implementado.** Revisar este plano antes de executar; o projeto
-> mudou desde que ele foi escrito:
+> **Status (2026-10-21): implementado** na branch `feat/recover-password`, do zero e seguindo
+> este plano com o lembrete de 2026-10-10 aplicado. Diferenças em relação ao texto abaixo:
 >
-> - **Sessões:** o refresh deixou de ser JWT stateless. A redefinição deve encerrar as sessões do
->   usuário com `SessionService.revokeAllForUser` (o item "Fora de escopo" abaixo caducou).
-> - **Rate limit:** `@nestjs/throttler` já está instalado e em uso (`@Throttle` no
->   `auth.controller.ts`, guard em `common/throttling/`); não é dependência nova.
-> - **E-mail:** buscar o usuário com `normalizeEmail`, como o login faz.
-> - **Trilha de segurança:** registrar o pedido e a troca em `SecurityEventsService`.
-> - **Erros:** usar `fieldConflict`/`errors: [{ field, message }]` (`common/field-errors.ts`).
-> - **Web:** o `middleware.ts` virou no-op (não há `PUBLIC_PATHS`). As telas devem usar o layout
->   de `app/(auth)/` e os componentes de `components/auth/` (`FormField`, `FormAlert`); o link
->   "Esqueci minha senha" entra em `components/auth/login-form.tsx`.
+> - **Sem dependência nova:** o Resend é chamado pela API HTTP com `fetch` (Node 22), sem o SDK;
+>   `@nestjs/throttler` já estava instalado e o guard é global (`AppThrottlerGuard`, por IP para
+>   quem não está logado). Limites: `forgot-password` 5/15 min, `reset-password` 10/15 min.
+> - **Serviço próprio:** a lógica fica em `auth/password-reset.service.ts` (não no
+>   `AuthService`). O pedido responde na hora e processa em segundo plano, para o tempo de
+>   resposta não revelar quais e-mails têm conta; no máximo um e-mail por minuto por conta.
+> - **Sessões:** a redefinição chama `SessionService.revokeAllForUser` (todas as sessões).
+> - **Trilha:** `password_reset_requested` e `password_reset` em `SecurityEventsService`.
+> - **Token:** consumido de forma atômica (`updateMany` com `usedAt: null`), então dois envios do
+>   mesmo link não trocam a senha duas vezes; erro com `errors: [{ field: 'token' }]`.
+> - **`MAIL_PROVIDER=log` em produção** não escreve o link no log (só um aviso).
+> - **Web:** telas em `components/auth/` (`forgot-password-form.tsx`,
+>   `reset-password-form.tsx`); `/redefinir-senha` com `referrer: no-referrer` e `noindex`.
+>   `middleware.ts` não precisou mudar (é no-op).
+> - Existe uma implementação anterior do Bruno (`origin/feat/implements-password-recovery`,
+>   2026-07-27) que não foi aproveitada: ficou 160 commits atrás da `main`.
 
 ## Context
 

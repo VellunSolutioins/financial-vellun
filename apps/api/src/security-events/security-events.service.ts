@@ -6,6 +6,8 @@ import { PrismaService } from '../prisma/prisma.service';
 /** Eventos registrados na trilha da conta. */
 export type SecurityEventType =
   | 'password_changed'
+  | 'password_reset_requested'
+  | 'password_reset'
   | 'email_changed'
   | 'phone_verified'
   | 'sessions_revoked';
