@@ -5,6 +5,7 @@ import {
   FORGOT_PASSWORD_MESSAGE,
   INVALID_RESET_LINK_MESSAGE,
   PasswordResetService,
+  RESET_REQUEST_COOLDOWN_SECONDS,
   RESET_TOKEN_TTL_MINUTES,
   hashResetToken,
 } from './password-reset.service';
@@ -17,25 +18,21 @@ const USER = { id: 'user-1', name: 'Joao Grilo', email: 'joao@example.com' };
 
 function createMocks() {
   const tx = {
+    $executeRaw: jest.fn().mockResolvedValue(1),
     passwordResetToken: {
-      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
-      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+      findFirst: jest.fn().mockResolvedValue(null),
+      deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+      create: jest.fn().mockResolvedValue({}),
     },
     user: { update: jest.fn().mockResolvedValue({}) },
   };
   const prisma = {
     user: { findFirst: jest.fn().mockResolvedValue(USER) },
     passwordResetToken: {
-      findFirst: jest.fn().mockResolvedValue(null),
       findUnique: jest.fn(),
-      deleteMany: jest.fn().mockReturnValue('deleteMany-op'),
-      create: jest.fn().mockReturnValue('create-op'),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
     },
-    $transaction: jest.fn((arg: unknown) =>
-      typeof arg === 'function'
-        ? (arg as (client: typeof tx) => unknown)(tx)
-        : Promise.all(arg as unknown[]),
-    ),
+    $transaction: jest.fn((callback: (client: typeof tx) => unknown) => callback(tx)),
   };
   const sessions = { revokeAllForUser: jest.fn().mockResolvedValue(3) };
   const securityEvents = { record: jest.fn().mockResolvedValue(undefined) };
@@ -55,7 +52,6 @@ function tokenRow(overrides: Record<string, unknown> = {}) {
   return {
     id: 'token-1',
     userId: USER.id,
-    usedAt: null,
     expiresAt: new Date(Date.now() + 30 * 60_000),
     ...overrides,
   };
@@ -63,12 +59,14 @@ function tokenRow(overrides: Record<string, unknown> = {}) {
 
 describe('PasswordResetService', () => {
   describe('requestReset', () => {
-    it('responde a mesma mensagem genérica sem esperar o envio', () => {
+    it('responde o mesmo corpo, com os prazos, sem esperar o envio', () => {
       const { service, mail } = createMocks();
       mail.sendPasswordReset.mockReturnValue(new Promise(() => undefined));
 
       expect(service.requestReset('joao@example.com')).toEqual({
         message: FORGOT_PASSWORD_MESSAGE,
+        expiresInMinutes: RESET_TOKEN_TTL_MINUTES,
+        retryAfterSeconds: RESET_REQUEST_COOLDOWN_SECONDS,
       });
     });
 
@@ -87,9 +85,11 @@ describe('PasswordResetService', () => {
 
   describe('issueAndSend', () => {
     it('gera o token, guarda só o hash e envia o link', async () => {
-      const { service, prisma, mail, securityEvents } = createMocks();
+      const { service, prisma, tx, mail, securityEvents } = createMocks();
 
-      await service.issueAndSend('  Joao@Example.com ', { ip: '1.2.3.4' });
+      await expect(service.issueAndSend('  Joao@Example.com ', { ip: '1.2.3.4' })).resolves.toBe(
+        true,
+      );
 
       expect(prisma.user.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -97,7 +97,7 @@ describe('PasswordResetService', () => {
         }),
       );
       // Links anteriores invalidados antes de criar o novo.
-      expect(prisma.passwordResetToken.deleteMany).toHaveBeenCalledWith({
+      expect(tx.passwordResetToken.deleteMany).toHaveBeenCalledWith({
         where: { userId: USER.id },
       });
 
@@ -109,7 +109,7 @@ describe('PasswordResetService', () => {
       );
       expect(match).not.toBeNull();
 
-      const data = prisma.passwordResetToken.create.mock.calls[0][0].data;
+      const data = tx.passwordResetToken.create.mock.calls[0][0].data;
       expect(data.tokenHash).toBe(hashResetToken(match![1]));
       expect(data.tokenHash).not.toBe(match![1]);
       const ttl = data.expiresAt.getTime() - Date.now();
@@ -121,29 +121,50 @@ describe('PasswordResetService', () => {
       });
     });
 
-    it('e-mail sem conta: não cria token nem envia nada', async () => {
+    it('trava a conta antes de checar o intervalo (pedidos simultâneos)', async () => {
+      const { service, tx } = createMocks();
+      const order: string[] = [];
+      tx.$executeRaw.mockImplementation(async () => {
+        order.push('lock');
+        return 1;
+      });
+      tx.passwordResetToken.findFirst.mockImplementation(async () => {
+        order.push('cooldown');
+        return null;
+      });
+
+      await service.issueAndSend(USER.email);
+
+      expect(order).toEqual(['lock', 'cooldown']);
+      // O lock é por conta: a chave leva o id do usuário.
+      const [, key] = tx.$executeRaw.mock.calls[0];
+      expect(key).toBe(`password-reset:${USER.id}`);
+    });
+
+    it('e-mail sem conta: não abre transação nem envia nada', async () => {
       const { service, prisma, mail } = createMocks();
       prisma.user.findFirst.mockResolvedValue(null);
 
-      await service.issueAndSend('ninguem@example.com');
+      await expect(service.issueAndSend('ninguem@example.com')).resolves.toBe(false);
 
-      expect(prisma.passwordResetToken.create).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
       expect(mail.sendPasswordReset).not.toHaveBeenCalled();
     });
 
     it('segura um segundo e-mail dentro do intervalo mínimo', async () => {
-      const { service, prisma, mail } = createMocks();
-      prisma.passwordResetToken.findFirst.mockResolvedValue({ id: 'recente' });
+      const { service, tx, mail, securityEvents } = createMocks();
+      tx.passwordResetToken.findFirst.mockResolvedValue({ id: 'recente' });
 
-      await service.issueAndSend(USER.email);
+      await expect(service.issueAndSend(USER.email)).resolves.toBe(false);
 
-      expect(prisma.passwordResetToken.create).not.toHaveBeenCalled();
+      expect(tx.passwordResetToken.create).not.toHaveBeenCalled();
       expect(mail.sendPasswordReset).not.toHaveBeenCalled();
+      expect(securityEvents.record).not.toHaveBeenCalled();
     });
   });
 
   describe('resetPassword', () => {
-    it('troca a senha, consome o token e encerra todas as sessões', async () => {
+    it('troca a senha, apaga os links e encerra as sessões na mesma transação', async () => {
       const { service, prisma, tx, sessions, securityEvents } = createMocks();
       prisma.passwordResetToken.findUnique.mockResolvedValue(tokenRow());
 
@@ -153,24 +174,38 @@ describe('PasswordResetService', () => {
       expect(prisma.passwordResetToken.findUnique).toHaveBeenCalledWith(
         expect.objectContaining({ where: { tokenHash: hashResetToken(TOKEN) } }),
       );
-      expect(tx.passwordResetToken.updateMany).toHaveBeenCalledWith({
-        where: { id: 'token-1', usedAt: null, expiresAt: { gt: expect.any(Date) } },
-        data: { usedAt: expect.any(Date) },
+      // Consome (apaga) o token usado e depois os demais da conta.
+      expect(tx.passwordResetToken.deleteMany).toHaveBeenNthCalledWith(1, {
+        where: { id: 'token-1', expiresAt: { gt: expect.any(Date) } },
+      });
+      expect(tx.passwordResetToken.deleteMany).toHaveBeenNthCalledWith(2, {
+        where: { userId: USER.id },
       });
 
       const { passwordHash } = tx.user.update.mock.calls[0][0].data;
       expect(await bcrypt.compare(NEW_PASSWORD, passwordHash)).toBe(true);
 
-      expect(sessions.revokeAllForUser).toHaveBeenCalledWith(USER.id);
+      // Revogação com o cliente da transação.
+      expect(sessions.revokeAllForUser).toHaveBeenCalledWith(USER.id, undefined, tx);
       expect(securityEvents.record).toHaveBeenCalledWith(USER.id, 'password_reset', {
         ip: '1.2.3.4',
         metadata: { sessoesEncerradas: 3 },
       });
     });
 
+    it('falha ao revogar as sessões: a transação inteira falha', async () => {
+      const { service, prisma, sessions, securityEvents } = createMocks();
+      prisma.passwordResetToken.findUnique.mockResolvedValue(tokenRow());
+      sessions.revokeAllForUser.mockRejectedValue(new Error('pool esgotado'));
+
+      await expect(service.resetPassword(TOKEN, NEW_PASSWORD)).rejects.toThrow('pool esgotado');
+      // A falha sai de dentro do $transaction, que desfaz a troca de senha.
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(securityEvents.record).not.toHaveBeenCalled();
+    });
+
     it.each([
       ['inexistente', null],
-      ['já usado', tokenRow({ usedAt: new Date() })],
       ['expirado', tokenRow({ expiresAt: new Date(Date.now() - 1000) })],
     ])('recusa token %s', async (_label, row) => {
       const { service, prisma, tx, sessions } = createMocks();
@@ -190,13 +225,26 @@ describe('PasswordResetService', () => {
     it('recusa quando outro envio consumiu o token no meio do caminho', async () => {
       const { service, prisma, tx, sessions } = createMocks();
       prisma.passwordResetToken.findUnique.mockResolvedValue(tokenRow());
-      tx.passwordResetToken.updateMany.mockResolvedValue({ count: 0 });
+      tx.passwordResetToken.deleteMany.mockResolvedValueOnce({ count: 0 });
 
       await expect(service.resetPassword(TOKEN, NEW_PASSWORD)).rejects.toBeInstanceOf(
         BadRequestException,
       );
       expect(tx.user.update).not.toHaveBeenCalled();
       expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('purgeExpired', () => {
+    it('apaga os links vencidos', async () => {
+      const { service, prisma } = createMocks();
+      prisma.passwordResetToken.deleteMany.mockResolvedValue({ count: 4 });
+      const now = new Date('2026-10-21T12:00:00Z');
+
+      await expect(service.purgeExpired(now)).resolves.toBe(4);
+      expect(prisma.passwordResetToken.deleteMany).toHaveBeenCalledWith({
+        where: { expiresAt: { lt: now } },
+      });
     });
   });
 });

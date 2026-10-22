@@ -38,7 +38,7 @@ function InvalidLink({ message }: { message?: string }) {
       <h1 className="mt-4 text-3xl font-bold tracking-tight text-ink">Link inválido</h1>
       <p className="mt-3 text-base text-ink-muted" role="alert">
         {message ??
-          'Este link de redefinição está incompleto ou já expirou. Os links valem por 1 hora e só podem ser usados uma vez.'}
+          'Este link de redefinição está incompleto ou já expirou. Cada link vale por pouco tempo e só pode ser usado uma vez.'}
       </p>
       <Button asChild size="xl" className="mt-8 w-full hover:bg-primary-hover">
         <Link href="/esqueci-senha">Pedir um novo link</Link>

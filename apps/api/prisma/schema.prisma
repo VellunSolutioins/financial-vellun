@@ -331,15 +331,15 @@ model UserSecurityEvent {
 
 /// Link de redefinição de senha ("esqueci minha senha"). Guarda só o SHA-256 do
 /// token: quem lê o banco não consegue redefinir a senha de ninguém. Uso único
-/// (`usedAt`) e curta duração (`expiresAt`); pedir um link novo apaga os
-/// anteriores ainda não usados.
+/// (a linha é apagada ao redefinir) e curta duração (`expiresAt`). Pedir um link
+/// novo, trocar a senha ou trocar o e-mail apaga os links da conta; os vencidos
+/// saem numa limpeza diária.
 model PasswordResetToken {
-  id        String    @id @default(uuid())
-  userId    String    @map("user_id")
-  tokenHash String    @unique @map("token_hash")
-  expiresAt DateTime  @map("expires_at")
-  usedAt    DateTime? @map("used_at")
-  createdAt DateTime  @default(now()) @map("created_at")
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  tokenHash String   @unique @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

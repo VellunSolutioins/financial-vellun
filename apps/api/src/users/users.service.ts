@@ -103,8 +103,12 @@ export class UsersService {
     if (!valid) throw new UnauthorizedException('Senha atual incorreta');
 
     const passwordHash = await bcrypt.hash(dto.newPassword, 12);
-    await this.prisma.user.update({ where: { id: userId }, data: { passwordHash } });
-    const encerradas = await this.sessions.revokeAllForUser(userId, currentSessionId);
+    const encerradas = await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: userId }, data: { passwordHash } });
+      // Links de "esqueci minha senha" pedidos antes da troca deixam de valer.
+      await tx.passwordResetToken.deleteMany({ where: { userId } });
+      return this.sessions.revokeAllForUser(userId, currentSessionId, tx);
+    });
     await this.securityEvents.record(userId, 'password_changed', {
       ...context,
       metadata: { sessoesEncerradas: encerradas },
@@ -140,35 +144,41 @@ export class UsersService {
       }
     }
 
-    const atualizado = await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        name: dto.name,
-        email,
-        postalCode: dto.postalCode,
-        street: dto.street,
-        addressNumber: dto.addressNumber,
-        complement: dto.complement,
-        neighborhood: dto.neighborhood,
-        city: dto.city,
-        state: dto.state,
-      },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        phone: true,
-        profileType: true,
-        postalCode: true,
-        street: true,
-        addressNumber: true,
-        complement: true,
-        neighborhood: true,
-        city: true,
-        state: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+    const atualizado = await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.update({
+        where: { id: userId },
+        data: {
+          name: dto.name,
+          email,
+          postalCode: dto.postalCode,
+          street: dto.street,
+          addressNumber: dto.addressNumber,
+          complement: dto.complement,
+          neighborhood: dto.neighborhood,
+          city: dto.city,
+          state: dto.state,
+        },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+          profileType: true,
+          postalCode: true,
+          street: true,
+          addressNumber: true,
+          complement: true,
+          neighborhood: true,
+          city: true,
+          state: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+      // Com o e-mail trocado, um link de redefinição enviado ao endereço antigo
+      // não pode continuar valendo.
+      if (emailAnterior) await tx.passwordResetToken.deleteMany({ where: { userId } });
+      return user;
     });
 
     if (emailAnterior) {

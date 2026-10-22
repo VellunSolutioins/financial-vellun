@@ -20,19 +20,21 @@ export function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => ESCAPES[char]);
 }
 
+/** Primeiro nome, ou `''` quando o cadastro não tem nome. */
 function firstName(name: string): string {
-  return name.trim().split(/\s+/)[0] || 'olá';
+  return name.trim().split(/\s+/)[0] ?? '';
 }
 
 export function passwordResetMessage(mail: PasswordResetMail): MailMessage {
-  const greeting = firstName(mail.name);
+  const name = firstName(mail.name);
+  const greeting = name ? `Olá, ${name}!` : 'Olá!';
   const validity =
     mail.expiresInMinutes % 60 === 0
       ? `${mail.expiresInMinutes / 60} hora${mail.expiresInMinutes === 60 ? '' : 's'}`
       : `${mail.expiresInMinutes} minutos`;
 
   const text = [
-    `Olá, ${greeting}!`,
+    greeting,
     '',
     'Recebemos um pedido para redefinir a senha da sua conta no Financial Vellun.',
     'Para criar uma senha nova, abra o link abaixo:',
@@ -52,7 +54,7 @@ export function passwordResetMessage(mail: PasswordResetMail): MailMessage {
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;margin:0 auto;background:#ffffff;border-radius:12px;">
       <tr>
         <td style="padding:32px 24px;font-size:16px;line-height:1.5;">
-          <p style="margin:0 0 16px;">Olá, ${escapeHtml(greeting)}!</p>
+          <p style="margin:0 0 16px;">${escapeHtml(greeting)}</p>
           <p style="margin:0 0 24px;">Recebemos um pedido para redefinir a senha da sua conta no Financial Vellun.</p>
           <p style="margin:0 0 24px;">
             <a href="${url}" style="display:inline-block;padding:14px 24px;border-radius:10px;background:#111827;color:#ffffff;text-decoration:none;font-weight:bold;">Criar senha nova</a>

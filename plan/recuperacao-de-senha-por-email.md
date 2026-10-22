@@ -20,6 +20,23 @@
 > - Existe uma implementação anterior do Bruno (`origin/feat/implements-password-recovery`,
 >   2026-07-27) que não foi aproveitada: ficou 160 commits atrás da `main`.
 
+> **Revisão do PR #36 (2026-10-21), ajustes aplicados:**
+>
+> - Trocar a senha (logado) ou o e-mail apaga os links de redefinição pendentes da conta.
+> - A redefinição consome o link, troca a senha e revoga as sessões numa só transação
+>   (`SessionService.revokeAllForUser` aceita o cliente da transação).
+> - O intervalo de 1 e-mail/min por conta usa `pg_advisory_xact_lock` por usuário, com a
+>   checagem dentro da transação: pedidos simultâneos não passam juntos.
+> - Em produção, `MAIL_PROVIDER` ausente derruba a subida; `log` só se escrito de propósito.
+> - O link usado é apagado na redefinição (a coluna `used_at` saiu) e um job diário às 4h
+>   apaga os vencidos.
+> - Validade e intervalo vêm na resposta de `POST /auth/forgot-password`
+>   (`expiresInMinutes`, `retryAfterSeconds`) em vez de ficarem em `@financial-vellun/shared`:
+>   a API só importa tipos desse pacote, que publica TypeScript sem build, e uma constante
+>   importada em tempo de execução quebraria o `nest build`. O "peça de novo" espera o
+>   intervalo com contagem regressiva.
+> - `common/web-url.util.ts` centraliza a leitura de `WEB_URL` (auth, billing e ops).
+
 ## Context
 
 Hoje o app permite **trocar a senha logado** (com a senha atual), mas não há como

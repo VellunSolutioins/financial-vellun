@@ -40,14 +40,42 @@ describe('passwordResetMessage', () => {
     expect(message.text).toContain('30 minutos');
   });
 
+  it('sem nome no cadastro, a saudação é só "Olá!"', () => {
+    const message = passwordResetMessage({
+      to: 'x@example.com',
+      name: '   ',
+      resetUrl: RESET_URL,
+      expiresInMinutes: 60,
+    });
+
+    expect(message.text.startsWith('Olá!\n')).toBe(true);
+    expect(message.text).not.toContain('Olá, olá');
+    expect(message.html).toContain('>Olá!</p>');
+  });
+
   it('escapeHtml cobre aspas e &', () => {
     expect(escapeHtml(`a&b"c'd`)).toBe('a&amp;b&quot;c&#39;d');
   });
 });
 
 describe('createMailTransport', () => {
-  it('usa log por padrão', () => {
+  it('fora de produção, ausente vira log', () => {
     expect(createMailTransport(config({})).name).toBe('log');
+  });
+
+  it('em produção, MAIL_PROVIDER ausente derruba a subida', () => {
+    expect(() => createMailTransport(config({ NODE_ENV: 'production' }))).toThrow(
+      /obrigatório em produção/,
+    );
+    expect(() =>
+      createMailTransport(config({ NODE_ENV: 'production', MAIL_PROVIDER: '  ' })),
+    ).toThrow(/obrigatório em produção/);
+  });
+
+  it('em produção, log só quando escrito de propósito', () => {
+    expect(createMailTransport(config({ NODE_ENV: 'production', MAIL_PROVIDER: 'log' })).name).toBe(
+      'log',
+    );
   });
 
   it('usa resend com chave e remetente', () => {

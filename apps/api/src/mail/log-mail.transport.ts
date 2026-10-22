@@ -8,7 +8,8 @@ import { MailMessage, MailTransport } from './mail-transport';
  *
  * Em produção o corpo **não** é escrito: ele carrega o link de redefinição, e
  * quem lê o log poderia trocar a senha de qualquer um. Fica só o aviso de que
- * um e-mail deixou de ser enviado — sinal de `MAIL_PROVIDER` mal configurado.
+ * um e-mail deixou de ser enviado. Em produção este transporte só existe com
+ * `MAIL_PROVIDER=log` escrito de propósito (ver `createMailTransport`).
  */
 export class LogMailTransport implements MailTransport {
   readonly name = 'log';
@@ -18,10 +19,7 @@ export class LogMailTransport implements MailTransport {
 
   async send(message: MailMessage): Promise<void> {
     if (this.production) {
-      this.logger.warn(
-        `E-mail "${message.subject}" NÃO enviado: MAIL_PROVIDER=log em produção. ` +
-          'Configure MAIL_PROVIDER=resend.',
-      );
+      this.logger.warn(`E-mail "${message.subject}" NÃO enviado: MAIL_PROVIDER=log em produção.`);
       return;
     }
     this.logger.log(`Para: ${message.to}\nAssunto: ${message.subject}\n\n${message.text}`);

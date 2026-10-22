@@ -6,6 +6,7 @@ import * as bcrypt from 'bcryptjs';
 
 import { normalizeEmail } from '../common/email.util';
 import { fieldInvalid } from '../common/field-errors';
+import { webUrl } from '../common/web-url.util';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestContext, SecurityEventsService } from '../security-events/security-events.service';
@@ -18,16 +19,33 @@ export const RESET_TOKEN_TTL_MINUTES = 60;
  * conta por IP; isto impede que alguém, trocando de IP, encha de e-mails a
  * caixa de outra pessoa.
  */
-export const RESET_REQUEST_COOLDOWN_MS = 60_000;
+export const RESET_REQUEST_COOLDOWN_SECONDS = 60;
 
 /** Resposta do pedido, exista a conta ou não: não revela quem tem cadastro. */
 export const FORGOT_PASSWORD_MESSAGE =
   'Se houver uma conta com esse e-mail, enviamos um link para você criar uma senha nova.';
 export const INVALID_RESET_LINK_MESSAGE = 'Este link é inválido ou já expirou. Peça um novo.';
 
+/**
+ * Corpo da resposta de `POST /auth/forgot-password`. Os prazos são os mesmos
+ * para qualquer e-mail; vão na resposta para o web não manter uma cópia deles.
+ */
+export interface ForgotPasswordResponse {
+  message: string;
+  /** Validade do link enviado. */
+  expiresInMinutes: number;
+  /** Espera antes de pedir outro link para o mesmo e-mail. */
+  retryAfterSeconds: number;
+}
+
 /** O banco guarda só o SHA-256 do token; o token em claro vai apenas no e-mail. */
 export function hashResetToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
+}
+
+/** Chave do advisory lock que serializa os pedidos de uma mesma conta. */
+function requestLockKey(userId: string): string {
+  return `password-reset:${userId}`;
 }
 
 /**
@@ -49,60 +67,75 @@ export class PasswordResetService {
   ) {}
 
   /**
-   * Responde na hora, sempre com a mesma mensagem, e faz o trabalho depois: se
-   * a resposta esperasse a consulta e o envio, o tempo dela denunciaria quais
+   * Responde na hora, sempre com o mesmo corpo, e faz o trabalho depois: se a
+   * resposta esperasse a consulta e o envio, o tempo dela denunciaria quais
    * e-mails têm conta.
    */
-  requestReset(email: string, context: RequestContext = {}): { message: string } {
+  requestReset(email: string, context: RequestContext = {}): ForgotPasswordResponse {
     void this.issueAndSend(email, context).catch((error: unknown) => {
       this.logger.error(
         'Falha ao processar pedido de redefinição de senha',
         error instanceof Error ? error.stack : undefined,
       );
     });
-    return { message: FORGOT_PASSWORD_MESSAGE };
+    return {
+      message: FORGOT_PASSWORD_MESSAGE,
+      expiresInMinutes: RESET_TOKEN_TTL_MINUTES,
+      retryAfterSeconds: RESET_REQUEST_COOLDOWN_SECONDS,
+    };
   }
 
-  /** Emite o token e envia o e-mail. Separado de `requestReset` para os testes. */
-  async issueAndSend(email: string, context: RequestContext = {}): Promise<void> {
+  /**
+   * Emite o token e envia o e-mail. Separado de `requestReset` para os testes.
+   * Retorna se um e-mail foi enviado.
+   */
+  async issueAndSend(email: string, context: RequestContext = {}): Promise<boolean> {
     const user = await this.prisma.user.findFirst({
       // Sem diferenciar maiúsculas, como o login: contas antigas não têm e-mail normalizado.
       where: { email: { equals: normalizeEmail(email), mode: 'insensitive' } },
       select: { id: true, name: true, email: true },
     });
-    if (!user) return;
-
-    const now = new Date();
-    const recent = await this.prisma.passwordResetToken.findFirst({
-      where: {
-        userId: user.id,
-        usedAt: null,
-        createdAt: { gt: new Date(now.getTime() - RESET_REQUEST_COOLDOWN_MS) },
-      },
-      select: { id: true },
-    });
-    if (recent) return;
+    if (!user) return false;
 
     const token = randomBytes(32).toString('hex');
-    await this.prisma.$transaction([
-      // Um link por vez: pedir outro invalida os anteriores.
-      this.prisma.passwordResetToken.deleteMany({ where: { userId: user.id } }),
-      this.prisma.passwordResetToken.create({
+    const issued = await this.prisma.$transaction(async (tx) => {
+      // Serializa os pedidos desta conta até o fim da transação. Sem a trava,
+      // pedidos simultâneos (de IPs diferentes, que o rate limit não segura)
+      // passavam todos pela checagem do intervalo antes de algum gravar o token,
+      // e cada um mandava um e-mail.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${requestLockKey(user.id)}))`;
+
+      const now = new Date();
+      const recent = await tx.passwordResetToken.findFirst({
+        where: {
+          userId: user.id,
+          createdAt: { gt: new Date(now.getTime() - RESET_REQUEST_COOLDOWN_SECONDS * 1000) },
+        },
+        select: { id: true },
+      });
+      if (recent) return false;
+
+      // Um link por vez: pedir outro invalida (e apaga) os anteriores.
+      await tx.passwordResetToken.deleteMany({ where: { userId: user.id } });
+      await tx.passwordResetToken.create({
         data: {
           userId: user.id,
           tokenHash: hashResetToken(token),
           expiresAt: new Date(now.getTime() + RESET_TOKEN_TTL_MINUTES * 60_000),
         },
-      }),
-    ]);
+      });
+      return true;
+    });
+    if (!issued) return false;
 
     await this.securityEvents.record(user.id, 'password_reset_requested', context);
     await this.mail.sendPasswordReset({
       to: user.email,
       name: user.name,
-      resetUrl: `${this.webUrl()}/redefinir-senha?token=${token}`,
+      resetUrl: `${webUrl(this.config)}/redefinir-senha?token=${token}`,
       expiresInMinutes: RESET_TOKEN_TTL_MINUTES,
     });
+    return true;
   }
 
   async resetPassword(
@@ -110,32 +143,32 @@ export class PasswordResetService {
     newPassword: string,
     context: RequestContext = {},
   ): Promise<{ message: string }> {
-    const now = new Date();
     const record = await this.prisma.passwordResetToken.findUnique({
       where: { tokenHash: hashResetToken(token) },
-      select: { id: true, userId: true, usedAt: true, expiresAt: true },
+      select: { id: true, userId: true, expiresAt: true },
     });
-    if (!record || record.usedAt || record.expiresAt <= now) throw this.invalidLink();
+    if (!record || record.expiresAt <= new Date()) throw this.invalidLink();
 
     const passwordHash = await bcrypt.hash(newPassword, 12);
-    const claimed = await this.prisma.$transaction(async (tx) => {
+    // Tudo numa transação: senha nova, links consumidos e sessões encerradas
+    // acontecem juntos. Se algo falhar, nada muda e o mesmo link continua
+    // servindo para tentar de novo.
+    const encerradas = await this.prisma.$transaction(async (tx) => {
       // Consome o token de forma atômica: dois envios simultâneos do mesmo
-      // link não trocam a senha duas vezes.
-      const { count } = await tx.passwordResetToken.updateMany({
-        where: { id: record.id, usedAt: null, expiresAt: { gt: now } },
-        data: { usedAt: now },
+      // link não trocam a senha duas vezes (o segundo espera a trava da linha e
+      // já não a encontra).
+      const { count } = await tx.passwordResetToken.deleteMany({
+        where: { id: record.id, expiresAt: { gt: new Date() } },
       });
-      if (count === 0) return false;
+      if (count === 0) return null;
 
       await tx.user.update({ where: { id: record.userId }, data: { passwordHash } });
-      await tx.passwordResetToken.deleteMany({
-        where: { userId: record.userId, id: { not: record.id } },
-      });
-      return true;
+      // Os demais links da conta, se houver, também deixam de valer.
+      await tx.passwordResetToken.deleteMany({ where: { userId: record.userId } });
+      return this.sessions.revokeAllForUser(record.userId, undefined, tx);
     });
-    if (!claimed) throw this.invalidLink();
+    if (encerradas === null) throw this.invalidLink();
 
-    const encerradas = await this.sessions.revokeAllForUser(record.userId);
     await this.securityEvents.record(record.userId, 'password_reset', {
       ...context,
       metadata: { sessoesEncerradas: encerradas },
@@ -144,11 +177,18 @@ export class PasswordResetService {
     return { message: 'Senha redefinida. Entre com a senha nova.' };
   }
 
-  private invalidLink() {
-    return fieldInvalid('token', INVALID_RESET_LINK_MESSAGE);
+  /**
+   * Apaga os links vencidos. Os usados já saem na própria redefinição; estes
+   * são os que expiraram sem uso. Retorna quantos foram removidos.
+   */
+  async purgeExpired(now = new Date()): Promise<number> {
+    const { count } = await this.prisma.passwordResetToken.deleteMany({
+      where: { expiresAt: { lt: now } },
+    });
+    return count;
   }
 
-  private webUrl(): string {
-    return (this.config.get<string>('WEB_URL') ?? 'http://localhost:3000').replace(/\/+$/, '');
+  private invalidLink() {
+    return fieldInvalid('token', INVALID_RESET_LINK_MESSAGE);
   }
 }

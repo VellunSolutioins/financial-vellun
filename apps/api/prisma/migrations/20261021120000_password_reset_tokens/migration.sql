@@ -1,7 +1,7 @@
 -- Links de redefinição de senha ("esqueci minha senha").
 --
 -- Só o hash SHA-256 do token é gravado; o token em claro vai apenas no e-mail.
--- Uso único (`used_at`) e expiração curta (`expires_at`), definidos pela API.
+-- Uso único (a linha é apagada ao redefinir) e expiração curta (`expires_at`).
 
 -- CreateTable
 CREATE TABLE "password_reset_tokens" (
@@ -9,7 +9,6 @@ CREATE TABLE "password_reset_tokens" (
     "user_id" TEXT NOT NULL,
     "token_hash" TEXT NOT NULL,
     "expires_at" TIMESTAMP(3) NOT NULL,
-    "used_at" TIMESTAMP(3),
     "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "password_reset_tokens_pkey" PRIMARY KEY ("id")

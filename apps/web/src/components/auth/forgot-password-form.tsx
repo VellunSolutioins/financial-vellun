@@ -8,24 +8,53 @@ import { MailCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { textLink } from '@/components/marketing/styles';
-import { forgotPassword } from '@/lib/auth';
+import { forgotPassword, type ForgotPasswordResponse } from '@/lib/auth';
 import { apiErrorMessages } from './api-errors';
 import { FormAlert } from './form-alert';
 import { FormField, fieldControlClass } from './form-field';
+import { formatCountdown, formatMinutes } from './format-duration';
 
 const schema = z.object({
-  email: z.string().trim().email('Email inválido'),
+  email: z.string().trim().email('E-mail inválido'),
 });
 type FormData = z.infer<typeof schema>;
+
+interface SentState extends ForgotPasswordResponse {
+  email: string;
+  /** Quando outro pedido para este e-mail volta a ter efeito (ms desde a época). */
+  retryAt: number;
+}
+
+/** Segundos que faltam até `retryAt`, atualizados a cada segundo enquanto houver espera. */
+function useSecondsUntil(retryAt: number | null): number {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (retryAt === null) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => {
+      const current = Date.now();
+      setNow(current);
+      if (current >= retryAt) window.clearInterval(timer);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [retryAt]);
+
+  return retryAt === null ? 0 : Math.max(0, Math.ceil((retryAt - now) / 1000));
+}
 
 /**
  * Pedido do link de redefinição. Depois do envio, a tela diz o mesmo para
  * qualquer e-mail — com conta ou sem —, como a API.
  */
 export function ForgotPasswordForm() {
-  const [sentTo, setSentTo] = useState<string | null>(null);
+  const [sent, setSent] = useState<SentState | null>(null);
+  const [showForm, setShowForm] = useState(true);
   const [formErrors, setFormErrors] = useState<string[]>([]);
   const sentHeadingRef = useRef<HTMLHeadingElement>(null);
+  // A API ignora um segundo pedido para o mesmo e-mail dentro do intervalo;
+  // a tela segura o "peça de novo" até lá, em vez de dizer que enviou.
+  const waitSeconds = useSecondsUntil(sent?.retryAt ?? null);
 
   const {
     register,
@@ -37,26 +66,31 @@ export function ForgotPasswordForm() {
 
   // Leitor de tela: ao trocar de estado, o foco vai para o novo título.
   useEffect(() => {
-    if (sentTo) sentHeadingRef.current?.focus();
-  }, [sentTo]);
+    if (!showForm) sentHeadingRef.current?.focus();
+  }, [showForm]);
 
   const onSubmit = async (data: FormData) => {
     setFormErrors([]);
     try {
-      await forgotPassword(data.email);
-      setSentTo(data.email);
+      const response = await forgotPassword(data.email);
+      setSent({
+        ...response,
+        email: data.email,
+        retryAt: Date.now() + response.retryAfterSeconds * 1000,
+      });
+      setShowForm(false);
     } catch (e) {
       setFormErrors(apiErrorMessages(e));
     }
   };
 
   const tryAgain = () => {
-    setSentTo(null);
+    setShowForm(true);
     // Espera o formulário voltar à tela antes de focar.
     requestAnimationFrame(() => setFocus('email'));
   };
 
-  if (sentTo) {
+  if (sent && !showForm) {
     return (
       <div className="mx-auto w-full max-w-[420px]">
         <MailCheck aria-hidden className="h-10 w-10 text-primary" />
@@ -68,14 +102,21 @@ export function ForgotPasswordForm() {
           Confira seu email
         </h1>
         <p className="mt-3 text-base text-ink-muted" role="status">
-          Se houver uma conta com <strong className="break-all text-ink">{sentTo}</strong>, enviamos
-          um link para você criar uma senha nova. O link vale por 1 hora.
+          Se houver uma conta com <strong className="break-all text-ink">{sent.email}</strong>,
+          enviamos um link para você criar uma senha nova. O link vale por{' '}
+          {formatMinutes(sent.expiresInMinutes)}.
         </p>
         <p className="mt-4 text-base text-ink-muted">
           Não chegou em alguns minutos? Veja a caixa de spam ou{' '}
-          <button type="button" onClick={tryAgain} className={textLink}>
-            peça de novo
-          </button>
+          {waitSeconds > 0 ? (
+            <span className="font-medium text-ink">
+              peça de novo em <span className="tabular-nums">{formatCountdown(waitSeconds)}</span>
+            </span>
+          ) : (
+            <button type="button" onClick={tryAgain} className={textLink}>
+              peça de novo
+            </button>
+          )}
           .
         </p>
         <Button asChild size="xl" variant="outline" className="mt-8 w-full">

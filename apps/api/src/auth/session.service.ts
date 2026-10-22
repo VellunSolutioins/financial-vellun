@@ -1,7 +1,7 @@
 import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { User } from '@prisma/client';
+import { Prisma, User } from '@prisma/client';
 import { CookieOptions, Request, Response } from 'express';
 
 import { CSRF_COOKIE, issueCsrfCookie } from '../common/csrf.util';
@@ -181,8 +181,17 @@ export class SessionService {
   }
 
   /** Encerra todas as sessões do usuário, exceto `exceptSessionId` quando informado. */
-  async revokeAllForUser(userId: string, exceptSessionId?: string): Promise<number> {
-    const { count } = await this.prisma.userSession.updateMany({
+  /**
+   * `db` permite revogar dentro da transação de quem chama (troca de senha):
+   * assim a senha nova e o fim das sessões antigas acontecem juntos ou não
+   * acontecem.
+   */
+  async revokeAllForUser(
+    userId: string,
+    exceptSessionId?: string,
+    db: Prisma.TransactionClient = this.prisma,
+  ): Promise<number> {
+    const { count } = await db.userSession.updateMany({
       where: {
         userId,
         revokedAt: null,
