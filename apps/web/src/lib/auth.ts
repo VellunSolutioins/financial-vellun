@@ -50,6 +50,28 @@ export async function login(data: { email: string; password: string }): Promise<
   return apiClient.post<User>('/auth/login', data);
 }
 
+/** Resposta do pedido de link. É a mesma para qualquer e-mail, com conta ou sem. */
+export interface ForgotPasswordResponse {
+  message: string;
+  /** Validade do link enviado. */
+  expiresInMinutes: number;
+  /** Espera antes de pedir outro link para o mesmo e-mail. */
+  retryAfterSeconds: number;
+}
+
+/** Pede o link de redefinição de senha. */
+export async function forgotPassword(email: string): Promise<ForgotPasswordResponse> {
+  return apiClient.post<ForgotPasswordResponse>('/auth/forgot-password', { email });
+}
+
+/** Troca a senha pelo token do link. Encerra todas as sessões da conta. */
+export async function resetPassword(data: {
+  token: string;
+  newPassword: string;
+}): Promise<{ message: string }> {
+  return apiClient.post<{ message: string }>('/auth/reset-password', data);
+}
+
 export async function logout(): Promise<void> {
   await apiClient.post('/auth/logout', {});
 }

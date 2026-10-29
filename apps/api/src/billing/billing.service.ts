@@ -2,6 +2,7 @@ import { BadRequestException, Inject, Injectable, Logger, NotFoundException } fr
 import { ConfigService } from '@nestjs/config';
 import { SubscriptionStatus } from '@prisma/client';
 
+import { webUrl } from '../common/web-url.util';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateCheckoutDto } from './dto/create-checkout.dto';
 import {
@@ -351,10 +352,6 @@ export class BillingService {
    * pública (ex.: túnel ngrok). Em produção cai no `WEB_URL` do domínio real.
    */
   private webUrl(): string {
-    return (
-      this.config.get<string>('BILLING_CALLBACK_BASE_URL') ??
-      this.config.get<string>('WEB_URL') ??
-      'http://localhost:3000'
-    );
+    return this.config.get<string>('BILLING_CALLBACK_BASE_URL') ?? webUrl(this.config);
   }
 }

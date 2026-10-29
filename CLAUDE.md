@@ -42,13 +42,16 @@ financial-vellun/
 
 ```
 apps/api/src/        accounts/ auth/ billing/ categories/ contacts/ credit-cards/ dashboard/
-                     financial-resources/ internal/ notifications/ observability/ ops/
-                     transactions/ users/
+                     financial-resources/ internal/ mail/ notifications/ observability/ ops/
+                     transactions/ users/ whatsapp-link/
                      prisma/ (cada módulo: *.module/*.controller/*.service + dto/)
+                     auth/ (sessões, "esqueci minha senha", aviso de senha alterada)
+                     mail/ (e-mail transacional: transports log/resend por MAIL_PROVIDER)
                      observability/ (métricas, health, correlação, log estruturado)
                      ops/ (auth GitHub OAuth, audit append-only, operators)
 apps/web/src/        app/ components/ contexts/ hooks/ lib/ middleware.ts
-                     app/(auth)/{login,cadastro}  app/app/{pessoal,empresa,conta}
+                     app/(auth)/{login,cadastro,esqueci-senha,redefinir-senha}
+                     app/app/{pessoal,empresa,conta}
                      app/{privacidade,termos} (páginas legais públicas)
                      components/marketing/ (landing e páginas públicas)  components/auth/
                      app/ops/ (área de operações — sessão e cliente HTTP próprios)

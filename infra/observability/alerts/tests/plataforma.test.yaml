@@ -303,3 +303,75 @@ tests:
       - eval_time: 20m
         alertname: EventosDePagamentoAcumulandoParaRetry
         exp_alerts: []
+
+  # ── E-mail transacional ──────────────────────────────────────────────────
+  - interval: 1m
+    name: envios bem-sucedidos não alertam
+    input_series:
+      # Como a API publica: todas as combinações existem desde a subida, em 0.
+      - series: 'vellun_api_mail_sent_total{template="password_reset",result="sent",env="production"}'
+        values: '0+1x30'
+      - series: 'vellun_api_mail_sent_total{template="password_reset",result="failed",env="production"}'
+        values: '0x30'
+      - series: 'vellun_api_mail_sent_total{template="password_reset",result="skipped",env="production"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: EmailTransacionalFalhando
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: EmailNaoEnviadoEmProducao
+        exp_alerts: []
+
+  - interval: 1m
+    name: falha de envio alerta na hora, por template
+    input_series:
+      - series: 'vellun_api_mail_sent_total{template="password_reset",result="failed",env="production"}'
+        values: '0x3 1x20'
+      - series: 'vellun_api_mail_sent_total{template="password_changed",result="failed",env="production"}'
+        values: '0x23'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: EmailTransacionalFalhando
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: api
+              template: password_reset
+            exp_annotations:
+              summary: 'Falha ao enviar e-mail transacional (password_reset)'
+              description: >-
+                1 envio(s) de password_reset falharam nos últimos 15 minutos. O erro do provedor está no log da API (MailService).
+              dashboard: 'DASHBOARD_BASE/d/vellun-api/api'
+              runbook: 'RUNBOOK_BASE/observability.md'
+
+  - interval: 1m
+    name: e-mail descartado em produção alerta
+    input_series:
+      - series: 'vellun_api_mail_sent_total{template="password_reset",result="skipped",env="production"}'
+        values: '0x3 1x20'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: EmailNaoEnviadoEmProducao
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: api
+              template: password_reset
+            exp_annotations:
+              summary: 'E-mails não estão sendo enviados em produção'
+              description: >-
+                1 e-mail(s) de password_reset deixaram de sair na última hora porque MAIL_PROVIDER=log. Configure MAIL_PROVIDER=resend na API.
+              dashboard: 'DASHBOARD_BASE/d/vellun-api/api'
+              runbook: 'RUNBOOK_BASE/observability.md'
+
+  - interval: 1m
+    name: transporte log fora de produção não alerta
+    input_series:
+      # Em dev o `log` é o caminho normal (e lá ele nem conta como skipped).
+      - series: 'vellun_api_mail_sent_total{template="password_reset",result="skipped",env="development"}'
+        values: '0x3 1x20'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: EmailNaoEnviadoEmProducao
+        exp_alerts: []

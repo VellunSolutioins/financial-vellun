@@ -49,3 +49,13 @@ export function fieldConflict(field: string, message: string): ConflictException
     errors: [{ field, message }],
   });
 }
+
+/** Valor recusado (formato válido, conteúdo não), apontando o campo responsável. */
+export function fieldInvalid(field: string, message: string): BadRequestException {
+  return new BadRequestException({
+    statusCode: HttpStatus.BAD_REQUEST,
+    message,
+    error: 'Bad Request',
+    errors: [{ field, message }],
+  });
+}

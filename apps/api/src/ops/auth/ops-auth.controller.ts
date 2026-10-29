@@ -4,6 +4,7 @@ import { ApiExcludeController } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { Request, Response } from 'express';
 
+import { webUrl } from '../../common/web-url.util';
 import { OPS_OAUTH_STATE_COOKIE } from '../ops.constants';
 import { CurrentOperator, CurrentOpsOperator } from './decorators/current-operator.decorator';
 import { OpsAuthGuard } from './guards/ops-auth.guard';
@@ -110,7 +111,7 @@ export class OpsAuthController {
   }
 
   private webBaseUrl(): string {
-    return (this.config.get<string>('WEB_URL') ?? 'http://localhost:3000').replace(/\/+$/, '');
+    return webUrl(this.config);
   }
 
   private loginUrl(erro: string): string {

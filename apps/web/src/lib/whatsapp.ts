@@ -38,6 +38,14 @@ export function getPhoneVerificationState(): Promise<PhoneVerificationState> {
   return apiClient.get<PhoneVerificationState>('/users/me/phone/verification');
 }
 
+/**
+ * Desfaz o vínculo do WhatsApp: o número deixa de lançar na conta. Exige a
+ * senha atual; senha errada volta como erro do campo `currentPassword`.
+ */
+export function unlinkWhatsapp(data: { currentPassword: string }): Promise<{ message: string }> {
+  return apiClient.post<{ message: string }>('/users/me/phone/unlink', data);
+}
+
 /** `5511999999999` → `+55 (11) 99999-9999`, para exibir o número do bot. */
 export function formatBotNumber(digits: string): string {
   const match = /^55(\d{2})(\d{4,5})(\d{4})$/.exec(digits);

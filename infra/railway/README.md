@@ -59,6 +59,28 @@ Conferir a cada serviço novo:
 - `PORT` fixo onde o Alloy scrapa (3001 na API, 8010 no agente, 8011 no worker);
   se o Railway atribuir outra porta, o alvo fica `down` em silêncio.
 
+## E-mail transacional (API)
+
+O `financial-vellun-api` envia o link de "Esqueci minha senha" e o aviso de
+senha alterada. Variáveis no serviço:
+
+| Variável         | Valor                                                                          |
+| ---------------- | ------------------------------------------------------------------------------ |
+| `MAIL_PROVIDER`  | `resend`                                                                       |
+| `RESEND_API_KEY` | chave do Resend **restrita a envio**                                           |
+| `MAIL_FROM`      | remetente do domínio verificado, ex. `Financial Vellun <nao-responda@dominio>` |
+
+Com `NODE_ENV=production`, `MAIL_PROVIDER` ausente impede a API de subir, e
+`resend` sem chave ou remetente também. `MAIL_PROVIDER=log` sobe, mas não envia
+nada; o alerta `EmailNaoEnviadoEmProducao` avisa.
+
+No Resend, antes de ligar:
+
+- domínio verificado, com SPF, DKIM e DMARC publicados;
+- **rastreamento de clique e de abertura desligado**. Ligado, o Resend reescreve
+  o link do e-mail para passar pelo servidor dele, e o token de redefinição vai
+  junto.
+
 ## `overlapSeconds` e o drain
 
 `overlapSeconds` mantém o container antigo vivo enquanto o novo sobe. Nos

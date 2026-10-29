@@ -6,8 +6,11 @@ import { PrismaService } from '../prisma/prisma.service';
 /** Eventos registrados na trilha da conta. */
 export type SecurityEventType =
   | 'password_changed'
+  | 'password_reset_requested'
+  | 'password_reset'
   | 'email_changed'
   | 'phone_verified'
+  | 'phone_unlinked'
   | 'sessions_revoked';
 
 /** Origem da requisição que provocou a mudança. */
@@ -31,6 +34,11 @@ const USER_AGENT_MAX = 255;
  *
  * **Best-effort**: falhar em registrar não pode desfazer a troca de senha que o
  * usuário acabou de pedir. A falha vai para o log da aplicação.
+ *
+ * A exceção é quem passa `db` (o cliente de uma transação): ali o evento faz
+ * parte da regra — o limite de pedidos de redefinição conta esses eventos — e a
+ * falha propaga. Engoli-la nem adiantaria: o Postgres já teria abortado a
+ * transação, e o commit falharia do mesmo jeito.
  */
 @Injectable()
 export class SecurityEventsService {
@@ -42,17 +50,21 @@ export class SecurityEventsService {
     userId: string,
     type: SecurityEventType,
     context: SecurityEventContext = {},
+    db?: Prisma.TransactionClient,
   ): Promise<void> {
+    const data = {
+      userId,
+      type,
+      ip: context.ip,
+      userAgent: context.userAgent?.slice(0, USER_AGENT_MAX),
+      metadata: context.metadata,
+    };
+    if (db) {
+      await db.userSecurityEvent.create({ data });
+      return;
+    }
     try {
-      await this.prisma.userSecurityEvent.create({
-        data: {
-          userId,
-          type,
-          ip: context.ip,
-          userAgent: context.userAgent?.slice(0, USER_AGENT_MAX),
-          metadata: context.metadata,
-        },
-      });
+      await this.prisma.userSecurityEvent.create({ data });
     } catch (error) {
       this.logger.error(
         `Falha ao registrar evento de segurança (${type}) do usuário ${userId}`,

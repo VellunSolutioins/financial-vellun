@@ -1,7 +1,54 @@
 # Plano — Recuperação de senha por e-mail
 
-> **Não implementado.** Revisado em 2026-10-11, depois de a recuperação pelo WhatsApp ter sido
-> implementada, avaliada e descartada (ver "Por que não WhatsApp").
+> **Status (2026-10-21): implementado** na branch `feat/recover-password`, do zero e seguindo
+> este plano com o lembrete de 2026-10-10 aplicado. Diferenças em relação ao texto abaixo:
+>
+> - **Sem dependência nova:** o Resend é chamado pela API HTTP com `fetch` (Node 22), sem o SDK;
+>   `@nestjs/throttler` já estava instalado e o guard é global (`AppThrottlerGuard`, por IP para
+>   quem não está logado). Limites: `forgot-password` 5/15 min, `reset-password` 10/15 min.
+> - **Serviço próprio:** a lógica fica em `auth/password-reset.service.ts` (não no
+>   `AuthService`). O pedido responde na hora e processa em segundo plano, para o tempo de
+>   resposta não revelar quais e-mails têm conta; no máximo um e-mail por minuto por conta.
+> - **Sessões:** a redefinição chama `SessionService.revokeAllForUser` (todas as sessões).
+> - **Trilha:** `password_reset_requested` e `password_reset` em `SecurityEventsService`.
+> - **Token:** consumido de forma atômica (`updateMany` com `usedAt: null`), então dois envios do
+>   mesmo link não trocam a senha duas vezes; erro com `errors: [{ field: 'token' }]`.
+> - **`MAIL_PROVIDER=log` em produção** não escreve o link no log (só um aviso).
+> - **Web:** telas em `components/auth/` (`forgot-password-form.tsx`,
+>   `reset-password-form.tsx`); `/redefinir-senha` com `referrer: no-referrer` e `noindex`.
+>   `middleware.ts` não precisou mudar (é no-op).
+> - Existe uma implementação anterior do Bruno (`origin/feat/implements-password-recovery`,
+>   2026-07-27) que não foi aproveitada: ficou 160 commits atrás da `main`.
+
+> **Revisão do PR #36 (2026-10-21), ajustes aplicados:**
+>
+> - Trocar a senha (logado) ou o e-mail apaga os links de redefinição pendentes da conta.
+> - A redefinição consome o link, troca a senha e revoga as sessões numa só transação
+>   (`SessionService.revokeAllForUser` aceita o cliente da transação).
+> - O intervalo de 1 e-mail/min por conta usa `pg_advisory_xact_lock` por usuário, com a
+>   checagem dentro da transação: pedidos simultâneos não passam juntos.
+> - Em produção, `MAIL_PROVIDER` ausente derruba a subida; `log` só se escrito de propósito.
+> - O link usado é apagado na redefinição (a coluna `used_at` saiu) e um job diário às 4h
+>   apaga os vencidos.
+> - Validade e intervalo vêm na resposta de `POST /auth/forgot-password`
+>   (`expiresInMinutes`, `retryAfterSeconds`) em vez de ficarem em `@financial-vellun/shared`:
+>   a API só importa tipos desse pacote, que publica TypeScript sem build, e uma constante
+>   importada em tempo de execução quebraria o `nest build`. O "peça de novo" espera o
+>   intervalo com contagem regressiva.
+> - `common/web-url.util.ts` centraliza a leitura de `WEB_URL` (auth, billing e ops).
+
+> **Revisão de 2026-10-29, ajustes aplicados** (detalhes em
+> [recuperacao-de-senha-ajustes.md](recuperacao-de-senha-ajustes.md)): a branch passou a seguir
+> esta versão do plano onde ela divergia.
+>
+> - Token no fragmento (`#token=`), limpo da barra ao ser lido; validade de **30 min**.
+> - Limite por conta: 1 e-mail por minuto **e** 3 por hora (contados na trilha de segurança).
+> - E-mail "sua senha foi alterada" na redefinição e na troca logada.
+> - A redefinição **não** desvincula o WhatsApp (decisão do Bruno): em vez disso, "Desvincular"
+>   em Minha Conta, com senha, e o aviso por e-mail mostra o final do número vinculado.
+> - Métrica `vellun_api_mail_sent_total` e alertas `EmailTransacionalFalhando` e
+>   `EmailNaoEnviadoEmProducao`.
+> - Política de privacidade, `CLAUDE.md` e `infra/railway/README.md` atualizados.
 
 ## Contexto
 

@@ -16,24 +16,50 @@ async function createService() {
       findFirst: jest.fn().mockResolvedValue(null),
       update: jest.fn().mockResolvedValue({ id: 'user-1', email: 'novo@example.com' }),
     },
+    passwordResetToken: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    $transaction: jest.fn(),
   };
+  // A transação recebe o próprio mock como cliente.
+  prisma.$transaction.mockImplementation((callback: (tx: typeof prisma) => unknown) =>
+    callback(prisma),
+  );
   const sessions = { revokeAllForUser: jest.fn().mockResolvedValue(2) };
   const securityEvents = { record: jest.fn().mockResolvedValue(undefined) };
-  const service = new UsersService(prisma as any, sessions as any, securityEvents as any);
-  return { prisma, sessions, securityEvents, service };
+  const notifier = { notify: jest.fn() };
+  const service = new UsersService(
+    prisma as any,
+    sessions as any,
+    securityEvents as any,
+    notifier as any,
+  );
+  return { prisma, sessions, securityEvents, notifier, service };
 }
 
 describe('UsersService', () => {
   describe('updatePassword', () => {
     it('encerra as demais sessões e mantém a atual', async () => {
-      const { sessions, service } = await createService();
+      const { prisma, sessions, service } = await createService();
 
       await service.updatePassword('user-1', 'session-atual', {
         currentPassword: TEST_PASSWORD,
         newPassword: 'n'.repeat(12),
       });
 
-      expect(sessions.revokeAllForUser).toHaveBeenCalledWith('user-1', 'session-atual');
+      expect(sessions.revokeAllForUser).toHaveBeenCalledWith('user-1', 'session-atual', prisma);
+    });
+
+    it('invalida links de redefinição pendentes junto com a troca', async () => {
+      const { prisma, service } = await createService();
+
+      await service.updatePassword('user-1', 'session-atual', {
+        currentPassword: TEST_PASSWORD,
+        newPassword: 'n'.repeat(12),
+      });
+
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(prisma.passwordResetToken.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'user-1' },
+      });
     });
 
     it('registra a troca na trilha da conta, com a origem da requisição', async () => {
@@ -53,8 +79,22 @@ describe('UsersService', () => {
       });
     });
 
+    it('avisa por e-mail que a senha mudou', async () => {
+      const { notifier, service } = await createService();
+
+      await service.updatePassword('user-1', 'session-atual', {
+        currentPassword: TEST_PASSWORD,
+        newPassword: 'n'.repeat(12),
+      });
+
+      expect(notifier.notify).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'user-1', email: 'joao@example.com' }),
+        'change',
+      );
+    });
+
     it('senha atual errada não troca nem revoga', async () => {
-      const { prisma, sessions, service } = await createService();
+      const { prisma, sessions, notifier, service } = await createService();
 
       await expect(
         service.updatePassword('user-1', 'session-atual', {
@@ -64,6 +104,7 @@ describe('UsersService', () => {
       ).rejects.toBeInstanceOf(UnauthorizedException);
       expect(prisma.user.update).not.toHaveBeenCalled();
       expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
+      expect(notifier.notify).not.toHaveBeenCalled();
     });
   });
 
@@ -88,6 +129,27 @@ describe('UsersService', () => {
       expect(prisma.user.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: expect.objectContaining({ email: 'novo@example.com' }) }),
       );
+    });
+
+    it('trocar o e-mail invalida links de redefinição pendentes', async () => {
+      const { prisma, service } = await createService();
+
+      await service.updateUser('user-1', {
+        email: 'novo@example.com',
+        currentPassword: TEST_PASSWORD,
+      });
+
+      expect(prisma.passwordResetToken.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'user-1' },
+      });
+    });
+
+    it('editar só o nome mantém os links de redefinição', async () => {
+      const { prisma, service } = await createService();
+
+      await service.updateUser('user-1', { name: 'Joao' });
+
+      expect(prisma.passwordResetToken.deleteMany).not.toHaveBeenCalled();
     });
 
     it('registra a troca de e-mail mascarado na trilha', async () => {
