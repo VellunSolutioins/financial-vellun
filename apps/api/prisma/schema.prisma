@@ -316,7 +316,7 @@ model UserSecurityEvent {
   id        String   @id @default(uuid())
   userId    String   @map("user_id")
   /// `password_changed`, `password_reset_requested`, `password_reset`, `email_changed`,
-  /// `phone_verified`, `sessions_revoked`.
+  /// `phone_verified`, `phone_unlinked`, `sessions_revoked`.
   type      String
   ip        String?
   userAgent String?  @map("user_agent")

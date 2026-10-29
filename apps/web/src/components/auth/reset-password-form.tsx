@@ -1,7 +1,7 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -31,6 +31,40 @@ const schema = z
   });
 type FormData = z.infer<typeof schema>;
 
+/**
+ * Token do link (`/redefinir-senha#token=…`). Ele vem no fragmento, que o
+ * navegador não manda a servidor nenhum; ao lê-lo, a tela o tira da barra de
+ * endereço, para não ficar no histórico. Por isso recarregar a página perde o
+ * token: é abrir o link do e-mail de novo.
+ *
+ * `null` enquanto não leu (o fragmento só existe no navegador); `''` quando o
+ * link veio sem token.
+ *
+ * Também relê no `hashchange`: colar o link do e-mail numa aba que já está
+ * nesta página só troca o fragmento, sem recarregar nada.
+ */
+function useTokenFromHash(): string | null {
+  const [token, setToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    const read = () => {
+      const value = new URLSearchParams(window.location.hash.slice(1)).get('token');
+      if (value !== null) {
+        setToken(value);
+        window.history.replaceState(null, '', window.location.pathname);
+      } else {
+        // Num segundo efeito (Strict Mode em dev), a barra já está limpa: mantém o lido.
+        setToken((current) => current ?? '');
+      }
+    };
+    read();
+    window.addEventListener('hashchange', read);
+    return () => window.removeEventListener('hashchange', read);
+  }, []);
+
+  return token;
+}
+
 function InvalidLink({ message }: { message?: string }) {
   return (
     <div className="mx-auto w-full max-w-[420px]">
@@ -38,7 +72,7 @@ function InvalidLink({ message }: { message?: string }) {
       <h1 className="mt-4 text-3xl font-bold tracking-tight text-ink">Link inválido</h1>
       <p className="mt-3 text-base text-ink-muted" role="alert">
         {message ??
-          'Este link de redefinição está incompleto ou já expirou. Cada link vale por pouco tempo e só pode ser usado uma vez.'}
+          'Abra de novo o link que enviamos por e-mail. Se ele já expirou ou já foi usado, peça um novo: cada link vale por pouco tempo e só funciona uma vez.'}
       </p>
       <Button asChild size="xl" className="mt-8 w-full hover:bg-primary-hover">
         <Link href="/esqueci-senha">Pedir um novo link</Link>
@@ -52,12 +86,12 @@ function InvalidLink({ message }: { message?: string }) {
   );
 }
 
-/** Nova senha a partir do link do e-mail (`/redefinir-senha?token=…`). */
+/** Nova senha a partir do link do e-mail (`/redefinir-senha#token=…`). */
 export function ResetPasswordForm() {
   const router = useRouter();
   const toast = useToast();
   const { setUser } = useAuth();
-  const token = useSearchParams().get('token') ?? '';
+  const token = useTokenFromHash();
 
   const [formErrors, setFormErrors] = useState<string[]>([]);
   const [linkError, setLinkError] = useState<string | null>(null);
@@ -71,6 +105,8 @@ export function ResetPasswordForm() {
     formState: { errors, isSubmitting },
   } = useForm<FormData>({ resolver: zodResolver(schema), mode: 'onTouched' });
 
+  // Antes de ler o fragmento, nada: evita piscar a tela de link inválido.
+  if (token === null) return null;
   if (!TOKEN_PATTERN.test(token)) return <InvalidLink />;
   if (linkError) return <InvalidLink message={linkError} />;
 

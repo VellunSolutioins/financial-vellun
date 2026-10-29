@@ -37,6 +37,19 @@
 >   intervalo com contagem regressiva.
 > - `common/web-url.util.ts` centraliza a leitura de `WEB_URL` (auth, billing e ops).
 
+> **Revisão de 2026-10-29, ajustes aplicados** (detalhes em
+> [recuperacao-de-senha-ajustes.md](recuperacao-de-senha-ajustes.md)): a branch passou a seguir
+> esta versão do plano onde ela divergia.
+>
+> - Token no fragmento (`#token=`), limpo da barra ao ser lido; validade de **30 min**.
+> - Limite por conta: 1 e-mail por minuto **e** 3 por hora (contados na trilha de segurança).
+> - E-mail "sua senha foi alterada" na redefinição e na troca logada.
+> - A redefinição **não** desvincula o WhatsApp (decisão do Bruno): em vez disso, "Desvincular"
+>   em Minha Conta, com senha, e o aviso por e-mail mostra o final do número vinculado.
+> - Métrica `vellun_api_mail_sent_total` e alertas `EmailTransacionalFalhando` e
+>   `EmailNaoEnviadoEmProducao`.
+> - Política de privacidade, `CLAUDE.md` e `infra/railway/README.md` atualizados.
+
 ## Contexto
 
 O app permite trocar a senha logado (com a senha atual), mas quem esqueceu a senha não tem saída:

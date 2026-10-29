@@ -7,6 +7,7 @@ import { SessionService } from './session.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { WhatsappLinkModule } from '../whatsapp-link/whatsapp-link.module';
 import { MailModule } from '../mail/mail.module';
+import { PasswordChangeNotifier } from './password-change-notifier.service';
 import { PasswordResetService } from './password-reset.service';
 import { PasswordResetRetentionService } from './password-reset-retention.service';
 
@@ -18,8 +19,9 @@ import { PasswordResetRetentionService } from './password-reset-retention.servic
     SessionService,
     PasswordResetService,
     PasswordResetRetentionService,
+    PasswordChangeNotifier,
     JwtStrategy,
   ],
-  exports: [AuthService, SessionService],
+  exports: [AuthService, SessionService, PasswordChangeNotifier],
 })
 export class AuthModule {}

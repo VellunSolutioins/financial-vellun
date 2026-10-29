@@ -180,8 +180,9 @@ export class SessionService {
     });
   }
 
-  /** Encerra todas as sessões do usuário, exceto `exceptSessionId` quando informado. */
   /**
+   * Encerra todas as sessões do usuário, exceto `exceptSessionId` quando informado.
+   *
    * `db` permite revogar dentro da transação de quem chama (troca de senha):
    * assim a senha nova e o fim das sessões antigas acontecem juntos ou não
    * acontecem.

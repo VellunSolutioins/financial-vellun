@@ -10,16 +10,23 @@ import { webUrl } from '../common/web-url.util';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestContext, SecurityEventsService } from '../security-events/security-events.service';
+import { PasswordChangeNotifier } from './password-change-notifier.service';
 import { SessionService } from './session.service';
 
 /** Validade do link de redefinição. */
-export const RESET_TOKEN_TTL_MINUTES = 60;
+export const RESET_TOKEN_TTL_MINUTES = 30;
 /**
  * Intervalo mínimo entre dois e-mails para a mesma conta. O rate limit da rota
  * conta por IP; isto impede que alguém, trocando de IP, encha de e-mails a
  * caixa de outra pessoa.
  */
 export const RESET_REQUEST_COOLDOWN_SECONDS = 60;
+/**
+ * Teto de e-mails por hora para a mesma conta. Só o intervalo ainda deixaria
+ * mandar 60 por hora, o bastante para incomodar a pessoa e queimar a
+ * reputação do domínio de envio.
+ */
+export const RESET_REQUESTS_PER_HOUR = 3;
 
 /** Resposta do pedido, exista a conta ou não: não revela quem tem cadastro. */
 export const FORGOT_PASSWORD_MESSAGE =
@@ -64,6 +71,7 @@ export class PasswordResetService {
     private readonly securityEvents: SecurityEventsService,
     private readonly mail: MailService,
     private readonly config: ConfigService,
+    private readonly notifier: PasswordChangeNotifier,
   ) {}
 
   /**
@@ -115,6 +123,17 @@ export class PasswordResetService {
       });
       if (recent) return false;
 
+      // O teto por hora conta os eventos da trilha, não os tokens: pedir um
+      // link novo apaga os anteriores.
+      const lastHour = await tx.userSecurityEvent.count({
+        where: {
+          userId: user.id,
+          type: 'password_reset_requested',
+          createdAt: { gt: new Date(now.getTime() - 60 * 60_000) },
+        },
+      });
+      if (lastHour >= RESET_REQUESTS_PER_HOUR) return false;
+
       // Um link por vez: pedir outro invalida (e apaga) os anteriores.
       await tx.passwordResetToken.deleteMany({ where: { userId: user.id } });
       await tx.passwordResetToken.create({
@@ -124,15 +143,18 @@ export class PasswordResetService {
           expiresAt: new Date(now.getTime() + RESET_TOKEN_TTL_MINUTES * 60_000),
         },
       });
+      // Dentro da transação, sob a trava: é o que o teto acima conta.
+      await this.securityEvents.record(user.id, 'password_reset_requested', context, tx);
       return true;
     });
     if (!issued) return false;
 
-    await this.securityEvents.record(user.id, 'password_reset_requested', context);
     await this.mail.sendPasswordReset({
       to: user.email,
       name: user.name,
-      resetUrl: `${webUrl(this.config)}/redefinir-senha?token=${token}`,
+      // No fragmento, o token não chega a servidor nenhum: nem ao log HTTP de
+      // quem serve o web, nem a um `Referer`. A tela o lê e limpa da barra.
+      resetUrl: `${webUrl(this.config)}/redefinir-senha#token=${token}`,
       expiresInMinutes: RESET_TOKEN_TTL_MINUTES,
     });
     return true;
@@ -153,7 +175,7 @@ export class PasswordResetService {
     // Tudo numa transação: senha nova, links consumidos e sessões encerradas
     // acontecem juntos. Se algo falhar, nada muda e o mesmo link continua
     // servindo para tentar de novo.
-    const encerradas = await this.prisma.$transaction(async (tx) => {
+    const done = await this.prisma.$transaction(async (tx) => {
       // Consome o token de forma atômica: dois envios simultâneos do mesmo
       // link não trocam a senha duas vezes (o segundo espera a trava da linha e
       // já não a encontra).
@@ -162,17 +184,23 @@ export class PasswordResetService {
       });
       if (count === 0) return null;
 
-      await tx.user.update({ where: { id: record.userId }, data: { passwordHash } });
+      const user = await tx.user.update({
+        where: { id: record.userId },
+        data: { passwordHash },
+        select: { id: true, email: true, name: true },
+      });
       // Os demais links da conta, se houver, também deixam de valer.
       await tx.passwordResetToken.deleteMany({ where: { userId: record.userId } });
-      return this.sessions.revokeAllForUser(record.userId, undefined, tx);
+      const encerradas = await this.sessions.revokeAllForUser(record.userId, undefined, tx);
+      return { user, encerradas };
     });
-    if (encerradas === null) throw this.invalidLink();
+    if (done === null) throw this.invalidLink();
 
     await this.securityEvents.record(record.userId, 'password_reset', {
       ...context,
-      metadata: { sessoesEncerradas: encerradas },
+      metadata: { sessoesEncerradas: done.encerradas },
     });
+    this.notifier.notify(done.user, 'reset');
 
     return { message: 'Senha redefinida. Entre com a senha nova.' };
   }

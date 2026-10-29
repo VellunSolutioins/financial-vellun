@@ -1,4 +1,4 @@
-import { MailMessage, MailTransport } from './mail-transport';
+import { MailDelivery, MailMessage, MailTransport } from './mail-transport';
 
 const RESEND_ENDPOINT = 'https://api.resend.com/emails';
 const TIMEOUT_MS = 10_000;
@@ -17,7 +17,7 @@ export class ResendMailTransport implements MailTransport {
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
-  async send(message: MailMessage): Promise<void> {
+  async send(message: MailMessage): Promise<MailDelivery> {
     const response = await this.fetchImpl(RESEND_ENDPOINT, {
       method: 'POST',
       headers: {
@@ -38,5 +38,6 @@ export class ResendMailTransport implements MailTransport {
       const detail = (await response.text().catch(() => '')).slice(0, 300);
       throw new Error(`Resend respondeu ${response.status}: ${detail}`);
     }
+    return 'sent';
   }
 }

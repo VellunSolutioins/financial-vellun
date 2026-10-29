@@ -66,4 +66,23 @@ describe('MetricsService', () => {
 
     expect(body).toContain('vellun_api_process_');
   });
+
+  it('séries de e-mail existem em 0 antes do primeiro envio', async () => {
+    // Sem a série, o alerta de falha de envio fica inerte até a primeira falha.
+    const { body } = await metrics.scrape();
+
+    expect(body).toMatch(
+      /vellun_api_mail_sent_total\{[^}]*template="password_changed"[^}]*result="failed"[^}]*\} 0/,
+    );
+  });
+
+  it('conta envios de e-mail por template e desfecho', async () => {
+    metrics.observeMail('password_reset', 'sent');
+    metrics.observeMail('password_reset', 'sent');
+
+    const { body } = await metrics.scrape();
+    expect(body).toMatch(
+      /vellun_api_mail_sent_total\{[^}]*template="password_reset"[^}]*result="sent"[^}]*\} 2/,
+    );
+  });
 });

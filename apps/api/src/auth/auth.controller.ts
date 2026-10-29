@@ -94,15 +94,25 @@ export class AuthController {
     });
   }
 
-  /** Troca a senha pelo token do e-mail e encerra todas as sessões da conta. */
+  /**
+   * Troca a senha pelo token do e-mail e encerra todas as sessões da conta.
+   * Os cookies de sessão deste navegador, se houver, saem junto: a sessão a
+   * que eles apontam acabou de ser revogada.
+   */
   @Throttle({ default: { limit: 10, ttl: 15 * 60_000 } })
   @HttpCode(HttpStatus.OK)
   @Post('reset-password')
-  resetPassword(@Body() dto: ResetPasswordDto, @Req() req: Request) {
-    return this.passwordReset.resetPassword(dto.token, dto.newPassword, {
+  async resetPassword(
+    @Body() dto: ResetPasswordDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.passwordReset.resetPassword(dto.token, dto.newPassword, {
       ip: req.ip,
       userAgent: req.headers['user-agent'],
     });
+    this.sessions.clearAuthCookies(res);
+    return result;
   }
 
   @Post('refresh')

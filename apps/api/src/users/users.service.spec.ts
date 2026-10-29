@@ -25,8 +25,14 @@ async function createService() {
   );
   const sessions = { revokeAllForUser: jest.fn().mockResolvedValue(2) };
   const securityEvents = { record: jest.fn().mockResolvedValue(undefined) };
-  const service = new UsersService(prisma as any, sessions as any, securityEvents as any);
-  return { prisma, sessions, securityEvents, service };
+  const notifier = { notify: jest.fn() };
+  const service = new UsersService(
+    prisma as any,
+    sessions as any,
+    securityEvents as any,
+    notifier as any,
+  );
+  return { prisma, sessions, securityEvents, notifier, service };
 }
 
 describe('UsersService', () => {
@@ -73,8 +79,22 @@ describe('UsersService', () => {
       });
     });
 
+    it('avisa por e-mail que a senha mudou', async () => {
+      const { notifier, service } = await createService();
+
+      await service.updatePassword('user-1', 'session-atual', {
+        currentPassword: TEST_PASSWORD,
+        newPassword: 'n'.repeat(12),
+      });
+
+      expect(notifier.notify).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'user-1', email: 'joao@example.com' }),
+        'change',
+      );
+    });
+
     it('senha atual errada não troca nem revoga', async () => {
-      const { prisma, sessions, service } = await createService();
+      const { prisma, sessions, notifier, service } = await createService();
 
       await expect(
         service.updatePassword('user-1', 'session-atual', {
@@ -84,6 +104,7 @@ describe('UsersService', () => {
       ).rejects.toBeInstanceOf(UnauthorizedException);
       expect(prisma.user.update).not.toHaveBeenCalled();
       expect(sessions.revokeAllForUser).not.toHaveBeenCalled();
+      expect(notifier.notify).not.toHaveBeenCalled();
     });
   });
 

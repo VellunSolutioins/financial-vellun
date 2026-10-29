@@ -21,7 +21,7 @@ export function escapeHtml(value: string): string {
 }
 
 /** Primeiro nome, ou `''` quando o cadastro não tem nome. */
-function firstName(name: string): string {
+export function firstName(name: string): string {
   return name.trim().split(/\s+/)[0] ?? '';
 }
 

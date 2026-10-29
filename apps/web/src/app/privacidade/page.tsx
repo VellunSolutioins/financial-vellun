@@ -26,7 +26,7 @@ const SECTIONS: LegalSection[] = [
     title: 'Compartilhamento de dados',
     paragraphs: [
       'Não vendemos dados pessoais.',
-      'O compartilhamento ocorre apenas quando necessário para a execução do serviço, com os prestadores que nos ajudam a operá-lo: o provedor de mensagens do WhatsApp, o serviço de inteligência artificial que interpreta as suas mensagens, o processador de pagamentos e a infraestrutura de hospedagem e monitoramento. Também pode ocorrer para cumprimento legal ou proteção de direitos.',
+      'O compartilhamento ocorre apenas quando necessário para a execução do serviço, com os prestadores que nos ajudam a operá-lo: o provedor de mensagens do WhatsApp, o serviço de inteligência artificial que interpreta as suas mensagens, o processador de pagamentos, o serviço de envio de e-mails (usado para o link de redefinição de senha e os avisos de segurança da conta) e a infraestrutura de hospedagem e monitoramento. Também pode ocorrer para cumprimento legal ou proteção de direitos.',
     ],
   },
   {
@@ -55,7 +55,7 @@ export default function PrivacidadePage() {
   return (
     <LegalPage
       title="Política de Privacidade"
-      updatedAt="10 de outubro de 2026"
+      updatedAt="29 de outubro de 2026"
       sections={SECTIONS}
     />
   );

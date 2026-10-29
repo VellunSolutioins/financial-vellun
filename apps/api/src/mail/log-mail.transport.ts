@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 
-import { MailMessage, MailTransport } from './mail-transport';
+import { MailDelivery, MailMessage, MailTransport } from './mail-transport';
 
 /**
  * Não envia nada: escreve a mensagem no log da API. É assim que, em dev, se
@@ -17,11 +17,12 @@ export class LogMailTransport implements MailTransport {
 
   constructor(private readonly production: boolean) {}
 
-  async send(message: MailMessage): Promise<void> {
+  async send(message: MailMessage): Promise<MailDelivery> {
     if (this.production) {
       this.logger.warn(`E-mail "${message.subject}" NÃO enviado: MAIL_PROVIDER=log em produção.`);
-      return;
+      return 'skipped';
     }
     this.logger.log(`Para: ${message.to}\nAssunto: ${message.subject}\n\n${message.text}`);
+    return 'sent';
   }
 }

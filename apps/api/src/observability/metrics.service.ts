@@ -13,6 +13,17 @@ export const UNMATCHED_ROUTE = 'unmatched';
 /** Marcos do ciclo de vida de um evento de webhook do PSP. */
 export type PaymentWebhookEvent = 'received' | 'processed' | 'failed' | 'exhausted';
 
+/** E-mails transacionais, um valor por template (label de cardinalidade fixa). */
+export const MAIL_TEMPLATES = ['password_reset', 'password_changed'] as const;
+export type MailTemplate = (typeof MAIL_TEMPLATES)[number];
+
+/**
+ * Desfecho de um envio. `skipped` é o transporte `log` em produção: nada falhou,
+ * mas o e-mail não saiu.
+ */
+export const MAIL_RESULTS = ['sent', 'failed', 'skipped'] as const;
+export type MailResult = (typeof MAIL_RESULTS)[number];
+
 /**
  * Métricas Prometheus da API.
  *
@@ -33,6 +44,7 @@ export class MetricsService {
   private readonly httpDuration: Histogram<'method' | 'route' | 'status'>;
   private readonly paymentWebhooks: Record<PaymentWebhookEvent, Counter<string>>;
   private readonly paymentWebhookPendingRetry: Gauge<string>;
+  private readonly mailSent: Counter<'template' | 'result'>;
 
   constructor() {
     this.registry.setDefaultLabels({
@@ -93,6 +105,18 @@ export class MetricsService {
       help: 'Eventos de webhook aguardando nova tentativa (status failed).',
       registers: [this.registry],
     });
+
+    this.mailSent = new Counter({
+      name: 'vellun_api_mail_sent_total',
+      help: 'E-mails transacionais por template e desfecho (sent, failed, skipped).',
+      labelNames: ['template', 'result'],
+      registers: [this.registry],
+    });
+    // Todas as combinações nascem em 0: sem isso a série só aparece no primeiro
+    // envio, e os alertas sobre ela ficam inertes até lá.
+    for (const template of MAIL_TEMPLATES) {
+      for (const result of MAIL_RESULTS) this.mailSent.inc({ template, result }, 0);
+    }
   }
 
   /** Marca um evento no ciclo de vida do webhook de pagamento. */
@@ -102,6 +126,11 @@ export class MetricsService {
 
   setPaymentWebhookPendingRetry(total: number): void {
     this.paymentWebhookPendingRetry.set(total);
+  }
+
+  /** Conta um envio de e-mail transacional. */
+  observeMail(template: MailTemplate, result: MailResult): void {
+    this.mailSent.inc({ template, result });
   }
 
   observeHttpRequest(params: {

@@ -13,6 +13,7 @@ import { UpdatePasswordDto } from './dto/update-password.dto';
 import { normalizeEmail } from '../common/email.util';
 import { fieldConflict } from '../common/field-errors';
 import { SessionService } from '../auth/session.service';
+import { PasswordChangeNotifier } from '../auth/password-change-notifier.service';
 import {
   RequestContext,
   SecurityEventsService,
@@ -25,6 +26,7 @@ export class UsersService {
     private prisma: PrismaService,
     private sessions: SessionService,
     private securityEvents: SecurityEventsService,
+    private passwordChangeNotifier: PasswordChangeNotifier,
   ) {}
 
   async getProfile(userId: string) {
@@ -113,6 +115,7 @@ export class UsersService {
       ...context,
       metadata: { sessoesEncerradas: encerradas },
     });
+    this.passwordChangeNotifier.notify(user, 'change');
 
     return { message: 'Senha atualizada com sucesso' };
   }
