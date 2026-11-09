@@ -6,11 +6,22 @@ import { AuthService } from './auth.service';
 import { SessionService } from './session.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { WhatsappLinkModule } from '../whatsapp-link/whatsapp-link.module';
+import { MailModule } from '../mail/mail.module';
+import { PasswordChangeNotifier } from './password-change-notifier.service';
+import { PasswordResetService } from './password-reset.service';
+import { PasswordResetRetentionService } from './password-reset-retention.service';
 
 @Module({
-  imports: [PassportModule, JwtModule.register({}), WhatsappLinkModule],
+  imports: [PassportModule, JwtModule.register({}), WhatsappLinkModule, MailModule],
   controllers: [AuthController],
-  providers: [AuthService, SessionService, JwtStrategy],
-  exports: [AuthService, SessionService],
+  providers: [
+    AuthService,
+    SessionService,
+    PasswordResetService,
+    PasswordResetRetentionService,
+    PasswordChangeNotifier,
+    JwtStrategy,
+  ],
+  exports: [AuthService, SessionService, PasswordChangeNotifier],
 })
 export class AuthModule {}

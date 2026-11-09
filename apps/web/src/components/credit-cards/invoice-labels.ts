@@ -53,9 +53,20 @@ export function invoiceStatus(invoice: CardInvoice): InvoiceStatus {
     return { label: 'Vencida', detail: `venceu em ${due}`, className: 'bg-rose-100 text-rose-800' };
   }
   if (invoice.state === 'open') {
+    // Paga antes do fechamento (docs/adrs/0021): continua aberta, e o que
+    // entrar até o fechamento volta a aparecer como valor a pagar.
+    const closes = `fecha em ${shortDate(invoice.closingDate)}`;
+    if (invoice.total > 0 && invoice.remaining === 0) {
+      return {
+        label: 'Paga até agora',
+        detail: `${closes} · novas compras ainda entram`,
+        className: 'bg-emerald-100 text-emerald-800',
+      };
+    }
     return {
       label: 'Aberta',
-      detail: `fecha em ${shortDate(invoice.closingDate)}`,
+      detail:
+        invoice.payments > 0 ? `${closes} · ${formatCurrency(invoice.payments)} já pago` : closes,
       className: 'bg-blue-100 text-blue-800',
     };
   }

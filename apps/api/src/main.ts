@@ -8,6 +8,7 @@ import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 
 import { AppModule } from './app.module';
+import { validationExceptionFactory } from './common/field-errors';
 import { isAllowedWebOrigin } from './common/http-origin.util';
 import { CORRELATION_HEADER } from './observability/correlation';
 import { AppLoggerService } from './observability/app-logger.service';
@@ -88,6 +89,8 @@ async function bootstrap() {
       whitelist: true,
       transform: true,
       forbidNonWhitelisted: true,
+      // Acrescenta `errors: [{ field, message }]` ao corpo do 400.
+      exceptionFactory: validationExceptionFactory,
     }),
   );
 

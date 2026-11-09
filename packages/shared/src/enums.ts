@@ -92,6 +92,25 @@ export const BillingInterval = {
 } as const;
 export type BillingInterval = (typeof BillingInterval)[keyof typeof BillingInterval];
 
+/** Por que uma cobrança foi recusada, em termos que a tela sabe explicar. */
+export const PaymentFailureReason = {
+  CARD_REFUSED: 'card_refused',
+  RISK_REJECTED: 'risk_rejected',
+} as const;
+export type PaymentFailureReason = (typeof PaymentFailureReason)[keyof typeof PaymentFailureReason];
+
+/**
+ * Dado do cadastro que um provedor de pagamentos pode exigir para cobrar. A API
+ * diz quais faltam; a tela de assinatura os mostra ao usuário.
+ */
+export type CustomerProfileField =
+  | 'phone'
+  | 'document'
+  | 'postalCode'
+  | 'street'
+  | 'addressNumber'
+  | 'neighborhood';
+
 export const PaymentMethodType = {
   CREDIT_CARD: 'credit_card',
 } as const;

@@ -241,3 +241,47 @@ groups:
           description: '{{ $value }} eventos aguardando nova tentativa.'
           dashboard: 'DASHBOARD_BASE/d/vellun-payments/pagamentos'
           runbook: 'RUNBOOK_BASE/observability.md'
+
+  # ── E-mail transacional ──────────────────────────────────────────────────
+  - name: email
+    interval: 60s
+    rules:
+      - alert: EmailTransacionalFalhando
+        # O pedido de "esqueci minha senha" responde "enviamos" antes de enviar (a
+        # resposta não pode revelar quem tem conta). Se o Resend recusa — chave
+        # revogada, domínio desverificado —, a pessoa fica trancada fora e ninguém
+        # vê: o erro só existe no log. As séries nascem em 0 na subida da API, então
+        # a regra não precisa de `unless absent()`.
+        expr: |
+          sum by (template) (increase(vellun_api_mail_sent_total{result="failed"}[15m])) > 0
+        for: 0m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: 'Falha ao enviar e-mail transacional ({{ $labels.template }})'
+          description: >-
+            {{ $value }} envio(s) de {{ $labels.template }} falharam nos últimos 15
+            minutos. O erro do provedor está no log da API (MailService).
+          dashboard: 'DASHBOARD_BASE/d/vellun-api/api'
+          runbook: 'RUNBOOK_BASE/observability.md'
+
+      - alert: EmailNaoEnviadoEmProducao
+        # `MAIL_PROVIDER=log` em produção: a API sobe, porque o valor é aceito quando
+        # escrito de propósito, mas nenhum e-mail sai — o transporte só registra um
+        # aviso. Em produção de verdade, é configuração errada.
+        expr: |
+          sum by (template) (
+            increase(vellun_api_mail_sent_total{result="skipped",env="production"}[1h])
+          ) > 0
+        for: 0m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: 'E-mails não estão sendo enviados em produção'
+          description: >-
+            {{ $value }} e-mail(s) de {{ $labels.template }} deixaram de sair na última
+            hora porque MAIL_PROVIDER=log. Configure MAIL_PROVIDER=resend na API.
+          dashboard: 'DASHBOARD_BASE/d/vellun-api/api'
+          runbook: 'RUNBOOK_BASE/observability.md'

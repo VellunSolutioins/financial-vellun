@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Post,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiCookieAuth, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { Request, Response } from 'express';
@@ -6,6 +16,9 @@ import { issueCsrfCookie } from '../common/csrf.util';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
+import { PasswordResetService } from './password-reset.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { AuthenticatedUser, REFRESH_COOKIE, SessionService } from './session.service';
 import { SecurityEventsService } from '../security-events/security-events.service';
@@ -17,6 +30,7 @@ export class AuthController {
     private authService: AuthService,
     private sessions: SessionService,
     private securityEvents: SecurityEventsService,
+    private passwordReset: PasswordResetService,
   ) {}
 
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
@@ -63,6 +77,42 @@ export class AuthController {
     });
     this.sessions.clearAuthCookies(res);
     return { message: 'Todas as sessões foram encerradas' };
+  }
+
+  /**
+   * Pede o link de redefinição. A resposta é sempre a mesma, exista a conta ou
+   * não. Limite apertado por IP; o serviço ainda segura um e-mail por minuto
+   * por conta.
+   */
+  @Throttle({ default: { limit: 5, ttl: 15 * 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('forgot-password')
+  forgotPassword(@Body() dto: ForgotPasswordDto, @Req() req: Request) {
+    return this.passwordReset.requestReset(dto.email, {
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+  }
+
+  /**
+   * Troca a senha pelo token do e-mail e encerra todas as sessões da conta.
+   * Os cookies de sessão deste navegador, se houver, saem junto: a sessão a
+   * que eles apontam acabou de ser revogada.
+   */
+  @Throttle({ default: { limit: 10, ttl: 15 * 60_000 } })
+  @HttpCode(HttpStatus.OK)
+  @Post('reset-password')
+  async resetPassword(
+    @Body() dto: ResetPasswordDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.passwordReset.resetPassword(dto.token, dto.newPassword, {
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+    this.sessions.clearAuthCookies(res);
+    return result;
   }
 
   @Post('refresh')

@@ -19,6 +19,30 @@ export class DashboardController {
     return this.dashboardService.getSummary(user.id, query.period_start, query.period_end, query);
   }
 
+  /** Gráfico "Saiu da conta": despesas em conta e faturas pagas, por categoria. */
+  @Get('accounts-spending')
+  getAccountsSpending(@Req() req: Request, @Query() query: DashboardQueryDto) {
+    const user = req.user as any;
+    return this.dashboardService.getAccountsSpending(
+      user.id,
+      query.period_start,
+      query.period_end,
+      query,
+    );
+  }
+
+  /** Gráfico "Foi no cartão": compras do período ainda não pagas, por categoria. */
+  @Get('cards-unpaid')
+  getCardsUnpaid(@Req() req: Request, @Query() query: DashboardQueryDto) {
+    const user = req.user as any;
+    return this.dashboardService.getCardsUnpaid(
+      user.id,
+      query.period_start,
+      query.period_end,
+      query,
+    );
+  }
+
   @Get('daily')
   getDaily(@Req() req: Request, @Query() query: DashboardQueryDto) {
     const user = req.user as any;

@@ -10,6 +10,7 @@ import { startOfMonthUtc, endOfMonthUtc } from '../common/date.util';
 
 import { CreateSpendingGoalDto } from './dto/create-spending-goal.dto';
 import { NET_EXPENSE_TYPES, netExpenseByCategory, roundCents } from '../transactions/net-expense';
+import { budgetDateWhere } from '../transactions/settlement-state';
 import { UpdateSpendingGoalDto } from './dto/update-spending-goal.dto';
 
 /** Faixas de comprometimento da meta de gasto por categoria (doc "Metas de Gastos"). */
@@ -50,7 +51,7 @@ export class SpendingGoalsService {
         type: { in: [...NET_EXPENSE_TYPES] },
         status: 'confirmed',
         categoryId: { in: categoryIds },
-        transactionDate: { gte: start, lte: end },
+        ...budgetDateWhere({ gte: start, lte: end }),
       },
       _sum: { amount: true },
     });

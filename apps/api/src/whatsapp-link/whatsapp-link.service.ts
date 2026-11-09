@@ -12,9 +12,10 @@ import { PhoneVerification, Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 
 import { randomNumericCode, safeEqual, sha256Hex } from '../common/crypto.util';
+import { fieldInvalid } from '../common/field-errors';
 import { normalizePhone, phoneVariants } from '../common/phone.util';
 import { PrismaService } from '../prisma/prisma.service';
-import { SecurityEventsService } from '../security-events/security-events.service';
+import { RequestContext, SecurityEventsService } from '../security-events/security-events.service';
 
 /** Validade do código exibido na tela. */
 export const VERIFICATION_TTL_MS = 10 * 60 * 1000;
@@ -177,6 +178,53 @@ export class WhatsappLinkService {
     return (await this.findLinkedContact(userId)) !== null;
   }
 
+  /** Número verificado e ativo, como exibido (o do cadastro), ou `null`. */
+  async linkedPhone(userId: string): Promise<string | null> {
+    const [linked, user] = await Promise.all([
+      this.findLinkedContact(userId),
+      this.prisma.user.findUnique({ where: { id: userId }, select: { phone: true } }),
+    ]);
+    return linked ? (user?.phone ?? linked.phoneNumber) : null;
+  }
+
+  /**
+   * Desfaz o vínculo a pedido do usuário: o número deixa de identificá-lo no
+   * bot. Para voltar, é verificar de novo.
+   *
+   * Exige a senha atual, como a troca de número: uma sessão roubada não basta
+   * para derrubar o WhatsApp do dono. O telefone do cadastro (`users.phone`)
+   * continua; só o vínculo sai.
+   */
+  async unlink(
+    userId: string,
+    currentPassword: string,
+    context: RequestContext = {},
+  ): Promise<{ message: string }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { passwordHash: true, phone: true },
+    });
+    if (!user) throw new NotFoundException('Usuário não encontrado');
+    if (!(await bcrypt.compare(currentPassword, user.passwordHash))) {
+      throw fieldInvalid('currentPassword', 'Senha atual incorreta');
+    }
+
+    const linked = await this.findLinkedContact(userId);
+    if (!linked) throw new NotFoundException('Nenhum WhatsApp vinculado a esta conta');
+
+    await this.prisma.$transaction(async (tx) => {
+      await this.revokeContacts(tx, userId, new Date());
+      // Um desafio aberto religaria o número ao ser confirmado.
+      await tx.phoneVerification.deleteMany({ where: { userId, consumedAt: null } });
+    });
+
+    await this.securityEvents.record(userId, 'phone_unlinked', {
+      ...context,
+      metadata: { telefone: user.phone ?? linked.phoneNumber },
+    });
+    return { message: 'WhatsApp desvinculado' };
+  }
+
   // ── Lado do bot (API interna) ────────────────────────────────────────────
 
   /**
@@ -272,7 +320,7 @@ export class WhatsappLinkService {
       await this.closeActiveConversations(tx, [contact.id]);
     }
 
-    await this.revokeOtherContacts(tx, verification.userId, contact.id, now);
+    await this.revokeContacts(tx, verification.userId, now, contact.id);
 
     return tx.user.update({
       where: { id: verification.userId },
@@ -280,20 +328,24 @@ export class WhatsappLinkService {
     });
   }
 
-  /** Revoga os demais números do usuário: só um número identifica a conta. */
-  private async revokeOtherContacts(tx: Tx, userId: string, keepId: string, now: Date) {
-    const others = await tx.whatsappContact.findMany({
-      where: { userId, id: { not: keepId }, revokedAt: null },
+  /**
+   * Revoga os números ativos do usuário, exceto `keepId` quando informado (só
+   * um número identifica a conta). Retorna quantos foram revogados.
+   */
+  private async revokeContacts(tx: Tx, userId: string, now: Date, keepId?: string) {
+    const contacts = await tx.whatsappContact.findMany({
+      where: { userId, revokedAt: null, ...(keepId ? { id: { not: keepId } } : {}) },
       select: { id: true },
     });
-    if (others.length === 0) return;
+    if (contacts.length === 0) return 0;
 
-    const ids = others.map((c) => c.id);
+    const ids = contacts.map((c) => c.id);
     await tx.whatsappContact.updateMany({
       where: { id: { in: ids } },
       data: { isVerified: false, revokedAt: now, linkVersion: { increment: 1 } },
     });
     await this.closeActiveConversations(tx, ids);
+    return ids.length;
   }
 
   private async closeActiveConversations(tx: Tx, contactIds: string[]) {

@@ -24,6 +24,16 @@
     --input: 214.3 31.8% 91.4%;
     --ring: 221.2 83.2% 53.3%;
     --radius: 1rem;
+
+    /* Páginas públicas (landing, login, cadastro). Aditivos: o app não os usa. */
+    --surface: 214.3 53.8% 97.5%; /* #F5F8FC */
+    --ink: 222.2 47.4% 11.2%; /* #0F172A */
+    --ink-muted: 215.3 19.3% 34.5%; /* #475569 */
+    --primary-hover: 224.3 76.3% 48%; /* #1D4ED8 */
+    --success: 142.4 71.8% 29.2%; /* #15803D */
+    --danger: 0 73.7% 41.8%; /* #B91C1C */
+    --shadow-soft: 0 1px 2px rgb(15 23 42 / 0.04), 0 4px 12px rgb(15 23 42 / 0.05);
+    --shadow-card: 0 2px 4px rgb(15 23 42 / 0.04), 0 16px 40px rgb(15 23 42 / 0.08);
   }
 
   .dark {
@@ -55,5 +65,31 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+/*
+ * Entrada em sequência das páginas públicas (`components/marketing/reveal.tsx`).
+ * Só oculta com JS ativo e sem pedido de movimento reduzido: fora disso, o
+ * conteúdo aparece direto no estado final.
+ */
+@keyframes reveal-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (scripting: enabled) and (prefers-reduced-motion: no-preference) {
+  .reveal:not([data-revealed]) {
+    opacity: 0;
+  }
+  .reveal[data-revealed] {
+    animation: reveal-in 0.5s ease-out both;
+    animation-delay: var(--reveal-delay, var(--reveal-stagger, 0ms));
   }
 }

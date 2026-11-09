@@ -1,5 +1,4 @@
 import {
-  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -12,7 +11,9 @@ import { CreateBusinessProfileDto } from './dto/create-business-profile.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UpdatePasswordDto } from './dto/update-password.dto';
 import { normalizeEmail } from '../common/email.util';
+import { fieldConflict } from '../common/field-errors';
 import { SessionService } from '../auth/session.service';
+import { PasswordChangeNotifier } from '../auth/password-change-notifier.service';
 import {
   RequestContext,
   SecurityEventsService,
@@ -25,6 +26,7 @@ export class UsersService {
     private prisma: PrismaService,
     private sessions: SessionService,
     private securityEvents: SecurityEventsService,
+    private passwordChangeNotifier: PasswordChangeNotifier,
   ) {}
 
   async getProfile(userId: string) {
@@ -45,7 +47,7 @@ export class UsersService {
       throw new ForbiddenException('Usuário não é do tipo individual');
 
     const cpfOwner = await this.prisma.individualProfile.findUnique({ where: { cpf: dto.cpf } });
-    if (cpfOwner && cpfOwner.userId !== userId) throw new ConflictException('CPF já cadastrado');
+    if (cpfOwner && cpfOwner.userId !== userId) throw fieldConflict('cpf', 'CPF já cadastrado');
 
     const existing = await this.prisma.individualProfile.findUnique({ where: { userId } });
     if (existing) {
@@ -71,7 +73,7 @@ export class UsersService {
       throw new ForbiddenException('Usuário não é do tipo business');
 
     const cnpjOwner = await this.prisma.businessProfile.findUnique({ where: { cnpj: dto.cnpj } });
-    if (cnpjOwner && cnpjOwner.userId !== userId) throw new ConflictException('CNPJ já cadastrado');
+    if (cnpjOwner && cnpjOwner.userId !== userId) throw fieldConflict('cnpj', 'CNPJ já cadastrado');
 
     const existing = await this.prisma.businessProfile.findUnique({ where: { userId } });
     if (existing) {
@@ -103,12 +105,17 @@ export class UsersService {
     if (!valid) throw new UnauthorizedException('Senha atual incorreta');
 
     const passwordHash = await bcrypt.hash(dto.newPassword, 12);
-    await this.prisma.user.update({ where: { id: userId }, data: { passwordHash } });
-    const encerradas = await this.sessions.revokeAllForUser(userId, currentSessionId);
+    const encerradas = await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: userId }, data: { passwordHash } });
+      // Links de "esqueci minha senha" pedidos antes da troca deixam de valer.
+      await tx.passwordResetToken.deleteMany({ where: { userId } });
+      return this.sessions.revokeAllForUser(userId, currentSessionId, tx);
+    });
     await this.securityEvents.record(userId, 'password_changed', {
       ...context,
       metadata: { sessoesEncerradas: encerradas },
     });
+    this.passwordChangeNotifier.notify(user, 'change');
 
     return { message: 'Senha atualizada com sucesso' };
   }
@@ -135,40 +142,46 @@ export class UsersService {
         const emailOwner = await this.prisma.user.findFirst({
           where: { email: { equals: email, mode: 'insensitive' }, id: { not: userId } },
         });
-        if (emailOwner) throw new ConflictException('Email já cadastrado');
+        if (emailOwner) throw fieldConflict('email', 'Email já cadastrado');
         emailAnterior = current.email;
       }
     }
 
-    const atualizado = await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        name: dto.name,
-        email,
-        postalCode: dto.postalCode,
-        street: dto.street,
-        addressNumber: dto.addressNumber,
-        complement: dto.complement,
-        neighborhood: dto.neighborhood,
-        city: dto.city,
-        state: dto.state,
-      },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        phone: true,
-        profileType: true,
-        postalCode: true,
-        street: true,
-        addressNumber: true,
-        complement: true,
-        neighborhood: true,
-        city: true,
-        state: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+    const atualizado = await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.update({
+        where: { id: userId },
+        data: {
+          name: dto.name,
+          email,
+          postalCode: dto.postalCode,
+          street: dto.street,
+          addressNumber: dto.addressNumber,
+          complement: dto.complement,
+          neighborhood: dto.neighborhood,
+          city: dto.city,
+          state: dto.state,
+        },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+          profileType: true,
+          postalCode: true,
+          street: true,
+          addressNumber: true,
+          complement: true,
+          neighborhood: true,
+          city: true,
+          state: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+      // Com o e-mail trocado, um link de redefinição enviado ao endereço antigo
+      // não pode continuar valendo.
+      if (emailAnterior) await tx.passwordResetToken.deleteMany({ where: { userId } });
+      return user;
     });
 
     if (emailAnterior) {

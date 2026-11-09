@@ -1,5 +1,7 @@
 import { Logger } from '@nestjs/common';
 
+import { PaymentProviderError, PaymentProviderErrorKind } from '../payment-provider.errors';
+
 export interface AsaasHttpClientOptions {
   baseUrl: string;
   apiKey: string;
@@ -13,15 +15,29 @@ export interface AsaasRequestOptions {
   query?: Record<string, string | number | undefined>;
 }
 
-/** Erro do Asaas sem nenhum segredo no payload (seguro para log). */
-export class AsaasApiError extends Error {
+/** Tipo de falha do domínio para cada resposta de erro do Asaas. */
+function kindOf(status: number): PaymentProviderErrorKind {
+  if (status === 404) return 'not_found';
+  // 401/403 aqui é a NOSSA chave sendo recusada: problema de configuração.
+  if (status === 401 || status === 403 || status >= 500) return 'unavailable';
+  // Limite de requisições: os dados estão certos, vale tentar de novo depois.
+  if (status === 429) return 'unavailable';
+  return 'validation';
+}
+
+/**
+ * Resposta de erro do Asaas, sem nenhum segredo no payload (seguro para log).
+ * Para o domínio é um {@link PaymentProviderError}; o status e o corpo ficam
+ * para o próprio adapter ler.
+ */
+export class AsaasApiError extends PaymentProviderError {
   constructor(
     public readonly status: number,
     public readonly method: string,
     public readonly path: string,
     public readonly body?: unknown,
   ) {
-    super(`Asaas ${method} ${path} falhou (HTTP ${status})`);
+    super(kindOf(status), `Asaas ${method} ${path} falhou (HTTP ${status})`);
     this.name = 'AsaasApiError';
   }
 }
@@ -82,7 +98,11 @@ export class AsaasHttpClient {
         }
       }
     }
-    throw lastError;
+    if (lastError instanceof PaymentProviderError) throw lastError;
+    // Rede, timeout: o Asaas não respondeu.
+    throw new PaymentProviderError('unavailable', `Asaas ${method} ${path} não respondeu`, {
+      cause: lastError,
+    });
   }
 
   private async execute<T>(method: string, url: string, path: string, body: unknown): Promise<T> {

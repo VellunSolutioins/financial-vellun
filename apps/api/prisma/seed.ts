@@ -129,6 +129,33 @@ const individualCategories = [
     color: '#D3D3D3',
     profileType: ProfileType.individual,
   },
+  // Também criadas pela migration 20261008120000_default_categories, para
+  // chegarem à produção sem depender de rodar o seed.
+  {
+    name: 'Streaming',
+    type: TransactionType.expense,
+    color: '#B39DDB',
+    profileType: ProfileType.individual,
+  },
+  {
+    name: 'Delivery',
+    type: TransactionType.expense,
+    color: '#FFB74D',
+    profileType: ProfileType.individual,
+  },
+  {
+    name: 'Restaurante',
+    type: TransactionType.expense,
+    color: '#F48FB1',
+    profileType: ProfileType.individual,
+  },
+  // Categoria dos lançamentos de pagamento de fatura (`CARD_INVOICE_CATEGORY`).
+  {
+    name: 'Fatura do cartão',
+    type: TransactionType.expense,
+    color: '#90A4AE',
+    profileType: ProfileType.individual,
+  },
   // Natureza própria (docs/adrs/0018): juros e tarifas aparecem à parte do
   // consumo, e compra de bem durável não é tratada como consumo do mês.
   {

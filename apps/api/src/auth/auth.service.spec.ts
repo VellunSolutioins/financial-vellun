@@ -99,6 +99,25 @@ describe('AuthService', () => {
       expect(result).not.toHaveProperty('passwordHash');
     });
 
+    it('só com os dados pessoais: cria a conta sem perfil PF nem endereço', async () => {
+      const { tx, prisma, service } = createMocks();
+      tx.user.create.mockResolvedValue(userRow());
+
+      await service.register({
+        name: 'Joao Grilo',
+        email: 'joao@example.com',
+        phone: '(19) 99999-9999',
+        password: TEST_PASSWORD,
+        profileType: ProfileType.individual,
+      });
+
+      // CPF e endereço vêm depois, em "Minha Conta", e só são exigidos ao assinar.
+      expect(prisma.individualProfile.findUnique).not.toHaveBeenCalled();
+      expect(tx.individualProfile.create).not.toHaveBeenCalled();
+      expect(tx.user.create.mock.calls[0][0].data.postalCode).toBeUndefined();
+      expect(tx.account.create).toHaveBeenCalled();
+    });
+
     it('cria perfil PJ e conta padrão', async () => {
       const { tx, service } = createMocks();
       tx.user.create.mockResolvedValue(
@@ -132,17 +151,40 @@ describe('AuthService', () => {
       const { prisma, service } = createMocks();
       prisma.user.findFirst.mockResolvedValue(userRow());
 
+      const attempt = service.register({
+        name: 'Outro',
+        email: 'JOAO@EXAMPLE.COM',
+        phone: '(19) 99999-9999',
+        password: TEST_PASSWORD,
+        profileType: ProfileType.individual,
+        cpf: CPF,
+        ...ADDRESS,
+      });
+
+      await expect(attempt).rejects.toThrow('Email já cadastrado');
+      // O corpo aponta o campo, para o formulário marcar o erro no lugar certo.
+      await expect(attempt).rejects.toMatchObject({
+        response: { errors: [{ field: 'email', message: 'Email já cadastrado' }] },
+      });
+    });
+
+    it('aponta o campo quando o CPF já pertence a outra conta', async () => {
+      const { prisma, service } = createMocks();
+      prisma.individualProfile.findUnique.mockResolvedValue({ id: 'profile-9' });
+
       await expect(
         service.register({
           name: 'Outro',
-          email: 'JOAO@EXAMPLE.COM',
+          email: 'outro@example.com',
           phone: '(19) 99999-9999',
           password: TEST_PASSWORD,
           profileType: ProfileType.individual,
           cpf: CPF,
           ...ADDRESS,
         }),
-      ).rejects.toThrow('Email já cadastrado');
+      ).rejects.toMatchObject({
+        response: { errors: [{ field: 'cpf', message: 'CPF já cadastrado' }] },
+      });
     });
   });
 

@@ -18,6 +18,15 @@ const LOTE = 50;
  */
 const PRESO_APOS_MINUTOS = 15;
 
+/**
+ * Quanto tempo um evento pode ficar `received` antes de ser considerado órfão.
+ *
+ * A primeira tentativa sai em milissegundos; um minuto depois, quem ainda está
+ * `received` é porque ela nunca rodou. Menos que isso disputaria o evento com
+ * a tentativa imediata — inofensivo, pela reivindicação atômica, mas à toa.
+ */
+const ORFAO_APOS_SEGUNDOS = 60;
+
 export interface RetrySweepSummary {
   destravados: number;
   tentados: number;
@@ -82,12 +91,25 @@ export class WebhookRetryService {
         }),
       );
 
+      const agora = new Date();
       const vencidos = await this.prisma.paymentWebhookEvent.findMany({
-        where: { status: WebhookEventStatus.failed, nextRetryAt: { lte: new Date() } },
+        where: {
+          OR: [
+            { status: WebhookEventStatus.failed, nextRetryAt: { lte: agora } },
+            // Órfãos: recebidos e nunca tentados. A primeira tentativa é
+            // agendada em memória; se o processo cai antes dela, o evento
+            // ficava `received` para sempre — o PSP recebeu 200 e não reenvia.
+            {
+              status: WebhookEventStatus.received,
+              receivedAt: { lt: new Date(agora.getTime() - ORFAO_APOS_SEGUNDOS * 1000) },
+            },
+          ],
+        },
         select: { id: true },
-        // Mais antigos primeiro: um evento que espera há duas horas não pode
-        // ficar atrás de um que acabou de falhar.
-        orderBy: { nextRetryAt: 'asc' },
+        // Órfãos primeiro (não têm `nextRetryAt`): nunca foram tentados. Depois,
+        // os mais antigos: um evento que espera há duas horas não pode ficar
+        // atrás de um que acabou de falhar.
+        orderBy: [{ nextRetryAt: { sort: 'asc', nulls: 'first' } }, { receivedAt: 'asc' }],
         take: LOTE,
       });
 

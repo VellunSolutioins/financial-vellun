@@ -1,9 +1,9 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { Select } from '@/components/ui/select';
 import { CategoryBars } from '@/components/dashboard/CategoryBars';
-import { useTransactionSummary } from '@/hooks/useTransactionSummary';
+import { apiClient } from '@/lib/api-client';
 
 export interface ChartResource {
   /** Id da conta ou do cartão (não da conta interna). */
@@ -25,14 +25,45 @@ interface Props {
   emptyText: string;
 }
 
-const LABELS = {
-  accounts: { title: 'Gastos nas contas', all: 'Todas as contas' },
-  cards: { title: 'Gastos no cartão', all: 'Todos os cartões' },
+/**
+ * Os dois gráficos seguem o dinheiro (docs/adrs/0021):
+ * - contas: o que saiu delas no mês, inclusive as faturas pagas, que entram
+ *   na categoria "Fatura do cartão";
+ * - cartões: das compras do mês, o que ainda não foi pago. Fatura paga tira
+ *   as compras daqui — o valor passa a aparecer nas contas.
+ */
+const CHARTS = {
+  accounts: {
+    title: 'Saiu da conta',
+    all: 'Todas as contas',
+    subtitle: 'O que saiu das contas no mês, com as faturas pagas',
+    path: '/dashboard/accounts-spending',
+    idsParam: 'accountIds',
+    empty: 'Nada saiu das contas no mês',
+  },
+  cards: {
+    title: 'Foi no cartão',
+    all: 'Todos os cartões',
+    subtitle: 'Compras do mês ainda não pagas',
+    path: '/dashboard/cards-unpaid',
+    idsParam: 'cardIds',
+    empty: 'Nada a pagar no cartão neste mês',
+  },
 } as const;
 
+interface ResourceSpending {
+  total: number;
+  slices: {
+    categoryId: string | null;
+    categoryName: string;
+    color: string | null;
+    total: number;
+  }[];
+}
+
 /**
- * Despesas por categoria só de contas ou só de cartões, no período da tela.
- * Com mais de um recurso, um seletor escolhe entre todos ou um específico.
+ * Gastos por categoria só de contas ou só de cartões, no período da tela. Com
+ * mais de um recurso, um seletor escolhe entre todos ou um específico.
  */
 export function ResourceCategoryChart({
   kind,
@@ -41,7 +72,7 @@ export function ResourceCategoryChart({
   periodEnd,
   emptyText,
 }: Props) {
-  const labels = LABELS[kind];
+  const chart = CHARTS[kind];
   const [selected, setSelected] = useState('');
   // Recurso que saiu da lista (ex.: filtro da tela mudou) volta para "todos".
   const current = resources?.some((r) => r.id === selected) ? selected : '';
@@ -49,8 +80,8 @@ export function ResourceCategoryChart({
   if (!resources || resources.length === 0) {
     return (
       <CategoryBars
-        title={labels.title}
-        subtitle="Gastos do mês · parcela no mês dela"
+        title={chart.title}
+        subtitle={chart.subtitle}
         slices={resources ? [] : null}
         emptyText={emptyText}
       />
@@ -66,7 +97,7 @@ export function ResourceCategoryChart({
         onChange={(e) => setSelected(e.target.value)}
         className="h-8 w-auto max-w-[11rem] text-xs"
       >
-        <option value="">{labels.all}</option>
+        <option value="">{chart.all}</option>
         {resources.map((r) => (
           <option key={r.id} value={r.id}>
             {r.archived ? `${r.name} (arquivado)` : r.name}
@@ -77,67 +108,58 @@ export function ResourceCategoryChart({
 
   return (
     <ResourceCategoryData
-      title={labels.title}
+      title={chart.title}
       // Com um recurso só, o nome dele; com vários, o seletor já diz qual.
       subtitle={
-        resources.length === 1
-          ? `${resources[0].name} · gastos do mês`
-          : 'Gastos do mês · parcela no mês dela'
+        resources.length === 1 ? `${resources[0].name} · ${chart.subtitle}` : chart.subtitle
       }
       action={selector}
-      query={{
-        periodStart,
-        periodEnd,
-        // Mesma base dos gastos do dashboard: a parcela no mês dela, o resto
-        // na data do fato (docs/adrs/0019).
-        dateBasis: 'spending',
-        realizedOnly: true,
-        ...(kind === 'accounts' ? { accountIds: ids.join(',') } : { cardIds: ids.join(',') }),
-      }}
+      emptyText={chart.empty}
+      url={`${chart.path}?period_start=${periodStart}&period_end=${periodEnd}&${chart.idsParam}=${ids.join(',')}`}
     />
   );
 }
 
 /**
- * Separado para só buscar quando há ids: sem nenhum, `/transactions/summary`
- * devolveria o consolidado, e o gráfico de cartões mostraria as contas.
+ * Separado para só buscar quando há ids: sem nenhum, a API devolveria vazio e
+ * o gráfico diria "nada" em vez de "nenhuma conta cadastrada".
  */
 function ResourceCategoryData({
   title,
   subtitle,
   action,
-  query,
+  emptyText,
+  url,
 }: {
   title: string;
   subtitle: string;
   action: React.ReactNode;
-  query: {
-    periodStart: string;
-    periodEnd: string;
-    dateBasis: 'spending';
-    realizedOnly: true;
-    accountIds?: string;
-    cardIds?: string;
-  };
+  emptyText: string;
+  url: string;
 }) {
-  const { data, loading } = useTransactionSummary(query);
-  const slices = loading
-    ? null
-    : (data?.byCategory ?? [])
-        .filter((c) => c.type === 'expense')
-        .map((c) => ({
-          categoryId: c.categoryId,
-          categoryName: c.categoryName,
-          color: c.color,
-          total: c.total,
-        }));
+  const [data, setData] = useState<ResourceSpending | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    apiClient
+      .get<ResourceSpending>(url)
+      .then((res) => !cancelled && setData(res))
+      .catch(() => !cancelled && setData(null))
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [url]);
+
   return (
     <CategoryBars
       title={title}
       subtitle={subtitle}
-      slices={slices}
+      slices={loading ? null : (data?.slices ?? [])}
       action={action}
-      emptyText={data ? 'Sem despesas no mês' : 'Não foi possível carregar'}
+      emptyText={data ? emptyText : 'Não foi possível carregar'}
     />
   );
 }

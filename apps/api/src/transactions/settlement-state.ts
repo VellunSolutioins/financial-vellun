@@ -102,10 +102,20 @@ export function realizedWhere(endOfToday: Date): Prisma.TransactionWhereInput {
 export function spendingPeriodWhere(start: Date, end: Date): Prisma.TransactionWhereInput {
   return {
     OR: [
-      { recurrenceType: 'parcelado', transactionDate: { gte: start, lte: end } },
+      { recurrenceType: 'parcelado', ...budgetDateWhere({ gte: start, lte: end }) },
       { recurrenceType: { not: 'parcelado' }, eventDate: { gte: start, lte: end } },
     ],
   };
+}
+
+/**
+ * Data em que um lançamento pesa nos gastos, pelo calendário de cobrança: o
+ * `budgetDate` quando existe, senão a própria `transactionDate`. Só a parcela
+ * 2+ no cartão tem `budgetDate` — ela é datada na abertura da fatura, e o gasto
+ * continua contando uma parcela por mês a partir da compra (docs/adrs/0022).
+ */
+export function budgetDateWhere(range: Prisma.DateTimeFilter): Prisma.TransactionWhereInput {
+  return { OR: [{ budgetDate: range }, { budgetDate: null, transactionDate: range }] };
 }
 
 /**

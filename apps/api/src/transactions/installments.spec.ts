@@ -263,7 +263,12 @@ describe('InstallmentsService.advance', () => {
     expect(advanceUpdates(prisma)).toEqual([
       {
         where: { id: 'p4' },
-        data: { transactionDate: TODAY, advancedAt: TODAY, advancedFromDate: day(10) },
+        data: {
+          transactionDate: TODAY,
+          advancedAt: TODAY,
+          advancedFromDate: day(10),
+          budgetDate: null,
+        },
       },
     ]);
     expect(cardLedger.syncTransactions).toHaveBeenCalledWith(['p4'], prisma);

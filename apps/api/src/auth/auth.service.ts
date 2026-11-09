@@ -1,8 +1,9 @@
-import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { AccountType, ProfileType } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { normalizeEmail } from '../common/email.util';
+import { fieldConflict } from '../common/field-errors';
 import { WhatsappLinkService } from '../whatsapp-link/whatsapp-link.service';
 import { SessionMeta, SessionService } from './session.service';
 import { RegisterDto } from './dto/register.dto';
@@ -28,16 +29,20 @@ export class AuthService {
   async register(dto: RegisterDto) {
     const email = normalizeEmail(dto.email);
     const exists = await this.findUserByEmail(email);
-    if (exists) throw new ConflictException('Email já cadastrado');
+    if (exists) throw fieldConflict('email', 'Email já cadastrado');
 
     if (dto.profileType === ProfileType.individual) {
-      const cpfExists = await this.prisma.individualProfile.findUnique({ where: { cpf: dto.cpf } });
-      if (cpfExists) throw new ConflictException('CPF já cadastrado');
+      if (dto.cpf) {
+        const cpfExists = await this.prisma.individualProfile.findUnique({
+          where: { cpf: dto.cpf },
+        });
+        if (cpfExists) throw fieldConflict('cpf', 'CPF já cadastrado');
+      }
     } else {
       const cnpjExists = await this.prisma.businessProfile.findUnique({
         where: { cnpj: dto.cnpj },
       });
-      if (cnpjExists) throw new ConflictException('CNPJ já cadastrado');
+      if (cnpjExists) throw fieldConflict('cnpj', 'CNPJ já cadastrado');
     }
 
     const passwordHash = await bcrypt.hash(dto.password, 12);
@@ -59,14 +64,17 @@ export class AuthService {
         },
       });
 
+      // Sem CPF, o perfil PF nasce quando ele for informado em "Minha Conta".
       if (dto.profileType === ProfileType.individual) {
-        await tx.individualProfile.create({
-          data: {
-            userId: createdUser.id,
-            cpf: dto.cpf!,
-            birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined,
-          },
-        });
+        if (dto.cpf) {
+          await tx.individualProfile.create({
+            data: {
+              userId: createdUser.id,
+              cpf: dto.cpf,
+              birthDate: dto.birthDate ? new Date(dto.birthDate) : undefined,
+            },
+          });
+        }
       } else {
         await tx.businessProfile.create({
           data: {

@@ -1,4 +1,4 @@
-import { UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 
 import { sha256Hex } from '../common/crypto.util';
@@ -326,6 +326,93 @@ describe('WhatsappLinkService', () => {
       await expect(service.getState('user-1')).resolves.toEqual(
         expect.objectContaining({ status: 'verified', linkedPhone: '(19) 99999-9999' }),
       );
+    });
+  });
+
+  describe('linkedPhone', () => {
+    it('devolve o número do cadastro quando há vínculo ativo', async () => {
+      const { prisma, service } = createService();
+      prisma.whatsappContact.findFirst.mockResolvedValue({ phoneNumber: '+5519999999999' });
+      prisma.user.findUnique.mockResolvedValue({ phone: '(19) 99999-9999' });
+
+      await expect(service.linkedPhone('user-1')).resolves.toBe('(19) 99999-9999');
+    });
+
+    it('sem vínculo, null', async () => {
+      const { prisma, service } = createService();
+      prisma.user.findUnique.mockResolvedValue({ phone: '(19) 99999-9999' });
+
+      await expect(service.linkedPhone('user-1')).resolves.toBeNull();
+    });
+  });
+
+  describe('unlink', () => {
+    async function withLinkedUser() {
+      const created = createService();
+      created.prisma.user.findUnique.mockResolvedValue({
+        phone: '(19) 99999-9999',
+        passwordHash: await bcrypt.hash(TEST_PASSWORD, 4),
+      });
+      created.prisma.whatsappContact.findFirst.mockResolvedValue({
+        id: 'contact-1',
+        phoneNumber: '+5519999999999',
+      });
+      created.prisma.whatsappContact.findMany.mockResolvedValue([{ id: 'contact-1' }]);
+      return created;
+    }
+
+    it('revoga o vínculo, fecha as conversas e apaga os desafios abertos', async () => {
+      const { prisma, securityEvents, service } = await withLinkedUser();
+
+      await expect(
+        service.unlink('user-1', TEST_PASSWORD, { ip: '203.0.113.10' }),
+      ).resolves.toEqual({ message: 'WhatsApp desvinculado' });
+
+      expect(prisma.whatsappContact.findMany).toHaveBeenCalledWith({
+        where: { userId: 'user-1', revokedAt: null },
+        select: { id: true },
+      });
+      expect(prisma.whatsappContact.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['contact-1'] } },
+        data: { isVerified: false, revokedAt: expect.any(Date), linkVersion: { increment: 1 } },
+      });
+      expect(prisma.aiConversation.updateMany).toHaveBeenCalledWith({
+        where: { whatsappContactId: { in: ['contact-1'] }, status: 'active' },
+        data: { status: 'abandoned' },
+      });
+      // Um desafio aberto religaria o número ao ser confirmado.
+      expect(prisma.phoneVerification.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'user-1', consumedAt: null },
+      });
+      expect(securityEvents.record).toHaveBeenCalledWith('user-1', 'phone_unlinked', {
+        ip: '203.0.113.10',
+        metadata: { telefone: '(19) 99999-9999' },
+      });
+    });
+
+    it('senha errada não desvincula e aponta o campo', async () => {
+      const { prisma, securityEvents, service } = await withLinkedUser();
+
+      const error = await service
+        .unlink('user-1', 'x'.repeat(12))
+        .catch((e: unknown) => e as BadRequestException);
+
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect((error as BadRequestException).getResponse()).toMatchObject({
+        errors: [{ field: 'currentPassword', message: 'Senha atual incorreta' }],
+      });
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(securityEvents.record).not.toHaveBeenCalled();
+    });
+
+    it('sem vínculo ativo responde 404', async () => {
+      const { prisma, service } = await withLinkedUser();
+      prisma.whatsappContact.findFirst.mockResolvedValue(null);
+
+      await expect(service.unlink('user-1', TEST_PASSWORD)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      expect(prisma.$transaction).not.toHaveBeenCalled();
     });
   });
 });

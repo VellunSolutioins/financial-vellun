@@ -129,7 +129,7 @@ integration('cartão: previsões, obrigações e créditos entre faturas (Postgr
     expect((await env.cards.findOne(userId, card.id)).totalDebt).toBe(600);
   });
 
-  it('fatura futura paga antecipadamente não aparece como valor a pagar', async () => {
+  it('pagamento a mais na primeira fatura abate as futuras, que não aparecem como valor a pagar', async () => {
     const card = await newCard();
     const first = await buy(card.accountId, 300, dayFromToday(-3), {
       recurrenceType: 'parcelado',
@@ -138,12 +138,16 @@ integration('cartão: previsões, obrigações e créditos entre faturas (Postgr
     const last = await env.prisma.transaction.findFirstOrThrow({
       where: { seriesId: first.seriesId, installmentNumber: 3 },
     });
-    await pay(card.id, last.invoiceId!, 100);
+    // Fatura que ainda não começou não recebe pagamento direto (docs/adrs/0021).
+    await expect(pay(card.id, last.invoiceId!, 100)).rejects.toMatchObject({ status: 400 });
+
+    // R$ 200 na fatura da 1ª parcela (R$ 100): os R$ 100 a mais abatem as seguintes.
+    await pay(card.id, await invoiceOf(first.id), 200);
 
     const view = await env.cards.findOne(userId, card.id);
     expect(view.futureCharges).toBe(200);
     expect(view.futureInstallments).toBe(100);
-    expect(view.totalDebt).toBe(200);
+    expect(view.totalDebt).toBe(100);
   });
 
   it('créditos de cartões diferentes não se compensam', async () => {

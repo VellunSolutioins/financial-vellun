@@ -1,21 +1,36 @@
-import type { ApiError, PaginatedResponse } from '@financial-vellun/shared';
+import type { ApiError, ApiFieldError, PaginatedResponse } from '@financial-vellun/shared';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
 // Endpoints de autenticação não devem disparar refresh-em-401:
 // - login/register: 401 = credenciais inválidas (deve aparecer ao usuário);
-// - refresh/logout: 401 = sessão realmente encerrada.
-const NO_REFRESH_PATHS = ['/auth/login', '/auth/register', '/auth/refresh', '/auth/logout'];
+// - refresh/logout: 401 = sessão realmente encerrada;
+// - forgot/reset-password: rotas públicas, não dependem de sessão.
+const NO_REFRESH_PATHS = [
+  '/auth/login',
+  '/auth/register',
+  '/auth/refresh',
+  '/auth/logout',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+];
 
 export class ApiClientError extends Error {
+  /** Mensagens uma a uma; `message` é a junção delas, para exibir em uma linha. */
+  public readonly messages: string[];
+
   constructor(
     public readonly statusCode: number,
-    message: string,
+    message: string | string[],
     public readonly error: string,
     public readonly code?: string,
+    /** Campo de cada mensagem, quando a API informa (validação e valores já em uso). */
+    public readonly fieldErrors: ApiFieldError[] = [],
   ) {
-    super(message);
+    const messages = Array.isArray(message) ? message : [message];
+    super(messages.join('; '));
     this.name = 'ApiClientError';
+    this.messages = messages;
   }
 }
 
@@ -88,7 +103,7 @@ async function request<T>(path: string, options?: RequestInit, retry = true): Pr
       window.location.assign(`${BILLING_PATH}?status=required`);
     }
 
-    throw new ApiClientError(err.statusCode, err.message, err.error, err.code);
+    throw new ApiClientError(err.statusCode, err.message, err.error, err.code, err.errors);
   }
 
   return res.json() as Promise<T>;
@@ -103,4 +118,4 @@ export const apiClient = {
   delete: <T>(path: string, init?: RequestInit) => request<T>(path, { ...init, method: 'DELETE' }),
 };
 
-export type { PaginatedResponse, ApiError };
+export type { PaginatedResponse, ApiError, ApiFieldError };

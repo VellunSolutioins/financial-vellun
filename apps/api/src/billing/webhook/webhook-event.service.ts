@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma, WebhookEventStatus } from '@prisma/client';
 
+import { Db } from '../../common/db';
 import { MetricsService } from '../../observability/metrics.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { VerifiedPaymentEvent } from '../providers/payment-provider.interface';
@@ -45,6 +46,7 @@ export class WebhookEventService {
     try {
       const created = await this.prisma.paymentWebhookEvent.create({
         data: {
+          provider: event.provider,
           providerEventId: event.providerEventId,
           eventType: event.eventType,
           status: WebhookEventStatus.received,
@@ -89,17 +91,34 @@ export class WebhookEventService {
     return count === 1;
   }
 
-  markProcessed(id: string) {
-    this.metrics.observePaymentWebhook('processed');
-    return this.prisma.paymentWebhookEvent.update({
+  /**
+   * Fecha o evento, ligando-o a assinatura que o processamento encontrou.
+   *
+   * Recebe o `tx` de quem chama: o evento so pode virar `processed` no mesmo
+   * commit dos efeitos que ele causou. Fechado a parte, uma falha entre os dois
+   * passos faria o evento ser reprocessado com os efeitos ja aplicados. A
+   * correlacao (`subscriptionId`) vai na mesma escrita — nula quando o evento
+   * nao correlaciona, e isso tambem e informacao.
+   *
+   * **Nao conta a metrica**: dentro de uma transacao ainda nao ha commit. Quem
+   * chama conta com {@link observeProcessed}, depois dele.
+   */
+  markProcessed(id: string, subscriptionId: string | null, db: Db) {
+    return db.paymentWebhookEvent.update({
       where: { id },
       data: {
         status: WebhookEventStatus.processed,
         processedAt: new Date(),
         lastError: null,
         nextRetryAt: null,
+        ...(subscriptionId ? { subscriptionId } : {}),
       },
     });
+  }
+
+  /** Conta o evento processado. So depois do commit, para a metrica nao divergir do banco. */
+  observeProcessed(): void {
+    this.metrics.observePaymentWebhook('processed');
   }
 
   /**
@@ -144,16 +163,20 @@ export class WebhookEventService {
   }
 
   /**
-   * Liga o evento a assinatura que o processamento encontrou.
-   *
-   * Best-effort: a correlacao e informacao de diagnostico, e falhar em grava-la
-   * nao pode desfazer um pagamento ja aplicado. Sem ela a tabela seguiria sendo
-   * uma ilha — nao havia como perguntar "o que aconteceu com esta assinatura"
-   * partindo dos eventos.
+   * Evento que nenhuma nova tentativa vai resolver (ex.: de um PSP que não é
+   * mais o configurado). Vai direto para `exhausted`, onde o painel de
+   * operações o mostra, em vez de virar `processed` sem ter tido efeito.
    */
-  async linkSubscription(id: string, subscriptionId: string): Promise<void> {
-    await this.prisma.paymentWebhookEvent
-      .update({ where: { id }, data: { subscriptionId } })
-      .catch(() => undefined);
+  async markUnprocessable(id: string, error: string) {
+    const atualizado = await this.prisma.paymentWebhookEvent.update({
+      where: { id },
+      data: {
+        status: WebhookEventStatus.exhausted,
+        lastError: error.slice(0, 1000),
+        nextRetryAt: null,
+      },
+    });
+    this.metrics.observePaymentWebhook('exhausted');
+    return atualizado;
   }
 }

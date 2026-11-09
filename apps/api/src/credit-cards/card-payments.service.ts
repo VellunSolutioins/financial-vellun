@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AccountsService } from '../accounts/accounts.service';
 import { isFutureDay, parseDateOnly } from '../common/date.util';
 import { FINANCIAL_TX_OPTIONS, lockAccounts, lockCreditCard } from '../common/db';
+import { findCardInvoiceCategoryId } from '../categories/default-categories';
 import { CreateCardPaymentDto } from './dto/create-card-payment.dto';
 
 type PaymentWithSource = CardPayment & { sourceAccount: { id: string; name: string } };
@@ -82,6 +83,13 @@ export class CardPaymentsService {
       where: { id: invoiceId, creditCardId: card.id },
     });
     if (!invoice) throw new NotFoundException('Fatura não encontrada');
+    // Pagamento antes do fechamento é na fatura aberta (docs/adrs/0021). A que
+    // ainda não começou só tem parcelas futuras: o caminho é adiantá-las.
+    if (isFutureDay(invoice.periodStart)) {
+      throw new BadRequestException(
+        'Esta fatura ainda não começou. Para pagar estas parcelas agora, adiante-as: elas vêm para a fatura aberta.',
+      );
+    }
 
     const source = await this.prisma.account.findUnique({ where: { id: dto.sourceAccountId } });
     if (!source || source.userId !== userId || !source.isActive || source.type === 'credit_card') {
@@ -94,6 +102,9 @@ export class CardPaymentsService {
     }
 
     const description = `Pagamento da fatura ${card.account.name} ${invoice.referenceMonth.slice(5)}/${invoice.referenceMonth.slice(0, 4)}`;
+    // As duas pernas levam a categoria "Fatura do cartão": é com ela que o
+    // pagamento aparece em Lançamentos e nos gastos das contas do dashboard.
+    const categoryId = await findCardInvoiceCategoryId(this.prisma);
     let payment: PaymentWithSource;
     try {
       payment = await this.prisma.$transaction(async (tx) => {
@@ -120,6 +131,7 @@ export class CardPaymentsService {
           eventDate: paymentDate,
           status: 'confirmed' as const,
           source: 'manual' as const,
+          categoryId,
           cardPaymentId: created.id,
         };
         await tx.transaction.createMany({
