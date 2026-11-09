@@ -72,6 +72,20 @@ pagamento" na edição. A API continua aceitando `settle` explícito (testes e
 integrações); os clientes deixaram de enviar. No WhatsApp, o campo `settled` saiu do
 que a IA preenche.
 
+**Previsão é escolha.** A ADR 0018 fazia a recorrência nascer como previsão, e o
+formulário oferecia "Compromisso firmado (contrato)" para o contrário. A opção era
+confusa e, no cartão, não tinha efeito nenhum (lá o que separa previsão de cobrança é a
+data). Agora:
+
+- recorrência em conta nasce a pagar (ou a receber), no app e no WhatsApp: o padrão de
+  `forecast` na API passou a ser `false` também no fixo;
+- a caixa se chama **Previsão**, vem desmarcada e serve para estimativas ("o mercado do
+  mês"): as ocorrências aparecem como "Previsto" e ficam fora do gasto do mês até serem
+  pagas;
+- a caixa não aparece quando a conta escolhida é um cartão.
+
+Recorrências gravadas antes continuam como previsão; na edição, a caixa vem marcada.
+
 ### A IA não escolhe conta sem o usuário dizer
 
 Em produção, mensagens sem menção a conta ou cartão ("Compra de capa do celular no

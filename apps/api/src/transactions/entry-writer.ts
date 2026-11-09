@@ -33,7 +33,7 @@ export interface EntryInput {
   firstDate: Date;
   /** Data do fato, quando difere do vencimento (conta de luz de setembro que vence em outubro). */
   eventDate?: Date;
-  /** Previsão em vez de obrigação. Padrão: só no fixo. */
+  /** Previsão em vez de obrigação: escolha de quem cria, só faz diferença no fixo em conta. */
   forecast?: boolean;
   /**
    * Já foi pago/recebido (a primeira ocorrência). Padrão: lançamento avulso,
@@ -66,8 +66,8 @@ export function defaultSettle(input: {
  * - **Parcelado:** cria a compra (`installment_purchases`, `id = seriesId`)
  *   com data e total próprios; as parcelas apontam para ela e têm como data do
  *   fato a data da compra. O total é dividido em centavos exatos.
- * - **Fixo:** cada ocorrência tem a própria data como fato e nasce como
- *   previsão, salvo `forecast: false` (compromisso firmado).
+ * - **Fixo:** cada ocorrência tem a própria data como fato e nasce a pagar
+ *   (ou a receber); com `forecast: true`, nasce como previsão (docs/adrs/0020).
  * - **À vista:** com `settle`, a primeira ocorrência nasce paga — a
  *   liquidação é gravada junto, sem passo a mais para o usuário.
  *
@@ -117,8 +117,7 @@ export async function writeEntrySeries(tx: Db, input: EntryInput) {
     });
   }
 
-  const forecast =
-    series.recurrenceType === 'fixo' ? (input.forecast ?? true) : (input.forecast ?? false);
+  const forecast = input.forecast ?? false;
   const base = {
     userId: input.userId,
     accountId: input.account.id,

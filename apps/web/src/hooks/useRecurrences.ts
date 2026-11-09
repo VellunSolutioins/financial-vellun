@@ -17,7 +17,7 @@ export interface Recurrence {
   frequency: RecurrenceFrequency;
   dueDay: number;
   isActive: boolean;
-  /** Previsão (cancelável) ou compromisso firmado (`false`). */
+  /** Previsão (`true`) ou conta a pagar/receber (`false`). No cartão não tem efeito. */
   forecast: boolean;
   nextDate: string;
   /** Ocorrências confirmadas de hoje em diante. */

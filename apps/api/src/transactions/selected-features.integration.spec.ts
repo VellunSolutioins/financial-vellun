@@ -95,9 +95,9 @@ integration('selected features with PostgreSQL', () => {
     expect(Number((await accounts.findOne(userId, accountId)).currentBalance)).toBe(1000);
     const overdue = await transactions.findAll(userId, { ...filters, settlement: 'overdue' });
     expect(overdue.data.map((t) => [t.state, t.isOverdue, t.remaining])).toEqual([
-      ['forecast', true, 100],
-      ['forecast', true, 100],
-      ['forecast', true, 100],
+      ['open', true, 100],
+      ['open', true, 100],
+      ['open', true, 100],
     ]);
     expect((await transactions.findAll(otherId, { recurrenceType: 'fixo' })).meta.total).toBe(0);
     await expect(transactions.update(otherId, first.id, { amount: 999 })).rejects.toThrow();

@@ -51,8 +51,8 @@ export class UpdateRecurrenceDto {
   @ApiProperty({
     required: false,
     description:
-      'Previsão (true, o padrão do fixo: cancelável, não é obrigação) ou compromisso firmado ' +
-      '(false: contrato que obriga as próximas ocorrências, ex.: aluguel).',
+      'Previsão (true: estimativa, não é conta) ou conta a pagar/receber (false, o padrão). ' +
+      'Vale para as próximas ocorrências em conta comum; no cartão não tem efeito.',
   })
   @IsOptional()
   @IsBoolean()
