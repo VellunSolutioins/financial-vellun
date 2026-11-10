@@ -66,8 +66,8 @@ export function defaultSettle(input: {
  * - **Parcelado:** cria a compra (`installment_purchases`, `id = seriesId`)
  *   com data e total próprios; as parcelas apontam para ela e têm como data do
  *   fato a data da compra. O total é dividido em centavos exatos.
- * - **Fixo:** cada ocorrência tem a própria data como fato e nasce a pagar
- *   (ou a receber); com `forecast: true`, nasce como previsão (docs/adrs/0020).
+ * - **Fixo:** cada ocorrência tem a própria data como fato e nasce sempre
+ *   como previsão: o valor é estimativa, o pagamento registrado é o real.
  * - **À vista:** com `settle`, a primeira ocorrência nasce paga — a
  *   liquidação é gravada junto, sem passo a mais para o usuário.
  *
@@ -117,7 +117,9 @@ export async function writeEntrySeries(tx: Db, input: EntryInput) {
     });
   }
 
-  const forecast = input.forecast ?? false;
+  // Gasto fixo é sempre previsão: o valor é estimativa e o pagamento
+  // registrado é o real (docs/adrs/0018). No cartão a marca não tem efeito.
+  const forecast = series.recurrenceType === 'fixo' || (input.forecast ?? false);
   const base = {
     userId: input.userId,
     accountId: input.account.id,

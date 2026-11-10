@@ -32,8 +32,6 @@ const schema = z
     recurrenceFrequency: z.enum(['monthly', 'bimonthly', 'semiannual', 'annual']),
     installments: z.string().optional(),
     recurrenceMonths: z.string().optional(),
-    /** Só no fixo em conta: previsão em vez de conta a pagar ou a receber. */
-    forecast: z.boolean(),
     /** Data do fato, quando difere do vencimento (vazio = a mesma). */
     eventDate: z.string().optional(),
   })
@@ -126,7 +124,6 @@ export function TransactionForm({
       recurrenceFrequency: 'monthly',
       installments: '',
       recurrenceMonths: '',
-      forecast: false,
       eventDate: '',
     },
   });
@@ -137,7 +134,6 @@ export function TransactionForm({
   const watchedAccount = watch('accountId');
   const watchedAmount = watch('amount');
   const watchedInstallments = watch('installments');
-  const watchedForecast = watch('forecast');
 
   // Em "parcelado" o campo Valor é o TOTAL da compra e o backend reparte — a
   // prévia existe pra ninguém digitar o valor da parcela por engano.
@@ -188,14 +184,10 @@ export function TransactionForm({
     if (selectedRecurrenceType === 'parcelado') {
       return 'Cada parcela fica a pagar: o saldo só muda quando você marcar como paga.';
     }
-    if (watchedForecast) {
-      return income
-        ? 'Cada ocorrência fica como previsão: o saldo só muda quando você marcar como recebida.'
-        : 'Cada ocorrência fica como previsão: o saldo só muda quando você marcar como paga.';
-    }
+    // Gasto fixo é sempre previsão: o valor real é o informado ao pagar.
     return income
-      ? 'Cada ocorrência fica a receber: o saldo só muda quando você marcar como recebida.'
-      : 'Cada ocorrência fica a pagar: o saldo só muda quando você marcar como paga.';
+      ? 'O valor é uma estimativa: ao marcar como recebida, você informa quanto entrou de fato. O saldo só muda nessa hora.'
+      : 'O valor é uma estimativa: ao marcar como paga, você informa quanto pagou de fato. O saldo só muda nessa hora.';
   })();
 
   /** Preferencial que serve para o tipo: cartão não recebe receita. */
@@ -227,7 +219,6 @@ export function TransactionForm({
       recurrenceMonths,
       recurrenceType,
       recurrenceFrequency,
-      forecast,
       eventDate,
       ...rest
     } = data;
@@ -244,8 +235,6 @@ export function TransactionForm({
           ...(recurrenceType === 'fixo' && {
             recurrenceFrequency,
             recurrenceMonths: Number(recurrenceMonths),
-            // No cartão a marca não tem efeito (vale a data): a tela nem pergunta.
-            ...(!card && { forecast }),
           }),
         };
     try {
@@ -471,19 +460,6 @@ export function TransactionForm({
                 <p className="col-span-2 text-xs text-destructive">
                   {errors.recurrenceMonths.message}
                 </p>
-              )}
-              {!onCard && (
-                <label className="col-span-2 flex items-start gap-2 text-sm">
-                  <input type="checkbox" className="mt-0.5 h-4 w-4" {...register('forecast')} />
-                  <span>
-                    Previsão
-                    <span className="block text-xs text-muted-foreground">
-                      {selectedType === 'income'
-                        ? 'Cria os lançamentos como previsão de receita, não como valor a receber. Use para entradas que podem mudar ou não acontecer. Eles aparecem como "Previsto", e o saldo só muda quando você marcar como recebido.'
-                        : 'Cria os lançamentos como previsão de gasto, não como conta a pagar. Use para valores que podem mudar ou não acontecer, como o mercado do mês. Eles aparecem como "Previsto", e o saldo só muda quando você marcar como pago.'}
-                    </span>
-                  </span>
-                </label>
               )}
             </div>
           )}

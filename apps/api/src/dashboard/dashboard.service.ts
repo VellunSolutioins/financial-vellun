@@ -401,6 +401,7 @@ export class DashboardService {
               cashBalance +
                 commitments.receivableToHorizon -
                 commitments.overdueBills -
+                commitments.overdueForecast -
                 commitments.billsToHorizon -
                 commitments.forecastToHorizon -
                 (commitments.invoicesOverdue + commitments.invoicesToHorizon),
@@ -409,6 +410,7 @@ export class DashboardService {
               cashBalance,
               receivable: commitments.receivableToHorizon,
               overdueBills: commitments.overdueBills,
+              overdueForecast: commitments.overdueForecast,
               bills: commitments.billsToHorizon,
               forecastBills: commitments.forecastToHorizon,
               invoices: roundCents(commitments.invoicesOverdue + commitments.invoicesToHorizon),
@@ -507,7 +509,10 @@ export class DashboardService {
       horizon: horizon.toISOString().slice(0, 10),
       /** Contas (obrigações firmadas) vencidas e não pagas. */
       overdueBills,
-      /** Previsões cuja data passou sem pagamento: confirme, pague ou cancele. */
+      /**
+       * Previsões cuja data passou sem pagamento (ex.: gasto fixo atrasado).
+       * Entram no saldo projetado como as contas vencidas.
+       */
       overdueForecast,
       /** Contas a vencer até o horizonte. */
       billsToHorizon,

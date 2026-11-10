@@ -90,6 +90,11 @@ export async function recordSettlement(
  * do banco (`settled_amount <= amount`) recusa o excedente mesmo que algo
  * escape da trava. A chave de idempotência (única) faz o duplo clique e o
  * retry devolverem a mesma liquidação.
+ *
+ * Recorrência (fixo): o valor da ocorrência é previsão. O pagamento registrado
+ * é o valor real — menor ou maior que o previsto — e fecha a ocorrência: vira
+ * o `amount`, e o previsto fica em `forecastAmount` até uma reversão
+ * restaurá-lo. Parcelado e avulso continuam aceitando pagamento parcial.
  */
 @Injectable()
 export class SettlementsService {
@@ -128,12 +133,16 @@ export class SettlementsService {
         const transaction = await this.findTransaction(userId, transactionId, tx);
         assertSettleable(transaction);
 
-        const remainingCents = cents(transaction.amount) - cents(transaction.settledAmount);
+        const settledCents = cents(transaction.settledAmount);
+        const remainingCents = cents(transaction.amount) - settledCents;
         if (remainingCents <= 0) {
           throw new ConflictException('Este lançamento já está liquidado.');
         }
         const amountCents = dto.amount !== undefined ? cents(dto.amount) : remainingCents;
-        if (amountCents > remainingCents) {
+        // Na recorrência o valor da ocorrência é previsão: o pagamento é o
+        // valor real, para menos ou para mais, e fecha a ocorrência.
+        const realValue = transaction.recurrenceType === 'fixo' && kind === 'payment';
+        if (amountCents > remainingCents && !realValue) {
           throw new BadRequestException(
             `O valor passa do que falta liquidar (R$ ${(remainingCents / 100).toFixed(2)}).`,
           );
@@ -144,6 +153,17 @@ export class SettlementsService {
             ? null
             : await this.resolveAccount(userId, dto.accountId ?? transaction.accountId, tx);
         await lockAccounts(tx, [accountId]);
+        if (realValue) {
+          // Antes da liquidação: o `amount` sobe primeiro e o CHECK
+          // `settled_amount <= amount` segue valendo.
+          await tx.transaction.update({
+            where: { id: transactionId },
+            data: {
+              amount: (settledCents + amountCents) / 100,
+              forecastAmount: transaction.forecastAmount ?? transaction.amount,
+            },
+          });
+        }
         const settlement = await recordSettlement(tx, {
           userId,
           transactionId,
@@ -284,10 +304,30 @@ export class SettlementsService {
       data: { status: 'reversed', reversedAt: new Date() },
       include: settlementInclude,
     });
-    await tx.transaction.update({
+    const transaction = await tx.transaction.update({
       where: { id: settlement.transactionId },
       data: { settledAmount: { decrement: settlement.amount } },
     });
+    if (transaction.recurrenceType === 'fixo') {
+      // Fixo pago pelo valor real: sem pagamento ativo, volta a ser a previsão
+      // em aberto; com algum ainda ativo, continua fechado pelo que sobrou.
+      const restore = cents(transaction.settledAmount) === 0;
+      await tx.transaction.update({
+        where: { id: transaction.id },
+        data: restore
+          ? {
+              forecast: true,
+              ...(transaction.forecastAmount !== null && {
+                amount: transaction.forecastAmount,
+                forecastAmount: null,
+              }),
+            }
+          : {
+              amount: transaction.settledAmount,
+              forecastAmount: transaction.forecastAmount ?? transaction.amount,
+            },
+      });
+    }
     if (settlement.accountId) {
       await this.accountsService.recalculateBalance(settlement.accountId, tx);
     }

@@ -86,6 +86,14 @@ data). Agora:
 
 Recorrências gravadas antes continuam como previsão; na edição, a caixa vem marcada.
 
+> **Substituído em 2026-11-10** (ver ADR 0018, "Pagamento de recorrência é o valor
+> real"): gasto fixo voltou a ser **sempre** previsão, em conta e no cartão, e a caixa
+> saiu do formulário. O valor da ocorrência é estimativa e o pagamento registrado é o
+> valor real, então a distinção entre previsão e conta a pagar deixou de ajudar. A API
+> ignora `forecast` no fixo, e os fixos não pagos foram convertidos pela migration
+> `fixed_always_forecast`. No dashboard, previsões vencidas e a vencer entram em
+> "contas" e no saldo projetado, como as contas a pagar.
+
 ### A IA não escolhe conta sem o usuário dizer
 
 Em produção, mensagens sem menção a conta ou cartão ("Compra de capa do celular no

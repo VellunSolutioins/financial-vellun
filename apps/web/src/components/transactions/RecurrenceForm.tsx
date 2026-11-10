@@ -29,8 +29,6 @@ const schema = z.object({
     .refine((v) => Number.isInteger(Number(v)) && Number(v) >= 1 && Number(v) <= 31, {
       message: 'Informe um dia entre 1 e 31',
     }),
-  /** Previsão em vez de conta a pagar ou a receber (só em conta comum). */
-  forecast: z.boolean(),
 });
 type FormData = z.infer<typeof schema>;
 
@@ -53,7 +51,6 @@ export function RecurrenceForm({ recurrence, onSuccess, onCancel }: Props) {
     register,
     handleSubmit,
     setValue,
-    watch,
     formState: { errors, isSubmitting },
   } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -63,7 +60,6 @@ export function RecurrenceForm({ recurrence, onSuccess, onCancel }: Props) {
       accountId: recurrence.accountId,
       categoryId: recurrence.categoryId ?? '',
       dueDay: String(recurrence.dueDay),
-      forecast: recurrence.forecast === true,
     },
   });
 
@@ -80,17 +76,12 @@ export function RecurrenceForm({ recurrence, onSuccess, onCancel }: Props) {
     if (categories.length) setValue('categoryId', recurrence.categoryId ?? '');
   }, [resources, categories, recurrence.accountId, recurrence.categoryId, setValue]);
 
-  // No cartão a marca não tem efeito (vale a data da cobrança): a opção some.
-  const onCard = !!resources?.cards.some((c) => c.accountId === watch('accountId'));
-
   const onSubmit = async (data: FormData) => {
     try {
-      const { forecast, ...rest } = data;
       await apiClient.patch(`/recurrences/${recurrence.seriesId}`, {
-        ...rest,
+        ...data,
         amount: currencyToNumber(data.amount),
         dueDay: Number(data.dueDay),
-        ...(!onCard && { forecast }),
       });
       toast.success('Recorrência atualizada.');
       onSuccess();
@@ -165,19 +156,6 @@ export function RecurrenceForm({ recurrence, onSuccess, onCancel }: Props) {
           </Select>
         </div>
       </div>
-      {!onCard && (
-        <label className="flex items-start gap-2 text-sm">
-          <input type="checkbox" className="mt-0.5 h-4 w-4" {...register('forecast')} />
-          <span>
-            Previsão
-            <span className="block text-xs text-muted-foreground">
-              {recurrence.type === 'income'
-                ? 'As próximas ocorrências ficam como previsão de receita, não como valor a receber. Use para entradas que podem mudar ou não acontecer. Ocorrência já recebida não muda.'
-                : 'As próximas ocorrências ficam como previsão de gasto, não como conta a pagar. Use para valores que podem mudar ou não acontecer, como o mercado do mês. Ocorrência já paga não muda.'}
-            </span>
-          </span>
-        </label>
-      )}
       <div className="flex gap-2 pt-2">
         <Button type="submit" disabled={isSubmitting} className="flex-1">
           {isSubmitting ? 'Salvando...' : 'Salvar alterações'}

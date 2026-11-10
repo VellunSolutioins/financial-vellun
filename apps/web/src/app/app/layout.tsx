@@ -95,7 +95,7 @@ const navItems: Record<
   individual: [
     { href: '/app/pessoal/dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { href: '/app/pessoal/lancamentos', label: 'Lançamentos', icon: Receipt },
-    { href: '/app/pessoal/recorrencias', label: 'Recorrências', icon: Repeat },
+    { href: '/app/pessoal/recorrencias', label: 'Gastos Fixos', icon: Repeat },
     { href: '/app/pessoal/parcelamentos', label: 'Parcelamentos', icon: Layers },
     { href: '/app/pessoal/faturas', label: 'Faturas', icon: ReceiptText },
     { href: '/app/pessoal/metas', label: 'Metas de Gastos', icon: Target },

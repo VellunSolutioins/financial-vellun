@@ -72,9 +72,20 @@ A tabela central continua; os papéis passam a ser distintos:
 - **À vista:** com `settle`, o lançamento nasce com a liquidação no mesmo
   commit. Padrão: avulso, em conta comum, com data até hoje (compatível com
   clientes antigos). Data futura nunca nasce paga.
-- **Recorrência** nasce como previsão (`forecast`); "compromisso firmado"
-  (`forecast: false`) é escolha do usuário, nunca inferida. Pausar ou excluir
-  não toca ocorrência já paga.
+- **Recorrência** (gasto fixo) nasce sempre como previsão (`forecast`), em
+  conta e no cartão; desde 2026-11-10 não é mais escolha do usuário (a API
+  ignora `forecast` no fixo, na criação e na edição). Pausar ou excluir não toca
+  ocorrência já paga.
+- **Pagamento de recorrência é o valor real** (2026-11-10): o valor da
+  ocorrência fixa é previsão. O pagamento registrado — menor ou maior que o
+  previsto — fecha a ocorrência: vira o `amount` e o previsto fica em
+  `forecast_amount`. Não existe parcial em fixo; reverter o pagamento restaura
+  o previsto e reabre a ocorrência. Parcelado e avulso seguem aceitando
+  pagamento parcial e recusando valor acima do restante. Os fixos que estavam
+  "pagos em parte" foram convertidos pela migration `fixed_forecast_amount`, e os
+  não pagos passaram a previsão pela `fixed_always_forecast`. Reverter o
+  pagamento devolve a ocorrência à previsão. O saldo projetado do dashboard
+  desconta também as previsões vencidas.
 - **Cobrança efetiva no cartão:** `event_date` até hoje. A compra parcelada já
   feita é dívida inteira (o fato de todas as parcelas é a compra); assinatura e
   compra com data futura são previsão (`forecastCents`) até a data —

@@ -67,8 +67,9 @@ export class CreateTransactionDto {
   @ApiProperty({
     required: false,
     description:
-      'Previsão em vez de conta a pagar ou a receber. Padrão: falso. Só faz diferença na ' +
-      'recorrência (fixo) em conta comum; no cartão, o que separa previsão de cobrança é a data.',
+      'Previsão em vez de conta a pagar ou a receber. Padrão: falso. Ignorado na ' +
+      'recorrência (fixo), que é sempre previsão; no cartão, o que separa previsão de ' +
+      'cobrança é a data.',
   })
   @IsOptional()
   @IsBoolean()
