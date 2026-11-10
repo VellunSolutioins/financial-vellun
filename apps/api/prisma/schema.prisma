@@ -851,9 +851,29 @@ model OpsOperator {
   updatedAt   DateTime  @updatedAt @map("updated_at")
   lastLoginAt DateTime? @map("last_login_at")
 
-  auditEntries OpsAuditLog[]
+  auditEntries        OpsAuditLog[]
+  featureFlagsUpdated FeatureFlag[]
 
   @@map("ops_operators")
+}
+
+/// Estado das feature flags globais do app (tela /ops/funcionalidades).
+///
+/// **Quais** flags existem é decidido no código (`FEATURE_CATALOG` na API); a
+/// tabela guarda só o estado. Flag sem linha usa o default do catálogo, e linha
+/// com chave fora do catálogo é ignorada — assim criar uma flag nova não exige
+/// migration de dados, e remover uma do código não quebra a leitura.
+model FeatureFlag {
+  key       String   @id
+  enabled   Boolean
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  /// Quem mudou por último. `SetNull` para não prender operador removido; o
+  /// histórico completo fica em `ops_audit_log`.
+  updatedByOperatorId String?      @map("updated_by_operator_id")
+  updatedBy           OpsOperator? @relation(fields: [updatedByOperatorId], references: [id], onDelete: SetNull)
+
+  @@map("feature_flags")
 }
 
 /// Trilha append-only das ações de operadores.

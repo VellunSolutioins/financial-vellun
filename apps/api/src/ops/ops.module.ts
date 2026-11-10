@@ -20,6 +20,8 @@ import { OpsFailedMessagesService } from './failures/ops-failed-messages.service
 import { OpsFailuresActionsService } from './failures/ops-failures-actions.service';
 import { OpsFailuresQueryService } from './failures/ops-failures-query.service';
 import { ReprocessReconciliationService } from './failures/reprocess-reconciliation.service';
+import { OpsFeatureFlagsController } from './feature-flags/ops-feature-flags.controller';
+import { OpsFeatureFlagsService } from './feature-flags/ops-feature-flags.service';
 import { OpsGrafanaService } from './grafana/ops-grafana.service';
 import { OpsOperatorsController } from './operators/ops-operators.controller';
 import { OpsOperatorsService } from './operators/ops-operators.service';
@@ -51,6 +53,7 @@ import { OpsPaymentsQueryService } from './payments/ops-payments-query.service';
     OpsOverviewController,
     OpsPaymentsController,
     OpsAuditController,
+    OpsFeatureFlagsController,
   ],
   providers: [
     OpsAuthService,
@@ -71,6 +74,7 @@ import { OpsPaymentsQueryService } from './payments/ops-payments-query.service';
     OpsPaymentsQueryService,
     OpsPaymentsActionsService,
     OpsAuditQueryService,
+    OpsFeatureFlagsService,
   ],
   exports: [
     OpsAuditService,

@@ -4,6 +4,7 @@ import { SpendingGoalsModule } from './spending-goals/spending-goals.module';
 import { NotesModule } from './notes/notes.module';
 import { RemindersModule } from './reminders/reminders.module';
 import { AgendaEventsModule } from './agenda-events/agenda-events.module';
+import { FeatureFlagsModule } from './feature-flags/feature-flags.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -41,6 +42,7 @@ import { OpsModule } from './ops/ops.module';
     NotesModule,
     RemindersModule,
     AgendaEventsModule,
+    FeatureFlagsModule,
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',

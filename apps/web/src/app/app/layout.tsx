@@ -30,6 +30,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { SubscriptionAccess } from '@/lib/billing';
+import { type FeatureKey, featureForPath } from '@/lib/features';
 
 const ASSINATURA_PATH = '/app/conta/assinatura';
 const SIDEBAR_COLLAPSED_KEY = 'fv:sidebar-collapsed';
@@ -86,9 +87,10 @@ function WhatsappBanner({ verified, pathname }: { verified?: boolean; pathname: 
   );
 }
 
+/** `feature`: item controlado por flag no /ops. Sem ela, o item é essencial e sempre aparece. */
 const navItems: Record<
   'individual' | 'business',
-  { href: string; label: string; icon: LucideIcon }[]
+  { href: string; label: string; icon: LucideIcon; feature?: FeatureKey }[]
 > = {
   individual: [
     { href: '/app/pessoal/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -99,8 +101,8 @@ const navItems: Record<
     { href: '/app/pessoal/metas', label: 'Metas de Gastos', icon: Target },
     { href: '/app/pessoal/cartoes', label: 'Cartões', icon: CreditCard },
     { href: '/app/pessoal/contas', label: 'Contas', icon: Wallet },
-    { href: '/app/pessoal/agenda', label: 'Agenda e Lembretes', icon: Calendar },
-    { href: '/app/pessoal/anotacoes', label: 'Anotações', icon: StickyNote },
+    { href: '/app/pessoal/agenda', label: 'Agenda e Lembretes', icon: Calendar, feature: 'agenda' },
+    { href: '/app/pessoal/anotacoes', label: 'Anotações', icon: StickyNote, feature: 'notes' },
     { href: '/app/pessoal/categorias', label: 'Categorias', icon: Tag },
   ],
   business: [
@@ -116,7 +118,7 @@ const navItems: Record<
 };
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
-  const { user, loading, logout, subscriptionAccess } = useAuth();
+  const { user, loading, logout, subscriptionAccess, features } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -161,6 +163,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     }
   }, [user, loading, router, pathname]);
 
+  // Funcionalidade desligada no /ops: a rota não abre nem pela URL. O efeito
+  // acima leva o perfil empresarial ao dashboard dele. A proteção dos dados em
+  // si é da API (403 FEATURE_DISABLED); aqui é para não mostrar a página.
+  const gatedFeature = featureForPath(pathname);
+  useEffect(() => {
+    if (gatedFeature && features && !features[gatedFeature]) {
+      router.replace('/app/pessoal/dashboard');
+    }
+  }, [gatedFeature, features, router]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -170,7 +182,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
   if (!user) return null;
 
-  const items = navItems[user.profileType] ?? navItems.individual;
+  // Itens com flag só aparecem depois de confirmados como ligados: melhor surgir
+  // um instante depois do que aparecer e sumir.
+  const items = (navItems[user.profileType] ?? navItems.individual).filter(
+    (item) => !item.feature || features?.[item.feature] === true,
+  );
+  const routeAvailable = !gatedFeature || features?.[gatedFeature] === true;
 
   const navLinkClass = (active: boolean) =>
     cn(
@@ -324,7 +341,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="mx-auto max-w-6xl p-4 sm:p-6 lg:p-8">
           <SubscriptionBanner access={subscriptionAccess} pathname={pathname} />
           <WhatsappBanner verified={user.whatsappVerified} pathname={pathname} />
-          {children}
+          {routeAvailable ? (
+            children
+          ) : (
+            <div className="py-12 text-center text-sm text-muted-foreground">Carregando...</div>
+          )}
         </div>
       </main>
     </div>

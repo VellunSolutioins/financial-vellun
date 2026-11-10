@@ -13,6 +13,7 @@ const navItems = [
   { href: '/ops/falhas', label: 'Falhas' },
   { href: '/ops/pagamentos', label: 'Pagamentos' },
   { href: '/ops/auditoria', label: 'Auditoria' },
+  { href: '/ops/funcionalidades', label: 'Funcionalidades' },
 ];
 
 const roleLabels: Record<string, string> = {

@@ -1,12 +1,13 @@
 import { Module } from '@nestjs/common';
 
 import { BillingModule } from '../billing/billing.module';
+import { FeatureFlagsModule } from '../feature-flags/feature-flags.module';
 
 import { RemindersController } from './reminders.controller';
 import { RemindersService } from './reminders.service';
 
 @Module({
-  imports: [BillingModule],
+  imports: [BillingModule, FeatureFlagsModule],
   controllers: [RemindersController],
   providers: [RemindersService],
   exports: [RemindersService],

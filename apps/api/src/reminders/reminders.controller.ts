@@ -15,6 +15,8 @@ import { Request } from 'express';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ActiveSubscriptionGuard } from '../billing/guards/active-subscription.guard';
+import { RequireFeature } from '../feature-flags/decorators/require-feature.decorator';
+import { FeatureEnabledGuard } from '../feature-flags/guards/feature-enabled.guard';
 
 import { RemindersService } from './reminders.service';
 import { CreateReminderDto } from './dto/create-reminder.dto';
@@ -22,7 +24,8 @@ import { UpdateReminderDto } from './dto/update-reminder.dto';
 
 @ApiCookieAuth()
 @ApiTags('reminders')
-@UseGuards(JwtAuthGuard, ActiveSubscriptionGuard)
+@RequireFeature('agenda')
+@UseGuards(JwtAuthGuard, ActiveSubscriptionGuard, FeatureEnabledGuard)
 @Controller('reminders')
 export class RemindersController {
   constructor(private remindersService: RemindersService) {}

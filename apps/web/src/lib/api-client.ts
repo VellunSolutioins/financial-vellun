@@ -35,6 +35,7 @@ export class ApiClientError extends Error {
 }
 
 const BILLING_PATH = '/app/conta/assinatura';
+const DASHBOARD_PATH = '/app/pessoal/dashboard';
 const CSRF_COOKIE = 'csrf_token';
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
@@ -101,6 +102,17 @@ async function request<T>(path: string, options?: RequestInit, retry = true): Pr
       !window.location.pathname.startsWith(BILLING_PATH)
     ) {
       window.location.assign(`${BILLING_PATH}?status=required`);
+    }
+
+    // Funcionalidade desligada no /ops com a página já aberta: volta ao
+    // dashboard. O recarregamento também atualiza as flags do menu.
+    if (
+      res.status === 403 &&
+      err.code === 'FEATURE_DISABLED' &&
+      typeof window !== 'undefined' &&
+      !window.location.pathname.startsWith(DASHBOARD_PATH)
+    ) {
+      window.location.assign(DASHBOARD_PATH);
     }
 
     throw new ApiClientError(err.statusCode, err.message, err.error, err.code, err.errors);

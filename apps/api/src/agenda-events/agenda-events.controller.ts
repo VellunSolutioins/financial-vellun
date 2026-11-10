@@ -15,6 +15,8 @@ import { Request } from 'express';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ActiveSubscriptionGuard } from '../billing/guards/active-subscription.guard';
+import { RequireFeature } from '../feature-flags/decorators/require-feature.decorator';
+import { FeatureEnabledGuard } from '../feature-flags/guards/feature-enabled.guard';
 
 import { AgendaEventsService } from './agenda-events.service';
 import { CreateAgendaEventDto } from './dto/create-agenda-event.dto';
@@ -22,7 +24,8 @@ import { UpdateAgendaEventDto } from './dto/update-agenda-event.dto';
 
 @ApiCookieAuth()
 @ApiTags('agenda-events')
-@UseGuards(JwtAuthGuard, ActiveSubscriptionGuard)
+@RequireFeature('agenda')
+@UseGuards(JwtAuthGuard, ActiveSubscriptionGuard, FeatureEnabledGuard)
 @Controller('agenda-events')
 export class AgendaEventsController {
   constructor(private agendaEventsService: AgendaEventsService) {}
