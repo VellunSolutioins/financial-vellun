@@ -201,7 +201,7 @@ integration('vencimento × pagamento (PostgreSQL)', () => {
     expect(await env.balance(accountId)).toBe(100);
   });
 
-  it('recorrência em conta nasce a pagar; previsão é escolha de quem cria', async () => {
+  it('gasto fixo nasce sempre como previsão, e editar não tira a marca', async () => {
     const accountId = await env.account(userId, 1000);
     const bill = await env.transactions.create(userId, {
       accountId,
@@ -211,10 +211,17 @@ integration('vencimento × pagamento (PostgreSQL)', () => {
       transactionDate: dayFromToday(-3),
       recurrenceType: 'fixo',
       recurrenceMonths: 2,
+      forecast: false, // ignorado: cliente antigo
     });
-    // Sem marcar "Previsão": conta a pagar, já vencida, sem mexer no saldo.
-    expect(bill).toMatchObject({ state: 'open', forecast: false, isOverdue: true });
+    // Previsão vencida, sem mexer no saldo.
+    expect(bill).toMatchObject({ state: 'forecast', forecast: true, isOverdue: true });
     expect(await env.balance(accountId)).toBe(1000);
+
+    await env.transactions.update(userId, bill.id, { forecast: false });
+    await env.recurrences.update(userId, bill.seriesId!, { forecast: false });
+    expect(
+      await env.prisma.transaction.count({ where: { seriesId: bill.seriesId, forecast: false } }),
+    ).toBe(0);
   });
 
   it('recorrência: previsão vencida segue visível; pausar não apaga o que foi pago', async () => {
@@ -250,6 +257,107 @@ integration('vencimento × pagamento (PostgreSQL)', () => {
     });
     expect(series.map((t) => t.status)).toEqual(['confirmed', 'cancelled', 'cancelled']);
     expect(await env.balance(accountId)).toBe(950);
+  });
+
+  it('recorrência: o valor é previsão e o pagamento, para menos ou para mais, fecha a ocorrência', async () => {
+    const accountId = await env.account(userId, 1000);
+    const [less, more] = await env.prisma.transaction.findMany({
+      where: {
+        seriesId: (
+          await env.transactions.create(userId, {
+            accountId,
+            type: 'expense',
+            amount: 50,
+            description: 'Luz',
+            transactionDate: dayFromToday(-40),
+            recurrenceType: 'fixo',
+            recurrenceMonths: 2,
+          })
+        ).seriesId,
+      },
+      orderBy: { transactionDate: 'asc' },
+    });
+
+    const k = key();
+    const paid = await env.settlements.settle(userId, less.id, {
+      amount: 48.5,
+      date: dayFromToday(0),
+      idempotencyKey: k,
+    });
+    // Repetir a chave não ajusta o valor de novo.
+    await env.settlements.settle(userId, less.id, {
+      amount: 48.5,
+      date: dayFromToday(0),
+      idempotencyKey: k,
+    });
+    expect(await env.balance(accountId)).toBe(951.5);
+    const settled = await env.transactions.findOne(userId, less.id);
+    expect(settled).toMatchObject({ state: 'settled', remaining: 0, settledAmount: 48.5 });
+    expect([Number(settled.amount), Number(settled.forecastAmount)]).toEqual([48.5, 50]);
+
+    await env.settlements.settle(userId, more.id, {
+      amount: 52.3,
+      date: dayFromToday(0),
+      idempotencyKey: key(),
+    });
+    expect(await env.transactions.findOne(userId, more.id)).toMatchObject({
+      state: 'settled',
+      remaining: 0,
+    });
+    expect(await env.balance(accountId)).toBe(899.2);
+
+    // Reverter restaura o previsto e reabre a ocorrência como previsão.
+    await env.settlements.reverse(userId, less.id, paid.id);
+    const reopened = await env.transactions.findOne(userId, less.id);
+    expect(reopened).toMatchObject({
+      state: 'forecast',
+      forecast: true,
+      remaining: 50,
+      forecastAmount: null,
+    });
+    expect(Number(reopened.amount)).toBe(50);
+    expect(await env.balance(accountId)).toBe(947.7);
+  });
+
+  it('avulso e parcelado continuam aceitando pagamento parcial e recusando acima do restante', async () => {
+    const accountId = await env.account(userId, 1000);
+    const single = await expense(accountId, 50, dayFromToday(-1), { settle: false });
+    const [installment] = await env.prisma.transaction.findMany({
+      where: {
+        seriesId: (
+          await env.transactions.create(userId, {
+            accountId,
+            type: 'expense',
+            amount: 100,
+            description: 'Curso',
+            transactionDate: dayFromToday(-1),
+            recurrenceType: 'parcelado',
+            installments: 2,
+          })
+        ).seriesId,
+      },
+      orderBy: { transactionDate: 'asc' },
+    });
+
+    for (const t of [single, installment]) {
+      await env.settlements.settle(userId, t.id, {
+        amount: 48.5,
+        date: dayFromToday(0),
+        idempotencyKey: key(),
+      });
+      expect(await env.transactions.findOne(userId, t.id)).toMatchObject({
+        state: 'partial',
+        remaining: 1.5,
+        forecastAmount: null,
+      });
+      await expect(
+        env.settlements.settle(userId, t.id, {
+          amount: 1.51,
+          date: dayFromToday(0),
+          idempotencyKey: key(),
+        }),
+      ).rejects.toMatchObject({ status: 400 });
+    }
   });
 
   it('totais "só realizados" seguem o dashboard: conta futura e previsão não paga ficam de fora', async () => {

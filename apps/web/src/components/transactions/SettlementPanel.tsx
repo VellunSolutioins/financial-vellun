@@ -61,6 +61,7 @@ const ORIGIN_LABEL: Record<string, string> = {
  * Vencer não paga nada: o saldo só muda quando o pagamento é registrado aqui.
  * Aceita pagamento parcial, de outra conta, e a dispensa do restante (desconto,
  * cobrança que não vai acontecer), que fecha o lançamento sem mexer no saldo.
+ * Na recorrência não há parcial: o valor pago é o real e fecha a ocorrência.
  */
 export function SettlementPanel({
   transaction,
@@ -83,6 +84,11 @@ export function SettlementPanel({
   const [submitting, setSubmitting] = useState(false);
   const isIncome = transaction.type === 'income';
   const remaining = transaction.remaining ?? 0;
+  // Na recorrência o valor é previsão: o pagamento registrado é o real e fecha
+  // a ocorrência, para menos ou para mais.
+  const isFixed = transaction.recurrenceType === 'fixo';
+  const forecastAmount =
+    transaction.forecastAmount != null ? Number(transaction.forecastAmount) : null;
 
   const load = useCallback(async () => {
     try {
@@ -175,8 +181,9 @@ export function SettlementPanel({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">{isIncome ? 'Recebimentos' : 'Pagamentos'}</h3>
         <p className="text-xs text-muted-foreground">
-          {isIncome ? 'Recebido' : 'Pago'} {formatCurrency(transaction.settledAmount ?? 0)} ·
-          restante {formatCurrency(remaining)}
+          {forecastAmount !== null && <>Previsto {formatCurrency(forecastAmount)} · </>}
+          {isIncome ? 'Recebido' : 'Pago'} {formatCurrency(transaction.settledAmount ?? 0)}
+          {forecastAmount === null && <> · restante {formatCurrency(remaining)}</>}
         </p>
       </div>
 
@@ -280,7 +287,9 @@ export function SettlementPanel({
           <p className="text-xs text-muted-foreground">
             {kind === 'write_off'
               ? 'Dispensar fecha o lançamento sem mexer no saldo: desconto, perdão ou cobrança que não vai acontecer.'
-              : 'Pode ser parcial: o que faltar continua em aberto.'}
+              : isFixed
+                ? `O valor da recorrência é uma previsão: informe o valor ${isIncome ? 'recebido' : 'pago'} de fato e o lançamento fica ${isIncome ? 'recebido' : 'pago'}.`
+                : 'Pode ser parcial: o que faltar continua em aberto.'}
           </p>
           <div className="flex gap-2">
             <Button type="submit" size="sm" disabled={submitting} className="flex-1">

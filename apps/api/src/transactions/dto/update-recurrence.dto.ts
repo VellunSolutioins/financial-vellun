@@ -51,8 +51,8 @@ export class UpdateRecurrenceDto {
   @ApiProperty({
     required: false,
     description:
-      'Previsão (true: estimativa, não é conta) ou conta a pagar/receber (false, o padrão). ' +
-      'Vale para as próximas ocorrências em conta comum; no cartão não tem efeito.',
+      'Obsoleto e ignorado: as ocorrências de um gasto fixo são sempre previsão. ' +
+      'Aceito só para compatibilidade com clientes antigos.',
   })
   @IsOptional()
   @IsBoolean()

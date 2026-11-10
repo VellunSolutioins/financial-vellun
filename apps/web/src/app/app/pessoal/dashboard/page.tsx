@@ -96,6 +96,7 @@ interface DashboardSummary {
       cashBalance: number;
       receivable: number;
       overdueBills: number;
+      overdueForecast: number;
       bills: number;
       forecastBills: number;
       invoices: number;
@@ -435,8 +436,11 @@ function DashboardContent() {
     },
   ];
 
-  const overdueTotal = data.commitments.overdueBills + data.commitments.invoicesOverdue;
-  const dueTotal = data.commitments.billsToHorizon + data.commitments.invoicesToHorizon;
+  // Gasto fixo é sempre previsão, mas para quem lê é conta: entra em "contas".
+  const overdueBills = data.commitments.overdueBills + data.commitments.overdueForecast;
+  const dueBills = data.commitments.billsToHorizon + data.commitments.forecastToHorizon;
+  const overdueTotal = overdueBills + data.commitments.invoicesOverdue;
+  const dueTotal = dueBills + data.commitments.invoicesToHorizon;
 
   // Gráficos por contas × cartões: mesmo período da tela e, se houver filtro,
   // só os recursos dele (um tipo fora do filtro mostra o aviso de vazio).
@@ -511,15 +515,9 @@ function DashboardContent() {
               {formatCurrency(overdueTotal)}
             </p>
             <p className="text-xs text-muted-foreground">
-              contas {formatCurrency(data.commitments.overdueBills)} · faturas{' '}
+              contas {formatCurrency(overdueBills)} · faturas{' '}
               {formatCurrency(data.commitments.invoicesOverdue)}
             </p>
-            {data.commitments.overdueForecast > 0 && (
-              <p className="text-xs text-amber-700">
-                + {formatCurrency(data.commitments.overdueForecast)} em previsões vencidas: confirme
-                ou cancele
-              </p>
-            )}
           </CardContent>
         </Card>
         <Card className="rounded-2xl">
@@ -527,14 +525,9 @@ function DashboardContent() {
             <p className="text-xs font-medium text-muted-foreground">A vencer até {horizonLabel}</p>
             <p className="text-lg font-bold">{formatCurrency(dueTotal)}</p>
             <p className="text-xs text-muted-foreground">
-              contas {formatCurrency(data.commitments.billsToHorizon)} · faturas{' '}
+              contas {formatCurrency(dueBills)} · faturas{' '}
               {formatCurrency(data.commitments.invoicesToHorizon)}
             </p>
-            {data.commitments.forecastToHorizon > 0 && (
-              <p className="text-xs text-muted-foreground">
-                previsto: {formatCurrency(data.commitments.forecastToHorizon)}
-              </p>
-            )}
           </CardContent>
         </Card>
         <Card className="rounded-2xl">
@@ -587,8 +580,7 @@ function DashboardContent() {
                 <p className="text-xs text-muted-foreground">
                   saldo em contas + a receber (
                   {formatCurrency(data.projected.components.receivable)}) − contas vencidas e a
-                  vencer, previsões e faturas até {horizonLabel}. Não é saldo bancário nem
-                  patrimônio.
+                  vencer e faturas até {horizonLabel}. Não é saldo bancário nem patrimônio.
                 </p>
               </>
             ) : (

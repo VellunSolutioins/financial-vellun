@@ -16,7 +16,7 @@ export const demoChat = {
 export const demoEntry = {
   description: 'Mercado',
   category: 'Mercado',
-  categoryColor: '#FFA07A',
+  categoryColor: '#FB8C00',
   account: DEMO_ACCOUNT,
   date: DEMO_DATE,
   amount: 85,
@@ -24,9 +24,9 @@ export const demoEntry = {
 
 /** Gastos do mês por categoria; o de Mercado já inclui o lançamento acima. */
 export const demoCategories = [
-  { name: 'Moradia', total: 800, color: '#87CEEB' },
-  { name: 'Mercado', total: 385, color: '#FFA07A' },
-  { name: 'Transporte', total: 165, color: '#98FB98' },
+  { name: 'Moradia', total: 800, color: '#1E88E5' },
+  { name: 'Mercado', total: 385, color: '#FB8C00' },
+  { name: 'Transporte', total: 165, color: '#FDD835' },
 ];
 
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });

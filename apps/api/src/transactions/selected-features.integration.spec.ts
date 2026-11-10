@@ -91,13 +91,14 @@ integration('selected features with PostgreSQL', () => {
     expect(recurring.data.map((t) => t.status)).toEqual(['confirmed', 'confirmed', 'confirmed']);
     expect(new Set(recurring.data.map((t) => t.seriesId)).size).toBe(1);
     // As três datas já passaram, mas ninguém pagou: vencer não liquida nada
-    // (docs/adrs/0018). O saldo fica, e as três seguem visíveis como vencidas.
+    // (docs/adrs/0018). O saldo fica, e as três seguem visíveis como previsões
+    // vencidas (gasto fixo é sempre previsão).
     expect(Number((await accounts.findOne(userId, accountId)).currentBalance)).toBe(1000);
     const overdue = await transactions.findAll(userId, { ...filters, settlement: 'overdue' });
     expect(overdue.data.map((t) => [t.state, t.isOverdue, t.remaining])).toEqual([
-      ['open', true, 100],
-      ['open', true, 100],
-      ['open', true, 100],
+      ['forecast', true, 100],
+      ['forecast', true, 100],
+      ['forecast', true, 100],
     ]);
     expect((await transactions.findAll(otherId, { recurrenceType: 'fixo' })).meta.total).toBe(0);
     await expect(transactions.update(otherId, first.id, { amount: 999 })).rejects.toThrow();

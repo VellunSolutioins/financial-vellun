@@ -437,7 +437,9 @@ export class TransactionsService {
           ...(dto.description !== undefined && { description: dto.description }),
           ...(dto.accountId !== undefined && { accountId: dto.accountId }),
           ...(dto.status !== undefined && { status: dto.status }),
-          ...(dto.forecast !== undefined && { forecast: dto.forecast }),
+          // Gasto fixo é sempre previsão: a marca não muda por edição.
+          ...(dto.forecast !== undefined &&
+            existing.recurrenceType !== 'fixo' && { forecast: dto.forecast }),
           ...(categoryId !== undefined && { categoryId }),
           ...(transactionDate && { transactionDate }),
           // Parcela datada na abertura da fatura (docs/adrs/0022): a data

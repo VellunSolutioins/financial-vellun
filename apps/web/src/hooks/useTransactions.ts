@@ -48,6 +48,8 @@ export interface Transaction {
   advancedFromDate?: string | null;
   /** Valor antes do desconto do adiantamento; nulo sem desconto. */
   amountBeforeAdvance?: number | null;
+  /** Recorrência paga pelo valor real: o valor previsto antes do pagamento. */
+  forecastAmount?: number | null;
   createdAt: string;
 }
 

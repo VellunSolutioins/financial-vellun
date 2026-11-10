@@ -18,9 +18,9 @@ import { UpdateRecurrenceDto } from './dto/update-recurrence.dto';
  * passadas e as já pagas ficam como estão, porque já aconteceram: cancelar a
  * assinatura não apaga o que foi gasto nem pago (docs/adrs/0018).
  *
- * As ocorrências nascem a pagar (ou a receber). "Previsão" (`forecast: true`)
- * marca a série inteira como estimativa, não como conta — escolha do usuário
- * (docs/adrs/0020). No cartão a marca não tem efeito: lá vale a data.
+ * As ocorrências nascem sempre como previsão (`forecast: true`): o valor é
+ * estimativa e o pagamento registrado é o valor real, que fecha a ocorrência
+ * (docs/adrs/0018). No cartão a marca não tem efeito: lá vale a data.
  */
 
 const occurrenceInclude = {
@@ -208,7 +208,6 @@ export class RecurrencesService {
       ...(dto.amount !== undefined && { amount: dto.amount }),
       ...(dto.accountId !== undefined && { accountId: dto.accountId }),
       ...(dto.categoryId !== undefined && { categoryId: dto.categoryId || null }),
-      ...(dto.forecast !== undefined && { forecast: dto.forecast }),
     };
 
     await this.prisma.$transaction(async (tx) => {
