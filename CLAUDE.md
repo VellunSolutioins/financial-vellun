@@ -41,14 +41,15 @@ financial-vellun/
 ## Estrutura interna dos apps
 
 ```
-apps/api/src/        accounts/ auth/ billing/ categories/ contacts/ credit-cards/ dashboard/
+apps/api/src/        accounts/ auth/ billing/ categories/ contacts/ credit-cards/ dashboard/ feature-flags/
                      financial-resources/ internal/ mail/ notifications/ observability/ ops/
                      transactions/ users/ whatsapp-link/
                      prisma/ (cada módulo: *.module/*.controller/*.service + dto/)
                      auth/ (sessões, "esqueci minha senha", aviso de senha alterada)
                      mail/ (e-mail transacional: transports log/resend por MAIL_PROVIDER)
                      observability/ (métricas, health, correlação, log estruturado)
-                     ops/ (auth GitHub OAuth, audit append-only, operators)
+                     ops/ (auth GitHub OAuth, audit append-only, operators, feature-flags)
+                     feature-flags/ (catálogo, GET /features, @RequireFeature + guard — ADR 0023)
 apps/web/src/        app/ components/ contexts/ hooks/ lib/ middleware.ts
                      app/(auth)/{login,cadastro,esqueci-senha,redefinir-senha}
                      app/app/{pessoal,empresa,conta}

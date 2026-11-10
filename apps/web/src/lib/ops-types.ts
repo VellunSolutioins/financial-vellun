@@ -6,6 +6,8 @@
  * quebraria em execução.
  */
 
+import type { FeatureKey } from '@financial-vellun/shared';
+
 export interface Paginated<T> {
   items: T[];
   total: number;
@@ -17,6 +19,18 @@ export type OpsFailureStatus = 'pending' | 'reprocessing' | 'reprocessed' | 'dis
 export type OpsFailureSource = 'whatsapp_inbound' | 'whatsapp_processing' | 'whatsapp_outbound';
 export type WebhookEventStatus = 'received' | 'processing' | 'processed' | 'failed' | 'exhausted';
 export type OpsAuditResult = 'success' | 'failure' | 'denied';
+
+/** Funcionalidade com feature flag global, como `GET /ops/feature-flags` devolve. */
+export interface OpsFeatureFlag {
+  key: FeatureKey;
+  label: string;
+  description: string;
+  enabled: boolean;
+  /** `true` enquanto ninguém mexeu na flag e vale o default do catálogo. */
+  isDefault: boolean;
+  updatedAt: string | null;
+  updatedBy: { githubLogin: string } | null;
+}
 
 export interface FailureListItem {
   id: string;
@@ -219,10 +233,12 @@ export const auditActionLabels: Record<string, string> = {
   'ops.failure.reprocess_published': 'Mensagem republicada',
   'ops.failure.discarded': 'Falha descartada',
   'ops.payment_event.recovered': 'Evento de pagamento recuperado',
+  'ops.feature_flag.updated': 'Funcionalidade ligada/desligada',
 };
 
 export const auditTargetLabels: Record<string, string> = {
   ops_operator: 'Operador',
   ops_failed_message: 'Falha',
   payment_webhook_event: 'Webhook de pagamento',
+  feature_flag: 'Funcionalidade',
 };

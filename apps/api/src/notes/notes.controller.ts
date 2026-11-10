@@ -4,6 +4,8 @@ import { Request } from 'express';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ActiveSubscriptionGuard } from '../billing/guards/active-subscription.guard';
+import { RequireFeature } from '../feature-flags/decorators/require-feature.decorator';
+import { FeatureEnabledGuard } from '../feature-flags/guards/feature-enabled.guard';
 
 import { NotesService } from './notes.service';
 import { CreateNoteDto } from './dto/create-note.dto';
@@ -11,7 +13,8 @@ import { UpdateNoteDto } from './dto/update-note.dto';
 
 @ApiCookieAuth()
 @ApiTags('notes')
-@UseGuards(JwtAuthGuard, ActiveSubscriptionGuard)
+@RequireFeature('notes')
+@UseGuards(JwtAuthGuard, ActiveSubscriptionGuard, FeatureEnabledGuard)
 @Controller('notes')
 export class NotesController {
   constructor(private notesService: NotesService) {}

@@ -4,4 +4,5 @@ export * from './schemas/transaction';
 export * from './schemas/category';
 export * from './schemas/account';
 export * from './schemas/billing';
+export * from './features';
 export * from './types/api';
