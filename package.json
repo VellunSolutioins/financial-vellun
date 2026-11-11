@@ -33,7 +33,7 @@
     "obs:down": "docker compose -f infra/docker/docker-compose.yml -f infra/observability/docker-compose.observability.yml down"
   },
   "engines": {
-    "node": ">=24.22.1 <25",
+    "node": ">=24.22.3 <25",
     "pnpm": ">=10.34.9 <11"
   },
   "pnpm": {
