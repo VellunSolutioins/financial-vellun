@@ -27,7 +27,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Gerar o Prisma Client
@@ -67,7 +67,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Gerar o Prisma Client
@@ -141,25 +141,29 @@ jobs:
   audit:
     name: Auditoria de dependências
     runs-on: ubuntu-latest
-    # Informativo por enquanto: o repositório tem um passivo conhecido (Next.js
-    # 14, sem correção para dois avisos críticos, e pacotes transitivos). Passar
-    # para bloqueante assim que o passivo for zerado — é o que dá sentido ao job.
+    # Informativo por enquanto: o repositório tem um passivo conhecido (avisos
+    # que só fecham com Nest 11 e zod 4, e pacotes transitivos). Passar para
+    # bloqueante assim que o passivo for zerado — é o que dá sentido ao job.
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version-file: .nvmrc
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # Falha em vulnerabilidade alta ou crítica; as demais aparecem no log.
       - name: pnpm audit
         run: pnpm audit --audit-level high
+      # `!cancelled()`: sem ele, uma falha do `pnpm audit` pula os passos abaixo
+      # e o Python nunca é auditado.
       - uses: actions/setup-python@v5
+        if: ${{ !cancelled() }}
         with:
           python-version: '3.12'
       - name: pip-audit
+        if: ${{ !cancelled() }}
         run: |
           pip install pip-audit
           pip-audit --requirement apps/ai-agent/requirements.lock --disable-pip
