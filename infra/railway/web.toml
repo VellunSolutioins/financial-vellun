@@ -9,8 +9,9 @@
 #   PORT                      ← atribuído pelo Railway; `next start` respeita
 
 [build]
-builder = "NIXPACKS"
-buildCommand = "pnpm install --frozen-lockfile && pnpm --filter @financial-vellun/web build"
+# Railpack, como a API (ver a nota sobre a versão do Node em api.toml).
+builder = "RAILPACK"
+buildCommand = "pnpm --filter @financial-vellun/web build"
 
 [deploy]
 startCommand = "pnpm --filter @financial-vellun/web start"
