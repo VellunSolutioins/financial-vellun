@@ -1,4 +1,4 @@
-# Serviço `financial-vellun-web` — Next.js 14 (App Router).
+# Serviço `financial-vellun-web` — Next.js 15 (App Router).
 #
 # Aponte o campo "Config as code" deste serviço para `infra/railway/web.toml`.
 # Só é necessário se o front sair da Vercel para o Railway; enquanto estiver na
@@ -9,8 +9,9 @@
 #   PORT                      ← atribuído pelo Railway; `next start` respeita
 
 [build]
-builder = "NIXPACKS"
-buildCommand = "pnpm install --frozen-lockfile && pnpm --filter @financial-vellun/web build"
+# Railpack, como a API (ver a nota sobre a versão do Node em api.toml).
+builder = "RAILPACK"
+buildCommand = "pnpm --filter @financial-vellun/web build"
 
 [deploy]
 startCommand = "pnpm --filter @financial-vellun/web start"

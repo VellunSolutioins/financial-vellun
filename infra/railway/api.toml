@@ -1,8 +1,15 @@
 # Serviço `financial-vellun-api` — NestJS + Prisma.
 #
 # Aponte o campo "Config as code" deste serviço para `infra/railway/api.toml`.
-# Build por Nixpacks a partir da raiz do monorepo (pnpm workspaces): a API
+# Build por Railpack a partir da raiz do monorepo (pnpm workspaces): a API
 # depende de `packages/shared`, então o root directory precisa ser `/`.
+#
+# Versão do Node: o Railpack lê `engines.node` do package.json raiz antes do
+# `.nvmrc` e reduz o range à major (">=24.22.3 <25" → "24"), instalando a
+# última 24.x publicada. `NODE_VERSION`/`RAILPACK_NODE_VERSION` nas variáveis
+# do serviço passam por cima de tudo: não deixar uma versão velha fixada lá.
+# O próprio Railpack roda `pnpm install --frozen-lockfile`; o buildCommand só
+# gera o Prisma Client e compila.
 #
 # Variáveis que este serviço PRECISA ter (as demais estão no README):
 #   PORT=3001                 ← o Alloy scrapa porta fixa
@@ -13,8 +20,8 @@
 #   METRICS_TOKEN             ← o mesmo do agente; o Alloy usa um só
 
 [build]
-builder = "NIXPACKS"
-buildCommand = "pnpm install --frozen-lockfile && pnpm --filter @financial-vellun/api exec prisma generate && pnpm --filter @financial-vellun/api build"
+builder = "RAILPACK"
+buildCommand = "pnpm --filter @financial-vellun/api exec prisma generate && pnpm --filter @financial-vellun/api build"
 
 [deploy]
 # As migrations rodam no start, contra `DIRECT_URL`: `migrate deploy` usa

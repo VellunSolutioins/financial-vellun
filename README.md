@@ -27,8 +27,8 @@ financial-vellun/
 
 | Ferramenta     | Versão                                       | Verificar                |
 | -------------- | -------------------------------------------- | ------------------------ |
-| Node.js        | ≥ 20 (`.nvmrc` fixa `22.13.1`)               | `node -v`                |
-| pnpm           | ≥ 9 (`corepack enable` usa a do projeto)     | `pnpm -v`                |
+| Node.js        | ≥ 24.22.3 (`.nvmrc` fixa `24.22.3`)          | `node -v`                |
+| pnpm           | ≥ 10.34.9 (`corepack enable` usa a do projeto) | `pnpm -v`                |
 | Python         | ≥ 3.11 (`.python-version` do agente: `3.12`) | `python --version`       |
 | Docker Desktop | com Compose v2                               | `docker compose version` |
 
