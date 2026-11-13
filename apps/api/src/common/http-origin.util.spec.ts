@@ -19,7 +19,18 @@ describe('isAllowedWebOrigin', () => {
     it('aceita as origens configuradas, exatas e sem barra final', () => {
       expect(isAllowedWebOrigin('https://app.vellun.com.br')).toBe(true);
       expect(isAllowedWebOrigin('https://mais.vellun.com.br')).toBe(true);
+    });
+
+    it('aceita o domínio próprio e o endereço antigo da Vercel mesmo sem configuração', () => {
+      delete process.env.WEB_URL;
+      delete process.env.WEB_ALLOWED_ORIGINS;
+      expect(isAllowedWebOrigin('https://zeloo.app.br')).toBe(true);
       expect(isAllowedWebOrigin('https://financial-vellun-web.vercel.app')).toBe(true);
+    });
+
+    it('recusa subdomínio do domínio próprio que não foi configurado', () => {
+      expect(isAllowedWebOrigin('https://www.zeloo.app.br')).toBe(false);
+      expect(isAllowedWebOrigin('https://zeloo.app.br.evil.example')).toBe(false);
     });
 
     it('recusa preview de branch e localhost', () => {
