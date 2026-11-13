@@ -94,6 +94,13 @@ export const opsApiClient = {
     }),
   patch: <T>(path: string, body: unknown, init?: RequestInit) =>
     request<T>(path, { ...init, method: 'PATCH', body: JSON.stringify(body) }),
+  /** `body` leva a justificativa da auditoria. */
+  delete: <T>(path: string, body?: unknown, init?: RequestInit) =>
+    request<T>(path, {
+      ...init,
+      method: 'DELETE',
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }),
 };
 
 /** URL de início do OAuth. É navegação de página, não `fetch`. */

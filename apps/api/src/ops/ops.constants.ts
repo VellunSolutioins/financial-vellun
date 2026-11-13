@@ -50,6 +50,9 @@ export const OPS_AUDIT_ACTIONS = {
   failureDiscarded: 'ops.failure.discarded',
   paymentEventRecovered: 'ops.payment_event.recovered',
   featureFlagUpdated: 'ops.feature_flag.updated',
+  planCreated: 'ops.plan.created',
+  planUpdated: 'ops.plan.updated',
+  planDeleted: 'ops.plan.deleted',
 } as const;
 
 /** Tipos de alvo usados em `ops_audit_log.targetType`. */
@@ -58,4 +61,5 @@ export const OPS_AUDIT_TARGETS = {
   failedMessage: 'ops_failed_message',
   paymentWebhookEvent: 'payment_webhook_event',
   featureFlag: 'feature_flag',
+  plan: 'plan',
 } as const;

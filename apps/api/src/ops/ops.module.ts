@@ -30,6 +30,8 @@ import { OpsOverviewService } from './overview/ops-overview.service';
 import { OpsPaymentsActionsService } from './payments/ops-payments-actions.service';
 import { OpsPaymentsController } from './payments/ops-payments.controller';
 import { OpsPaymentsQueryService } from './payments/ops-payments-query.service';
+import { OpsPlansController } from './plans/ops-plans.controller';
+import { OpsPlansService } from './plans/ops-plans.service';
 
 /**
  * Área de operações: identidade própria (GitHub OAuth + organização), papéis e
@@ -54,6 +56,7 @@ import { OpsPaymentsQueryService } from './payments/ops-payments-query.service';
     OpsPaymentsController,
     OpsAuditController,
     OpsFeatureFlagsController,
+    OpsPlansController,
   ],
   providers: [
     OpsAuthService,
@@ -75,6 +78,7 @@ import { OpsPaymentsQueryService } from './payments/ops-payments-query.service';
     OpsPaymentsActionsService,
     OpsAuditQueryService,
     OpsFeatureFlagsService,
+    OpsPlansService,
   ],
   exports: [
     OpsAuditService,

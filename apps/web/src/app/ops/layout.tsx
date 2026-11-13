@@ -14,6 +14,7 @@ const navItems = [
   { href: '/ops/pagamentos', label: 'Pagamentos' },
   { href: '/ops/auditoria', label: 'Auditoria' },
   { href: '/ops/funcionalidades', label: 'Funcionalidades' },
+  { href: '/ops/planos', label: 'Planos' },
 ];
 
 const roleLabels: Record<string, string> = {

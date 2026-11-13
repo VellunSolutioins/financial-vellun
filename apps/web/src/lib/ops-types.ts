@@ -32,6 +32,23 @@ export interface OpsFeatureFlag {
   updatedBy: { githubLogin: string } | null;
 }
 
+/** Plano de assinatura como o painel o vê (`GET /ops/plans`). */
+export interface OpsPlan {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  /** Duas casas, ponto decimal: `"49.90"`. */
+  price: string;
+  currency: string;
+  interval: 'monthly' | 'annual';
+  /** Exibido na tela de assinatura (e aceita checkout novo). */
+  isActive: boolean;
+  subscriptionCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface FailureListItem {
   id: string;
   source: OpsFailureSource;
@@ -234,6 +251,9 @@ export const auditActionLabels: Record<string, string> = {
   'ops.failure.discarded': 'Falha descartada',
   'ops.payment_event.recovered': 'Evento de pagamento recuperado',
   'ops.feature_flag.updated': 'Funcionalidade ligada/desligada',
+  'ops.plan.created': 'Plano criado',
+  'ops.plan.updated': 'Plano alterado',
+  'ops.plan.deleted': 'Plano excluído',
 };
 
 export const auditTargetLabels: Record<string, string> = {
@@ -241,4 +261,5 @@ export const auditTargetLabels: Record<string, string> = {
   ops_failed_message: 'Falha',
   payment_webhook_event: 'Webhook de pagamento',
   feature_flag: 'Funcionalidade',
+  plan: 'Plano',
 };
