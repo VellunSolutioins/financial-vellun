@@ -38,14 +38,15 @@ export class UpdateInstallmentDto {
 
 export class DeleteInstallmentQueryDto {
   @ApiProperty({
-    enum: ['all', 'future'],
+    enum: ['all'],
     default: 'all',
     required: false,
-    description: '`all`: a compra inteira; `future`: as parcelas de hoje em diante.',
+    description:
+      'Sempre a compra inteira: parcela não é excluída sozinha. `future` não existe mais.',
   })
   @IsOptional()
-  @IsIn(['all', 'future'])
-  scope?: 'all' | 'future' = 'all';
+  @IsIn(['all'], { message: 'Só a compra inteira pode ser excluída.' })
+  scope?: 'all' = 'all';
 }
 
 /** Adiantamento das últimas parcelas da compra para hoje (fatura aberta, no cartão). */

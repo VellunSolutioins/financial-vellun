@@ -79,6 +79,9 @@ export class InstallmentsController {
     @Query() query: DeleteInstallmentQueryDto,
   ) {
     const user = req.user as any;
-    return this.installmentsService.remove(user.id, seriesId, query.scope ?? 'all');
+    // `scope` só aceita `all`: cliente antigo pedindo `future` recebe 400
+    // em vez de apagar a compra inteira sem querer.
+    void query;
+    return this.installmentsService.remove(user.id, seriesId);
   }
 }

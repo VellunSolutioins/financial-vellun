@@ -17,8 +17,17 @@ import {
   startOfDayUtc,
   todaySaoPaulo,
 } from '../common/date.util';
-import { FINANCIAL_TX_OPTIONS, cents as toCents, lockAccounts } from '../common/db';
-import { recordSettlement } from './settlements.service';
+import {
+  FINANCIAL_TX_OPTIONS,
+  cents as toCents,
+  lockAccounts,
+  lockTransaction,
+} from '../common/db';
+import {
+  activeSettlementAccounts,
+  recordSettlement,
+  reverseActiveSettlements,
+} from './settlements.service';
 import { TransactionsService } from './transactions.service';
 import { AdvanceInstallmentDto, UpdateInstallmentDto } from './dto/update-installment.dto';
 import { advanceState, distributeAdvance } from './installment-advance';
@@ -30,9 +39,10 @@ import { advanceState, distributeAdvance } from './installment-advance';
  * (docs/adrs/0018). A tela de Lançamentos mostra as parcelas; a de
  * Parcelamentos, uma linha por compra.
  *
- * Exclusão respeita as mesmas travas da parcela avulsa (docs/adrs/0015):
- * parcela em fatura fechada ou paga, com estorno ou com pagamento registrado
- * não sai — a compra se desfaz por estorno.
+ * A compra é uma operação só: não se exclui nem cancela parcela isolada, só
+ * a compra inteira. Parcela em fatura fechada ou paga, ou compra com estorno,
+ * trava a exclusão (docs/adrs/0015) — a compra se desfaz por estorno.
+ * Pagamento registrado em conta não trava: é revertido junto.
  */
 
 const parcelInclude = {
@@ -45,16 +55,20 @@ const parcelInclude = {
 
 export type Parcel = Prisma.TransactionGetPayload<{ include: typeof parcelInclude }>;
 
-export type DeleteScope = 'all' | 'future';
-
 /** Por que uma parcela não pode ser excluída (trava de fatura ou estorno). */
 export type BlockReasons = Map<string, string>;
 
 const REFUND_BLOCK =
   'Esta compra tem estornos. Para desfazê-la, estorne o valor restante em vez de excluir.';
 
-const SETTLED_BLOCK =
-  'Esta parcela já tem pagamento registrado. Reverta o pagamento antes, ou estorne a compra.';
+/** Trava só o adiantamento: na exclusão, o pagamento é revertido junto. */
+export const SETTLED_BLOCK = 'Esta parcela já tem pagamento registrado.';
+
+/** Motivo que impede a exclusão: o pagamento registrado não impede. */
+function deleteBlock(blocked: BlockReasons, parcelId: string) {
+  const reason = blocked.get(parcelId);
+  return reason === SETTLED_BLOCK ? undefined : reason;
+}
 
 /**
  * Quanto falta pagar de cada parcela, em centavos (docs/adrs/0018):
@@ -99,8 +113,7 @@ export function groupInstallments(
       confirmed.find((p) => p.transactionDate >= today && !p.advancedAt) ??
       confirmed.find((p) => p.transactionDate >= today);
     const installmentTotal = first.installmentTotal ?? list.length;
-    const allBlock = list.map((p) => blocked.get(p.id)).find(Boolean) ?? null;
-    const futureBlock = future.map((p) => blocked.get(p.id)).find(Boolean) ?? null;
+    const deleteBlockedReason = list.map((p) => deleteBlock(blocked, p.id)).find(Boolean) ?? null;
     const advance = advanceState(list, today, blocked);
 
     // Cancelada: todas as parcelas canceladas (ex.: estorno da compra inteira).
@@ -147,11 +160,9 @@ export function groupInstallments(
       categoryId: first.categoryId,
       account: first.account,
       category: first.category,
-      canDeleteAll: !allBlock,
-      deleteAllBlockedReason: allBlock,
-      canDeleteFuture: future.length > 0 && !futureBlock,
-      deleteFutureBlockedReason:
-        future.length === 0 ? 'Não há parcelas de hoje em diante.' : futureBlock,
+      /** Exclusão só da compra inteira: qualquer parcela travada impede. */
+      canDelete: !deleteBlockedReason,
+      deleteBlockedReason,
       /** Parcela usada para o estorno da compra inteira; null se não há o que estornar. */
       refundAnchorId:
         first.type === 'expense'
@@ -497,33 +508,36 @@ export class InstallmentsService {
   }
 
   /**
-   * `all` apaga a compra inteira; `future`, as parcelas de hoje em diante
-   * (as anteriores ficam como estão). Qualquer parcela atingida que esteja
-   * travada bloqueia a operação inteira — nada é apagado pela metade.
+   * Apaga a compra inteira — todas as parcelas. Qualquer parcela travada
+   * (fatura fechada/paga, estorno) bloqueia a operação: nada é apagado pela
+   * metade. Pagamentos registrados em conta são revertidos no mesmo commit.
    */
-  async remove(userId: string, seriesId: string, scope: DeleteScope) {
-    const parcels = await this.findSeries(userId, seriesId);
-    const today = this.today();
-    const targets = scope === 'all' ? parcels : parcels.filter((p) => p.transactionDate >= today);
-    if (targets.length === 0) {
-      throw new BadRequestException('Não há parcelas de hoje em diante para excluir.');
-    }
+  async remove(userId: string, seriesId: string) {
+    const targets = await this.findSeries(userId, seriesId);
 
-    const [reason] = (await this.blockReasons(targets)).values();
+    const blocked = await this.blockReasons(targets);
+    const reason = targets.map((p) => deleteBlock(blocked, p.id)).find(Boolean);
     if (reason) {
       throw new ConflictException(
-        scope === 'all'
-          ? `${reason} Exclua só as parcelas de hoje em diante ou estorne a compra.`
-          : reason,
+        reason === REFUND_BLOCK ? reason : `${reason} Para desfazer a compra, use Estornar compra.`,
       );
     }
 
     const count = await this.prisma.$transaction(async (tx) => {
-      const accountIds = [...new Set(targets.map((p) => p.accountId))];
+      const ids = targets.map((p) => p.id);
+      // Parcelas antes das contas, na ordem dos ids: a mesma ordem de quem
+      // registra um pagamento (lançamento → conta), sem deadlock.
+      for (const id of [...ids].sort()) await lockTransaction(tx, id);
+      const accountIds = [
+        ...new Set([
+          ...targets.map((p) => p.accountId),
+          ...(await activeSettlementAccounts(tx, ids)),
+        ]),
+      ];
       await lockAccounts(tx, accountIds);
-      const { count: deleted } = await tx.transaction.deleteMany({
-        where: { id: { in: targets.map((p) => p.id) }, settledAmount: 0 },
-      });
+      // Parcela paga sai com o pagamento revertido: o dinheiro volta à conta.
+      await reverseActiveSettlements(tx, ids);
+      const { count: deleted } = await tx.transaction.deleteMany({ where: { id: { in: ids } } });
       // Sem parcela nenhuma, a compra não tem mais o que representar.
       await tx.installmentPurchase.deleteMany({
         where: { id: seriesId, userId, installments: { none: {} } },

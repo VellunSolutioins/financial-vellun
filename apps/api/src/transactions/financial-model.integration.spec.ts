@@ -183,22 +183,111 @@ integration('vencimento × pagamento (PostgreSQL)', () => {
     expect(settlement).toMatchObject({ amount: 35.5, origin: 'at_sight', kind: 'payment' });
   });
 
-  it('com pagamento registrado, não exclui nem cancela; revertido, exclui', async () => {
+  it('com pagamento registrado, a edição não cancela nem fica abaixo do pago', async () => {
     const accountId = await env.account(userId, 100);
     const bill = await expense(accountId, 50, dayFromToday(0));
 
-    await expect(env.transactions.remove(userId, bill.id)).rejects.toMatchObject({ status: 409 });
     await expect(
       env.transactions.update(userId, bill.id, { status: 'cancelled' }),
     ).rejects.toMatchObject({ status: 409 });
     await expect(env.transactions.update(userId, bill.id, { amount: 40 })).rejects.toMatchObject({
       status: 409,
     });
+    expect(await env.balance(accountId)).toBe(50);
+  });
 
-    const [settlement] = await env.settlements.list(userId, bill.id);
-    await env.settlements.reverse(userId, bill.id, settlement.id);
+  it('excluir lançamento pago reverte o pagamento na mesma operação', async () => {
+    const accountId = await env.account(userId, 100);
+    const bill = await expense(accountId, 50, dayFromToday(0));
+    expect(await env.balance(accountId)).toBe(50);
+
+    await env.transactions.remove(userId, bill.id, true);
+    expect(await env.balance(accountId)).toBe(100);
+    expect(await env.prisma.transaction.count({ where: { id: bill.id } })).toBe(0);
+  });
+
+  it('cancelar lançamento pago reverte o pagamento e guarda o histórico', async () => {
+    const accountId = await env.account(userId, 100);
+    const bill = await expense(accountId, 50, dayFromToday(0));
+
     await env.transactions.remove(userId, bill.id);
     expect(await env.balance(accountId)).toBe(100);
+    const stored = await env.prisma.transaction.findUniqueOrThrow({ where: { id: bill.id } });
+    expect([stored.status, Number(stored.settledAmount)]).toEqual(['cancelled', 0]);
+    expect((await env.settlements.list(userId, bill.id)).map((s) => s.status)).toEqual([
+      'reversed',
+    ]);
+  });
+
+  it('pagamento feito de outra conta: excluir recompõe o saldo das duas', async () => {
+    const accountId = await env.account(userId, 1000);
+    const otherAccountId = await env.account(userId, 500);
+    const bill = await expense(accountId, 300, dayFromToday(-1), { settle: false });
+    await env.settlements.settle(userId, bill.id, {
+      amount: 100,
+      date: dayFromToday(0),
+      idempotencyKey: key(),
+    });
+    await env.settlements.settle(userId, bill.id, {
+      amount: 50,
+      accountId: otherAccountId,
+      date: dayFromToday(0),
+      idempotencyKey: key(),
+    });
+    expect([await env.balance(accountId), await env.balance(otherAccountId)]).toEqual([900, 450]);
+
+    await env.transactions.remove(userId, bill.id, true);
+    expect([await env.balance(accountId), await env.balance(otherAccountId)]).toEqual([1000, 500]);
+  });
+
+  it('excluir receita recebida tira o valor do saldo', async () => {
+    const accountId = await env.account(userId, 100);
+    const salary = await env.transactions.create(userId, {
+      accountId,
+      type: 'income',
+      amount: 1000,
+      description: 'Salário',
+      transactionDate: dayFromToday(0),
+    });
+    expect(await env.balance(accountId)).toBe(1100);
+
+    await env.transactions.remove(userId, salary.id, true);
+    expect(await env.balance(accountId)).toBe(100);
+  });
+
+  it('cancelar ocorrência fixa paga pelo valor real restaura a previsão', async () => {
+    const accountId = await env.account(userId, 1000);
+    const [bill] = await env.prisma.transaction.findMany({
+      where: {
+        seriesId: (
+          await env.transactions.create(userId, {
+            accountId,
+            type: 'expense',
+            amount: 80,
+            description: 'Água',
+            transactionDate: dayFromToday(-40),
+            recurrenceType: 'fixo',
+            recurrenceMonths: 2,
+          })
+        ).seriesId,
+      },
+      orderBy: { transactionDate: 'asc' },
+    });
+    await env.settlements.settle(userId, bill.id, {
+      amount: 92,
+      date: dayFromToday(0),
+      idempotencyKey: key(),
+    });
+    expect(await env.balance(accountId)).toBe(908);
+
+    await env.transactions.remove(userId, bill.id);
+    const stored = await env.prisma.transaction.findUniqueOrThrow({ where: { id: bill.id } });
+    expect([stored.status, Number(stored.amount), stored.forecastAmount]).toEqual([
+      'cancelled',
+      80,
+      null,
+    ]);
+    expect(await env.balance(accountId)).toBe(1000);
   });
 
   it('gasto fixo nasce sempre como previsão, e editar não tira a marca', async () => {
