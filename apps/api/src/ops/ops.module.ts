@@ -11,6 +11,8 @@ import { OpsAuthController } from './auth/ops-auth.controller';
 import { OpsAuthService } from './auth/ops-auth.service';
 import { OpsSessionService } from './auth/ops-session.service';
 import { OpsAuthGuard } from './auth/guards/ops-auth.guard';
+import { OpsExemptionsController } from './exemptions/ops-exemptions.controller';
+import { OpsExemptionsService } from './exemptions/ops-exemptions.service';
 import { OpsRolesGuard } from './auth/guards/ops-roles.guard';
 import { AgentReprocessClient } from './failures/agent-reprocess.client';
 import { FailureRetentionService } from './failures/failure-retention.service';
@@ -57,6 +59,7 @@ import { OpsPlansService } from './plans/ops-plans.service';
     OpsAuditController,
     OpsFeatureFlagsController,
     OpsPlansController,
+    OpsExemptionsController,
   ],
   providers: [
     OpsAuthService,
@@ -79,6 +82,7 @@ import { OpsPlansService } from './plans/ops-plans.service';
     OpsAuditQueryService,
     OpsFeatureFlagsService,
     OpsPlansService,
+    OpsExemptionsService,
   ],
   exports: [
     OpsAuditService,

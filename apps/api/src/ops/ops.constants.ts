@@ -53,6 +53,9 @@ export const OPS_AUDIT_ACTIONS = {
   planCreated: 'ops.plan.created',
   planUpdated: 'ops.plan.updated',
   planDeleted: 'ops.plan.deleted',
+  exemptionCreated: 'ops.exemption.created',
+  exemptionUpdated: 'ops.exemption.updated',
+  exemptionDeleted: 'ops.exemption.deleted',
 } as const;
 
 /** Tipos de alvo usados em `ops_audit_log.targetType`. */
@@ -62,4 +65,5 @@ export const OPS_AUDIT_TARGETS = {
   paymentWebhookEvent: 'payment_webhook_event',
   featureFlag: 'feature_flag',
   plan: 'plan',
+  subscriptionExemption: 'subscription_exemption',
 } as const;

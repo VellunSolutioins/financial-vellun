@@ -10,9 +10,25 @@ const PAST = new Date('2026-06-10T12:00:00.000Z');
  * `rows`: as assinaturas do usuário, da mais nova para a mais antiga. O dublê
  * responde às consultas do serviço a partir delas.
  */
-function makeService(rows: jest.Mock | Array<Record<string, unknown>>, enforced = 'true') {
+function makeService(
+  rows: jest.Mock | Array<Record<string, unknown>>,
+  enforced = 'true',
+  exemption: { verifiedPhones?: string[]; exempt?: string[] } = {},
+) {
   const all = Array.isArray(rows) ? rows : [];
   const prisma = {
+    // Só contatos verificados e ativos chegam aqui: o filtro é da consulta.
+    whatsappContact: {
+      findMany: jest.fn(async () =>
+        (exemption.verifiedPhones ?? []).map((phoneNumber) => ({ phoneNumber })),
+      ),
+    },
+    subscriptionExemption: {
+      count: jest.fn(
+        async ({ where }: any) =>
+          (exemption.exempt ?? []).filter((n) => where.phoneNumber.in.includes(n)).length,
+      ),
+    },
     subscription: {
       findMany: jest.fn(async ({ where }: any) =>
         all.filter((row) => where.status.in.includes(row.status)),
@@ -182,6 +198,64 @@ describe('SubscriptionAccessService', () => {
       ]);
 
       expect((await service.currentSubscription('u1', NOW))?.id).toBe('s_nova');
+    });
+  });
+
+  describe('isenção por WhatsApp', () => {
+    const prismaOf = (service: SubscriptionAccessService) => (service as any).prisma;
+
+    it('libera a conta sem assinatura cujo WhatsApp verificado é isento', async () => {
+      const service = makeService([], 'true', {
+        verifiedPhones: ['+5541999998888'],
+        exempt: ['+5541999998888'],
+      });
+
+      await expect(service.canUseProduct('u1', NOW)).resolves.toMatchObject({
+        allowed: true,
+        reason: 'exempt',
+        status: null,
+      });
+      expect(prismaOf(service).whatsappContact.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { userId: 'u1', isVerified: true, revokedAt: null } }),
+      );
+    });
+
+    it('casa o número com ou sem o nono dígito', async () => {
+      const service = makeService([], 'true', {
+        verifiedPhones: ['+554199998888'],
+        exempt: ['+5541999998888'],
+      });
+
+      await expect(service.canUseProduct('u1', NOW)).resolves.toMatchObject({
+        allowed: true,
+        reason: 'exempt',
+      });
+    });
+
+    it('sem WhatsApp verificado ou com número não isento, continua bloqueado', async () => {
+      const noContact = makeService([], 'true', { exempt: ['+5541999998888'] });
+      await expect(noContact.canUseProduct('u1', NOW)).resolves.toMatchObject({
+        allowed: false,
+        reason: 'no_subscription',
+      });
+      expect(prismaOf(noContact).subscriptionExemption.count).not.toHaveBeenCalled();
+
+      const other = makeService([], 'true', {
+        verifiedPhones: ['+5511988887777'],
+        exempt: ['+5541999998888'],
+      });
+      await expect(other.canUseProduct('u1', NOW)).resolves.toMatchObject({ allowed: false });
+    });
+
+    it('assinante em dia não consulta isenções', async () => {
+      const service = makeService(
+        [{ id: 's1', status: SubscriptionStatus.active, trialEndsAt: null, graceUntil: null }],
+        'true',
+        { verifiedPhones: ['+5541999998888'], exempt: ['+5541999998888'] },
+      );
+
+      await expect(service.canUseProduct('u1', NOW)).resolves.toMatchObject({ reason: 'active' });
+      expect(prismaOf(service).whatsappContact.findMany).not.toHaveBeenCalled();
     });
   });
 });

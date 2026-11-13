@@ -63,7 +63,7 @@ export class BillingService {
   /** Estado comercial atual do usuário, incluindo a regra de acesso. */
   async getSubscriptionState(userId: string) {
     const subscription = await this.access.currentSubscription(userId);
-    const access = this.access.evaluate(subscription);
+    const access = await this.access.withExemption(userId, this.access.evaluate(subscription));
 
     return {
       status: subscription?.status ?? null,

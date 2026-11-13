@@ -112,6 +112,9 @@ export default function AssinaturaPage() {
   const status = state?.status ?? null;
   const showManagement = !!state?.plan && !!status && MANAGED_STATUSES.includes(status);
   const showPending = status === 'pending' && !choosingAgain;
+  // Conta isenta (WhatsApp cadastrado no painel de operações): sem assinatura
+  // a gerenciar, não há plano para oferecer.
+  const exempt = state?.access.reason === 'exempt';
   // Algo na tela abre um checkout: a lista de planos ou "Regularizar pagamento".
   const offersCheckout =
     (!showManagement && !showPending) || choosingAgain || (showManagement && status === 'past_due');
@@ -130,7 +133,7 @@ export default function AssinaturaPage() {
 
       <ReturnNotice status={returnStatus} />
 
-      {!loading && blocked && offersCheckout && (
+      {!loading && blocked && offersCheckout && !exempt && (
         <BillingProfileNotice
           missing={missing}
           documentLabel={user?.profileType === 'business' ? 'CNPJ' : 'CPF'}
@@ -156,6 +159,8 @@ export default function AssinaturaPage() {
           onRefresh={load}
           onChooseAgain={() => setChoosingAgain(true)}
         />
+      ) : exempt ? (
+        <ExemptCard />
       ) : (
         <>
           <StatusNotice status={status} failure={state?.lastPaymentFailure ?? null} />
@@ -224,6 +229,24 @@ function BillingProfileNotice({
         Completar dados
       </Link>
     </div>
+  );
+}
+
+function ExemptCard() {
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle className="text-base">Acesso liberado</CardTitle>
+          <Badge variant="success">Isento</Badge>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <p className="text-sm text-muted-foreground">
+          Sua conta está isenta de assinatura: você usa o app e o WhatsApp sem cobrança.
+        </p>
+      </CardContent>
+    </Card>
   );
 }
 

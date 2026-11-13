@@ -46,6 +46,8 @@ function setup(env: Record<string, string | undefined> = {}) {
       allowed: sub?.status === 'active' || sub?.status === 'trialing',
       reason: 'x',
     })),
+    // Sem isenção: devolve o acesso como veio.
+    withExemption: jest.fn(async (_userId: string, access: unknown) => access),
   };
   const values: Record<string, string | undefined> = { WEB_URL: 'http://localhost:3000', ...env };
   const config = { get: jest.fn((key: string) => values[key]) };

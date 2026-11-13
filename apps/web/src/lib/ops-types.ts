@@ -49,6 +49,18 @@ export interface OpsPlan {
   updatedAt: string;
 }
 
+/** Número de WhatsApp isento de assinatura (`GET /ops/exemptions`). */
+export interface OpsExemption {
+  id: string;
+  name: string;
+  /** Mascarado: `(41) 99999-9999`. */
+  phone: string;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+  updatedBy: { githubLogin: string } | null;
+}
+
 export interface FailureListItem {
   id: string;
   source: OpsFailureSource;
@@ -254,6 +266,9 @@ export const auditActionLabels: Record<string, string> = {
   'ops.plan.created': 'Plano criado',
   'ops.plan.updated': 'Plano alterado',
   'ops.plan.deleted': 'Plano excluído',
+  'ops.exemption.created': 'Isenção cadastrada',
+  'ops.exemption.updated': 'Isenção alterada',
+  'ops.exemption.deleted': 'Isenção excluída',
 };
 
 export const auditTargetLabels: Record<string, string> = {
@@ -262,4 +277,5 @@ export const auditTargetLabels: Record<string, string> = {
   payment_webhook_event: 'Webhook de pagamento',
   feature_flag: 'Funcionalidade',
   plan: 'Plano',
+  subscription_exemption: 'Isenção de assinatura',
 };
