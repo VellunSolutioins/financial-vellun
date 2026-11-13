@@ -11,6 +11,8 @@ import { OpsAuthController } from './auth/ops-auth.controller';
 import { OpsAuthService } from './auth/ops-auth.service';
 import { OpsSessionService } from './auth/ops-session.service';
 import { OpsAuthGuard } from './auth/guards/ops-auth.guard';
+import { OpsExemptionsController } from './exemptions/ops-exemptions.controller';
+import { OpsExemptionsService } from './exemptions/ops-exemptions.service';
 import { OpsRolesGuard } from './auth/guards/ops-roles.guard';
 import { AgentReprocessClient } from './failures/agent-reprocess.client';
 import { FailureRetentionService } from './failures/failure-retention.service';
@@ -30,6 +32,8 @@ import { OpsOverviewService } from './overview/ops-overview.service';
 import { OpsPaymentsActionsService } from './payments/ops-payments-actions.service';
 import { OpsPaymentsController } from './payments/ops-payments.controller';
 import { OpsPaymentsQueryService } from './payments/ops-payments-query.service';
+import { OpsPlansController } from './plans/ops-plans.controller';
+import { OpsPlansService } from './plans/ops-plans.service';
 
 /**
  * Área de operações: identidade própria (GitHub OAuth + organização), papéis e
@@ -54,6 +58,8 @@ import { OpsPaymentsQueryService } from './payments/ops-payments-query.service';
     OpsPaymentsController,
     OpsAuditController,
     OpsFeatureFlagsController,
+    OpsPlansController,
+    OpsExemptionsController,
   ],
   providers: [
     OpsAuthService,
@@ -75,6 +81,8 @@ import { OpsPaymentsQueryService } from './payments/ops-payments-query.service';
     OpsPaymentsActionsService,
     OpsAuditQueryService,
     OpsFeatureFlagsService,
+    OpsPlansService,
+    OpsExemptionsService,
   ],
   exports: [
     OpsAuditService,

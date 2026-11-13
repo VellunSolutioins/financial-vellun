@@ -67,9 +67,46 @@ NOT_LINKED_MESSAGE = (
     "toque em \"Verificar WhatsApp\" e envie o código aqui."
 )
 HELP_MESSAGE = (
-    "Posso registrar seus lançamentos! Ex.: 'gastei 100 no mercado' (já pago) ou "
-    "'conta de luz de 180 vence dia 10' (fica em aberto até você pagar)."
+    "Oi! 👋 Eu registro seus lançamentos no Zeloo. É só me mandar uma mensagem "
+    "do jeito que você falaria com alguém.\n\n"
+    "*Gastos*\n"
+    "• \"gastei 50 no mercado\"\n"
+    "• \"paguei 120 de luz ontem\"\n\n"
+    "*Receitas*\n"
+    "• \"recebi 3000 de salário\"\n"
+    "• \"vendi um bolo por 80\"\n\n"
+    "*Contas a pagar* (ficam em aberto até você pagar)\n"
+    "• \"conta de internet de 100 vence dia 20\"\n\n"
+    "*Cartão e parcelas*\n"
+    "• \"comprei um tênis de 300 no cartão Nubank em 3x\"\n\n"
+    "*Gastos que se repetem*\n"
+    "• \"academia 90 todo mês\"\n\n"
+    "*Conta e data*\n"
+    "• \"almoço 35 no Itaú dia 5\" — sem conta, uso a sua conta padrão; sem "
+    "data, o dia de hoje.\n\n"
+    "Também entendo *áudio* 🎙️ e *foto de comprovante* 📸.\n\n"
+    "Se faltar alguma informação, eu pergunto antes de registrar. Para corrigir "
+    "ou excluir um lançamento, ver resumos ou transferir entre suas contas, use "
+    "o app."
 )
+#: Mensagens que são só um pedido de ajuda: respondidas na hora, sem LLM e sem
+#: contar no limite diário. Frases mais longas ("como registro no cartão?")
+#: seguem pelo classificador, que também reconhece ``help``.
+HELP_COMMANDS = frozenset(
+    {
+        "ajuda",
+        "ajuda por favor",
+        "preciso de ajuda",
+        "help",
+        "menu",
+        "comandos",
+        "socorro",
+        "como funciona",
+        "como usar",
+        "?",
+    }
+)
+PENDING_REMINDER = "\n\nAinda estou esperando sua resposta sobre o lançamento anterior."
 #: Quando ativa, ``respond`` acumula o texto aqui em vez de enviar. Só o
 #: ``process_job`` a ativa — ver a docstring dele.
 _reply_outbox: ContextVar[list[str] | None] = ContextVar("reply_outbox", default=None)
@@ -126,6 +163,14 @@ def _normalize_text(text: str) -> str:
     normalized = unicodedata.normalize("NFKD", text)
     normalized = "".join(c for c in normalized if not unicodedata.combining(c))
     return normalized.lower().strip()
+
+
+def is_help_command(message: str) -> bool:
+    """A mensagem é só um pedido de ajuda ("Ajuda!", "menu", "?")."""
+    text = " ".join(_normalize_text(message).split())
+    if text != "?":
+        text = text.rstrip("!?.… ")
+    return text in HELP_COMMANDS
 
 
 def _parse_iso_date(value: str | None) -> date | None:
@@ -252,6 +297,16 @@ class MessageProcessor:
             metrics.incr("subscription_blocked")
             logger.info("Acesso bloqueado por assinatura")
             return await self._respond(phone, block_message or NOT_LINKED_MESSAGE)
+
+        # Ajuda: texto fixo, sem LLM e sem gastar o limite diário. Uma pergunta
+        # pendente continua valendo — a próxima mensagem ainda a responde.
+        if pre_extracted is None and is_help_command(message):
+            metrics.incr("help_requested")
+            state = await conversation_manager.get(phone)
+            pending = state.awaiting_confirmation and state.belongs_to(contact)
+            return await self._respond(
+                phone, response_prefix + HELP_MESSAGE + (PENDING_REMINDER if pending else "")
+            )
 
         # Depois do vínculo e da assinatura, antes de qualquer chamada paga. O
         # comprovante (intent pré-extraído) já foi contado no consumer de

@@ -32,7 +32,11 @@ import {
 } from '../common/date.util';
 import { Db, FINANCIAL_TX_OPTIONS, cents, lockAccounts, lockTransaction } from '../common/db';
 import { writeEntrySeries } from './entry-writer';
-import { recordSettlement } from './settlements.service';
+import {
+  activeSettlementAccounts,
+  recordSettlement,
+  reverseActiveSettlements,
+} from './settlements.service';
 import {
   realizedSpendingFilter,
   settlementWhere,
@@ -487,8 +491,16 @@ export class TransactionsService {
     return existing.recurrenceType === 'fixo' || sameAsDue ? transactionDate : undefined;
   }
 
+  /**
+   * Exclui (`hardDelete`) ou cancela o lançamento. Pagamentos registrados são
+   * revertidos na mesma transação — o saldo das contas de onde o dinheiro
+   * saiu (ou para onde entrou) é recomposto; o usuário não precisa reverter
+   * antes. Fatura fechada/paga e estorno da compra continuam travando.
+   * Parcela não sai sozinha: a compra parcelada é excluída inteira.
+   */
   async remove(userId: string, id: string, hardDelete = false) {
     const transaction = await this.findOne(userId, id);
+    assertNotParcel(transaction, hardDelete ? 'excluída' : 'cancelada');
     const reason = (await this.cardLedger.lockReasons([transaction])).get(id);
     if (reason) throw new ConflictException(reason);
     if (await this.hasRefunds(id)) {
@@ -496,21 +508,24 @@ export class TransactionsService {
         'Esta compra tem estornos. Para desfazê-la, estorne o valor restante em vez de excluir.',
       );
     }
-    assertNoActiveSettlement(transaction, 'excluído');
 
     await this.prisma.$transaction(async (tx) => {
       await lockTransaction(tx, id);
-      await lockAccounts(tx, [transaction.accountId]);
-      // Relido sob a trava: um pagamento pode ter entrado desde a checagem.
-      const current = await tx.transaction.findUniqueOrThrow({ where: { id } });
-      assertNoActiveSettlement(current, 'excluído');
+      // Lidas sob a trava do lançamento: nenhum pagamento novo entra depois.
+      // O pagamento pode ter saído de outra conta que não a do lançamento.
+      const settlementAccounts = await activeSettlementAccounts(tx, [id]);
+      const accountIds = [transaction.accountId, ...settlementAccounts];
+      await lockAccounts(tx, accountIds);
+      await reverseActiveSettlements(tx, [id]);
       if (hardDelete) {
         await tx.transaction.delete({ where: { id } });
       } else {
         await tx.transaction.update({ where: { id }, data: { status: 'cancelled' } });
         await this.cardLedger.syncTransactions([id], tx);
       }
-      await this.accountsService.recalculateBalance(transaction.accountId, tx);
+      for (const accountId of new Set(accountIds)) {
+        await this.accountsService.recalculateBalance(accountId, tx);
+      }
       await this.cardLedger.pruneForAccount(transaction.accountId, tx);
     }, FINANCIAL_TX_OPTIONS);
     return { message: 'Lançamento removido com sucesso' };
@@ -734,6 +749,7 @@ export class TransactionsService {
       }
     }
 
+    if (dto.status === 'cancelled') assertNotParcel(existing, 'cancelada');
     const settledCents = cents(existing.settledAmount);
     if (settledCents > 0) {
       if (dto.status === 'cancelled') assertNoActiveSettlement(existing, 'cancelado');
@@ -834,7 +850,10 @@ function timingWhere(
   return { [dateColumn]: timing === 'past' ? { lte: endOfToday } : { gt: endOfToday } };
 }
 
-/** Lançamento com pagamento ativo não é excluído nem cancelado: reverta antes. */
+/**
+ * Edição (`PATCH`) não cancela lançamento com pagamento ativo. Excluir ou
+ * cancelar pelo `DELETE` reverte os pagamentos sozinho (`remove`).
+ */
 function assertNoActiveSettlement(
   transaction: { settledAmount: Prisma.Decimal | number },
   action: string,
@@ -842,6 +861,21 @@ function assertNoActiveSettlement(
   if (cents(transaction.settledAmount) > 0) {
     throw new ConflictException(
       `Este lançamento já tem pagamento registrado e não pode ser ${action}. Reverta os pagamentos antes.`,
+    );
+  }
+}
+
+/**
+ * A compra parcelada é uma operação só: parcela não é excluída nem cancelada
+ * sozinha. Em conta, o que se desfaz numa parcela é o pagamento (reverter).
+ */
+function assertNotParcel(
+  transaction: { recurrenceType: string | null; seriesId: string | null },
+  action: string,
+) {
+  if (transaction.recurrenceType === 'parcelado' && transaction.seriesId) {
+    throw new ConflictException(
+      `Parcela não pode ser ${action} sozinha: exclua a compra parcelada inteira.`,
     );
   }
 }

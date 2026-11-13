@@ -134,6 +134,17 @@ fato (`dateBasis=event`).
 - Trava: contas `FOR UPDATE` em ordem de id (sem deadlock entre A→B e B→A);
   lançamento `FOR UPDATE` antes de liquidar; cartão `FOR UPDATE` antes de pagar.
   O banco recusa `settled_amount > amount` (`CHECK`).
+- Excluir ou cancelar um lançamento (ou excluir uma compra parcelada) com
+  liquidação ativa reverte essas liquidações no mesmo commit — o usuário não
+  reverte antes — e recalcula o saldo de todas as contas tocadas, inclusive a
+  de um pagamento feito de outra conta. Trava de fatura e estorno da compra
+  continuam bloqueando; a edição (`PATCH status=cancelled`) também.
+- Compra parcelada é uma operação só, no cartão ou em conta: parcela não é
+  excluída nem cancelada sozinha (`DELETE /transactions/:id` e `PATCH
+  status=cancelled` numa parcela respondem 409). Só a compra inteira é
+  excluída (`DELETE /installments/:seriesId`); numa parcela em conta, o que se
+  desfaz é o pagamento (reverter). Com parcela em fatura fechada ou paga, a
+  compra se desfaz por estorno.
 - Idempotência: chave única em liquidação, transferência e lançamento manual
   (além do WhatsApp e do pagamento de fatura); corrida em `P2002` devolve o
   existente; chave de outro usuário responde 409.

@@ -857,6 +857,7 @@ model OpsOperator {
 
   auditEntries        OpsAuditLog[]
   featureFlagsUpdated FeatureFlag[]
+  exemptionsUpdated   SubscriptionExemption[]
 
   @@map("ops_operators")
 }
@@ -878,6 +879,28 @@ model FeatureFlag {
   updatedBy           OpsOperator? @relation(fields: [updatedByOperatorId], references: [id], onDelete: SetNull)
 
   @@map("feature_flags")
+}
+
+/// Número de WhatsApp isento de assinatura (sócios, equipe), cadastrado no
+/// painel de operações. Isenta a conta cujo WhatsApp **verificado** é este
+/// número — um telefone só digitado no cadastro não conta.
+model SubscriptionExemption {
+  id          String   @id @default(uuid())
+  name        String
+  /// Como cadastrado, mascarado: `(41) 99999-9999`.
+  phone       String
+  /// E.164 (`normalizePhone`), comparado com `whatsapp_contacts.phone_number`.
+  phoneNumber String   @unique @map("phone_number")
+  note        String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  /// Quem mexeu por último. `SetNull` para não prender operador removido; o
+  /// histórico completo fica em `ops_audit_log`.
+  updatedByOperatorId String?      @map("updated_by_operator_id")
+  updatedBy           OpsOperator? @relation(fields: [updatedByOperatorId], references: [id], onDelete: SetNull)
+
+  @@map("subscription_exemptions")
 }
 
 /// Trilha append-only das ações de operadores.

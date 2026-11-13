@@ -193,6 +193,65 @@ integration('compra parcelada × calendário de cobrança (PostgreSQL)', () => {
     );
   });
 
+  it('parcela não é excluída nem cancelada sozinha; o pagamento dela se reverte', async () => {
+    const checking = await env.account(userId, 1000);
+    const purchase = await env.transactions.create(userId, {
+      accountId: checking,
+      type: 'expense',
+      amount: 500,
+      description: 'Bicicleta',
+      transactionDate: dayFromToday(-1),
+      recurrenceType: 'parcelado',
+      installments: 5,
+    });
+
+    await expect(env.transactions.remove(userId, purchase.id, true)).rejects.toMatchObject({
+      status: 409,
+    });
+    await expect(env.transactions.remove(userId, purchase.id)).rejects.toMatchObject({
+      status: 409,
+    });
+    await expect(
+      env.transactions.update(userId, purchase.id, { status: 'cancelled' }),
+    ).rejects.toMatchObject({ status: 409 });
+
+    const paid = await env.settlements.settle(userId, purchase.id, {
+      date: dayFromToday(0),
+      idempotencyKey: key(),
+    });
+    expect(await env.balance(checking)).toBe(900);
+    await env.settlements.reverse(userId, purchase.id, paid.id);
+    expect(await env.balance(checking)).toBe(1000);
+    expect(await env.prisma.transaction.count({ where: { seriesId: purchase.seriesId! } })).toBe(5);
+  });
+
+  it('crediário com parcela paga: excluir a compra reverte o pagamento e recompõe o saldo', async () => {
+    const checking = await env.account(userId, 1000);
+    const purchase = await env.transactions.create(userId, {
+      accountId: checking,
+      type: 'expense',
+      amount: 300,
+      description: 'Geladeira',
+      transactionDate: dayFromToday(-1),
+      recurrenceType: 'parcelado',
+      installments: 3,
+    });
+    await env.settlements.settle(userId, purchase.id, {
+      date: dayFromToday(0),
+      idempotencyKey: key(),
+    });
+    expect(await env.balance(checking)).toBe(900);
+    expect(await env.installments.findOne(userId, purchase.seriesId!)).toMatchObject({
+      canDelete: true,
+    });
+
+    await expect(env.installments.remove(userId, purchase.seriesId!)).resolves.toEqual({
+      deleted: 3,
+    });
+    expect(await env.balance(checking)).toBe(1000);
+    expect(await env.prisma.transaction.count({ where: { seriesId: purchase.seriesId! } })).toBe(0);
+  });
+
   it('parcela 2+ no cartão: a data é o primeiro dia da fatura dela; o mês do gasto continua um por mês', async () => {
     const card = await newCard();
     const today = dayFromToday(0);

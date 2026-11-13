@@ -1,108 +1,45 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/toast';
 import { useInstallment, type Installment } from '@/hooks/useInstallments';
 import { apiClient } from '@/lib/api-client';
-import { cn } from '@/lib/utils';
-
-type Scope = 'single' | 'future' | 'all';
+import { formatBRL } from '@/lib/billing';
 
 interface Props {
   /** Compra a excluir. Sem ela, o diálogo busca pelo `seriesId`. */
   installment?: Installment;
   seriesId?: string;
-  /**
-   * Parcela de onde a exclusão partiu (tela de Lançamentos): habilita a opção
-   * "só esta parcela", que é a padrão nesse caso.
-   */
-  parcel?: { id: string; installmentNumber?: number | null };
   open: boolean;
   onClose: () => void;
   onDeleted: () => void;
 }
 
-function plural(n: number, singular: string, pluralForm: string) {
-  return `${n} ${n === 1 ? singular : pluralForm}`;
-}
-
 /**
- * Exclusão de compra parcelada: só a parcela, as de hoje em diante ou a compra
- * inteira. Opções que esbarram numa trava (fatura fechada/paga, estorno) ficam
- * desabilitadas com o motivo — a API aplica a mesma regra.
+ * Exclusão de compra parcelada: a compra é uma operação só, então sai inteira
+ * — parcela não é excluída sozinha. Parcela em fatura fechada/paga ou compra
+ * com estorno travam a exclusão (o caminho é estornar a compra); pagamento
+ * registrado em conta não trava: a API o reverte junto.
  */
 export function DeleteInstallmentDialog({
   installment: given,
   seriesId,
-  parcel,
   open,
   onClose,
   onDeleted,
 }: Props) {
   const toast = useToast();
   const { installment, failed } = useInstallment({ installment: given, seriesId, open });
-  const [scope, setScope] = useState<Scope>(parcel ? 'single' : 'all');
   const [submitting, setSubmitting] = useState(false);
 
-  // Padrão: a parcela de origem; senão a compra inteira, ou as futuras se ela estiver travada.
-  const defaultScope = (i: Installment | null | undefined): Scope =>
-    parcel ? 'single' : i?.canDeleteAll === false ? 'future' : 'all';
-
-  useEffect(() => {
-    if (open) setScope(defaultScope(installment));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, installment, parcel]);
-
-  const options: { value: Scope; label: string; hint: string; disabledReason: string | null }[] =
-    installment
-      ? [
-          ...(parcel
-            ? [
-                {
-                  value: 'single' as const,
-                  label: 'Só esta parcela',
-                  hint: parcel.installmentNumber
-                    ? `Parcela ${parcel.installmentNumber}/${installment.installmentTotal}`
-                    : 'As demais continuam',
-                  disabledReason: null,
-                },
-              ]
-            : []),
-          {
-            value: 'future',
-            label: 'Parcelas de hoje em diante',
-            hint: `${plural(installment.futureCount, 'parcela', 'parcelas')}; as anteriores ficam como estão`,
-            disabledReason: installment.canDeleteFuture
-              ? null
-              : installment.deleteFutureBlockedReason,
-          },
-          {
-            value: 'all',
-            label: 'Compra inteira',
-            hint: `Todas as ${plural(installment.parcelCount, 'parcela', 'parcelas')}`,
-            disabledReason: installment.canDeleteAll ? null : installment.deleteAllBlockedReason,
-          },
-        ]
-      : [];
-
-  const selected = options.find((o) => o.value === scope);
-  const canSubmit = !!selected && !selected.disabledReason && !submitting;
-
   const submit = async () => {
-    if (!installment || !canSubmit) return;
+    if (!installment?.canDelete || submitting) return;
     setSubmitting(true);
     try {
-      if (scope === 'single' && parcel) {
-        await apiClient.delete(`/transactions/${parcel.id}?hard_delete=true`);
-        toast.success('Parcela excluída.');
-      } else {
-        const res = await apiClient.delete<{ deleted: number }>(
-          `/installments/${installment.seriesId}?scope=${scope}`,
-        );
-        toast.success(`${plural(res.deleted, 'parcela excluída', 'parcelas excluídas')}.`);
-      }
+      await apiClient.delete(`/installments/${installment.seriesId}`);
+      toast.success('Compra parcelada excluída.');
       onDeleted();
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Erro ao excluir');
@@ -110,6 +47,8 @@ export function DeleteInstallmentDialog({
       setSubmitting(false);
     }
   };
+
+  const onAccount = installment?.account?.type !== 'credit_card';
 
   return (
     <Dialog open={open} onClose={onClose} title="Excluir compra parcelada">
@@ -120,53 +59,33 @@ export function DeleteInstallmentDialog({
       ) : (
         <div className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            <strong className="text-foreground">{installment.description}</strong> —{' '}
-            {installment.installmentTotal}x. O que você quer excluir?
+            Excluir <strong className="text-foreground">{installment.description}</strong> —{' '}
+            {installment.installmentTotal}x, {formatBRL(installment.totalAmount)}?{' '}
+            {installment.parcelCount === 1
+              ? 'A parcela sai junto.'
+              : `As ${installment.parcelCount} parcelas saem juntas.`}
           </p>
-          <div role="radiogroup" aria-label="O que excluir" className="space-y-2">
-            {options.map((o) => {
-              const disabled = !!o.disabledReason;
-              const checked = scope === o.value;
-              return (
-                <button
-                  key={o.value}
-                  type="button"
-                  role="radio"
-                  aria-checked={checked}
-                  aria-disabled={disabled}
-                  onClick={() => !disabled && setScope(o.value)}
-                  className={cn(
-                    'w-full rounded-md border p-3 text-left transition-colors',
-                    checked && !disabled
-                      ? 'border-destructive bg-destructive/5'
-                      : 'border-input hover:bg-muted/40',
-                    disabled && 'cursor-not-allowed opacity-60 hover:bg-transparent',
-                  )}
-                >
-                  <span className="block text-sm font-medium">{o.label}</span>
-                  <span className="block text-xs text-muted-foreground">
-                    {o.disabledReason ?? o.hint}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-          {!installment.canDeleteAll && (
+          {installment.canDelete ? (
+            <p className="text-xs text-muted-foreground">
+              {onAccount &&
+                'Pagamentos já registrados nas parcelas são desfeitos e o valor volta para o saldo da conta. '}
+              Esta ação não pode ser desfeita.
+            </p>
+          ) : (
             <p className="rounded-md bg-muted p-3 text-xs text-muted-foreground">
-              Parcelas já faturadas não podem ser excluídas. Para desfazer a compra, use{' '}
+              {installment.deleteBlockedReason} Para desfazer a compra, use{' '}
               <strong>Estornar compra</strong>.
             </p>
           )}
-          <p className="text-xs text-muted-foreground">Esta ação não pode ser desfeita.</p>
           <div className="flex gap-2">
             <Button
               type="button"
               variant="destructive"
               className="flex-1"
-              disabled={!canSubmit}
+              disabled={!installment.canDelete || submitting}
               onClick={() => void submit()}
             >
-              {submitting ? 'Excluindo...' : 'Excluir'}
+              {submitting ? 'Excluindo...' : 'Excluir compra'}
             </Button>
             <Button type="button" variant="outline" onClick={onClose}>
               Cancelar

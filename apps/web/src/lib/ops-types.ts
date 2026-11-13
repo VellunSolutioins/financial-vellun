@@ -32,6 +32,35 @@ export interface OpsFeatureFlag {
   updatedBy: { githubLogin: string } | null;
 }
 
+/** Plano de assinatura como o painel o vê (`GET /ops/plans`). */
+export interface OpsPlan {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  /** Duas casas, ponto decimal: `"49.90"`. */
+  price: string;
+  currency: string;
+  interval: 'monthly' | 'annual';
+  /** Exibido na tela de assinatura (e aceita checkout novo). */
+  isActive: boolean;
+  subscriptionCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Número de WhatsApp isento de assinatura (`GET /ops/exemptions`). */
+export interface OpsExemption {
+  id: string;
+  name: string;
+  /** Mascarado: `(41) 99999-9999`. */
+  phone: string;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+  updatedBy: { githubLogin: string } | null;
+}
+
 export interface FailureListItem {
   id: string;
   source: OpsFailureSource;
@@ -234,6 +263,12 @@ export const auditActionLabels: Record<string, string> = {
   'ops.failure.discarded': 'Falha descartada',
   'ops.payment_event.recovered': 'Evento de pagamento recuperado',
   'ops.feature_flag.updated': 'Funcionalidade ligada/desligada',
+  'ops.plan.created': 'Plano criado',
+  'ops.plan.updated': 'Plano alterado',
+  'ops.plan.deleted': 'Plano excluído',
+  'ops.exemption.created': 'Isenção cadastrada',
+  'ops.exemption.updated': 'Isenção alterada',
+  'ops.exemption.deleted': 'Isenção excluída',
 };
 
 export const auditTargetLabels: Record<string, string> = {
@@ -241,4 +276,6 @@ export const auditTargetLabels: Record<string, string> = {
   ops_failed_message: 'Falha',
   payment_webhook_event: 'Webhook de pagamento',
   feature_flag: 'Funcionalidade',
+  plan: 'Plano',
+  subscription_exemption: 'Isenção de assinatura',
 };

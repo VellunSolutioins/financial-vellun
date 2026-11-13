@@ -84,6 +84,7 @@ KNOWN_COUNTERS = (
     # Mensagem sem intenção reconhecida nem valor ("oi")
     "intent_not_understood",
     "intent_unsupported_movement",
+    "help_requested",
     "message_too_long",
     "subscription_blocked",
     "ai_daily_limit_reached",

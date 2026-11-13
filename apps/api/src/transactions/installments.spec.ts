@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException } from '@nestjs/common';
 
 import {
   InstallmentsService,
+  SETTLED_BLOCK,
   buildInstallmentsSummary,
   groupInstallments,
   sortInstallments,
@@ -54,30 +55,35 @@ describe('groupInstallments', () => {
       futureCount: 2,
       status: 'active',
       nextNumber: 3,
-      canDeleteAll: true,
-      canDeleteFuture: true,
+      canDelete: true,
       refundAnchorId: 'p1',
     });
   });
 
-  it('parcela travada no passado bloqueia a compra inteira, mas não as futuras', () => {
+  it('parcela em fatura fechada trava a exclusão da compra', () => {
     const [i] = groupInstallments(
       fourParcels(),
       TODAY,
       new Map([['p1', 'Este lançamento está em uma fatura fechada.']]),
     );
 
-    expect(i.canDeleteAll).toBe(false);
-    expect(i.deleteAllBlockedReason).toContain('fatura fechada');
-    expect(i.canDeleteFuture).toBe(true);
+    expect(i.canDelete).toBe(false);
+    expect(i.deleteBlockedReason).toContain('fatura fechada');
   });
 
-  it('compra com todas as parcelas no passado fica encerrada e sem exclusão das futuras', () => {
+  it('parcela paga não trava a exclusão, só o adiantamento', () => {
+    const [i] = groupInstallments(fourParcels(), TODAY, new Map([['p4', SETTLED_BLOCK]]));
+
+    expect(i).toMatchObject({ canDelete: true, deleteBlockedReason: null });
+    expect(i.advanceable).toEqual([]);
+    expect(i.advanceBlockedReason).toBe(SETTLED_BLOCK);
+  });
+
+  it('compra com todas as parcelas no passado fica encerrada e continua excluível', () => {
     const [i] = groupInstallments(fourParcels(), new Date(Date.UTC(2027, 0, 1)), new Map());
 
     expect(i.status).toBe('finished');
-    expect(i.canDeleteFuture).toBe(false);
-    expect(i.canDeleteAll).toBe(true);
+    expect(i.canDelete).toBe(true);
   });
 
   it('compra com todas as parcelas canceladas fica cancelada e sem estorno', () => {
@@ -135,12 +141,24 @@ describe('groupInstallments', () => {
 });
 
 describe('InstallmentsService.remove', () => {
-  function createService(parcels: Parcel[], locked = new Map<string, string>(), refunded = []) {
+  function createService(
+    parcels: Parcel[],
+    locked = new Map<string, string>(),
+    refunded = [],
+    settlements: { id: string; transactionId: string; accountId: string; amount: number }[] = [],
+  ) {
     const prisma: any = {
       transaction: {
         findMany: jest.fn().mockResolvedValue(parcels),
         groupBy: jest.fn().mockResolvedValue(refunded),
         deleteMany: jest.fn(({ where }) => Promise.resolve({ count: where.id.in.length })),
+        update: jest.fn(({ where }) =>
+          Promise.resolve({ ...parcels.find((p) => p.id === where.id), settledAmount: 0 }),
+        ),
+      },
+      transactionSettlement: {
+        findMany: jest.fn().mockResolvedValue(settlements),
+        updateMany: jest.fn(),
       },
       installmentPurchase: { deleteMany: jest.fn() },
       $queryRaw: jest.fn(),
@@ -167,56 +185,55 @@ describe('InstallmentsService.remove', () => {
   it('apaga a compra inteira e recalcula o saldo', async () => {
     const { prisma, accounts, service } = createService(fourParcels());
 
-    await expect(service.remove('u1', 's1', 'all')).resolves.toEqual({ deleted: 4 });
-    // Parcela paga nunca sai junto (o filtro repete a trava dentro da transação).
+    await expect(service.remove('u1', 's1')).resolves.toEqual({ deleted: 4 });
     expect(prisma.transaction.deleteMany).toHaveBeenCalledWith({
-      where: { id: { in: ['p1', 'p2', 'p3', 'p4'] }, settledAmount: 0 },
+      where: { id: { in: ['p1', 'p2', 'p3', 'p4'] } },
     });
     expect(accounts.recalculateBalance).toHaveBeenCalledWith('a1', prisma);
     // Sem parcelas, a compra também sai.
     expect(prisma.installmentPurchase.deleteMany).toHaveBeenCalled();
   });
 
-  it('apaga só as parcelas de hoje em diante', async () => {
-    const { prisma, service } = createService(fourParcels());
-
-    await expect(service.remove('u1', 's1', 'future')).resolves.toEqual({ deleted: 2 });
-    expect(prisma.transaction.deleteMany).toHaveBeenCalledWith({
-      where: { id: { in: ['p3', 'p4'] }, settledAmount: 0 },
-    });
-  });
-
-  it('parcela com pagamento registrado bloqueia a exclusão', async () => {
+  it('parcela paga sai com o pagamento revertido e o saldo da conta dele recomposto', async () => {
     const parcels = fourParcels();
     (parcels[3] as any).settledAmount = 250;
-    const { prisma, service } = createService(parcels);
+    const settlements = [{ id: 's-p4', transactionId: 'p4', accountId: 'a2', amount: 250 }];
+    const { prisma, accounts, service } = createService(parcels, new Map(), [], settlements);
 
-    await expect(service.remove('u1', 's1', 'future')).rejects.toThrow('pagamento registrado');
-    expect(prisma.transaction.deleteMany).not.toHaveBeenCalled();
+    await expect(service.remove('u1', 's1')).resolves.toEqual({ deleted: 4 });
+    expect(prisma.transactionSettlement.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['s-p4'] } },
+      data: expect.objectContaining({ status: 'reversed' }),
+    });
+    expect(prisma.transaction.update).toHaveBeenCalledWith({
+      where: { id: 'p4' },
+      data: { settledAmount: { decrement: 250 } },
+    });
+    // A reversão vem antes da exclusão, e o saldo das duas contas é recalculado.
+    expect(prisma.transactionSettlement.updateMany.mock.invocationCallOrder[0]).toBeLessThan(
+      prisma.transaction.deleteMany.mock.invocationCallOrder[0],
+    );
+    expect(accounts.recalculateBalance).toHaveBeenCalledWith('a1', prisma);
+    expect(accounts.recalculateBalance).toHaveBeenCalledWith('a2', prisma);
   });
 
-  it('não apaga nada se uma parcela atingida está travada', async () => {
+  it('não apaga nada se uma parcela está em fatura fechada: o caminho é o estorno', async () => {
     const { prisma, service } = createService(
       fourParcels(),
       new Map([['p2', 'Este lançamento está em uma fatura fechada.']]),
     );
 
-    await expect(service.remove('u1', 's1', 'all')).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.remove('u1', 's1')).rejects.toThrow('Estornar compra');
     expect(prisma.transaction.deleteMany).not.toHaveBeenCalled();
-    // A trava do passado não atinge a exclusão das futuras.
-    await expect(service.remove('u1', 's1', 'future')).resolves.toEqual({ deleted: 2 });
   });
 
-  it('parcela com estorno bloqueia a exclusão', async () => {
-    const { service } = createService(fourParcels(), new Map(), [{ refundOfId: 'p3' }] as any);
+  it('compra com estorno bloqueia a exclusão', async () => {
+    const { prisma, service } = createService(fourParcels(), new Map(), [
+      { refundOfId: 'p3' },
+    ] as any);
 
-    await expect(service.remove('u1', 's1', 'future')).rejects.toBeInstanceOf(ConflictException);
-  });
-
-  it('sem parcelas futuras, "de hoje em diante" é um erro de uso', async () => {
-    const { service } = createService(fourParcels().slice(0, 2));
-
-    await expect(service.remove('u1', 's1', 'future')).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.remove('u1', 's1')).rejects.toBeInstanceOf(ConflictException);
+    expect(prisma.transaction.deleteMany).not.toHaveBeenCalled();
   });
 });
 

@@ -323,3 +323,98 @@ def test_movement_between_own_accounts_is_not_registered():
 
     assert reply == mp.UNSUPPORTED_MOVEMENT_MESSAGE
     assert sent == [mp.UNSUPPORTED_MOVEMENT_MESSAGE]
+
+
+class _NoCallClassifier:
+    async def classify(self, message, context):
+        raise AssertionError("Ajuda não passa pelo LLM")
+
+
+class _NoCallLimiter:
+    async def allow(self, phone):
+        raise AssertionError("Ajuda não conta no limite diário")
+
+
+class _FakeConversations:
+    def __init__(self, state):
+        self.state = state
+        self.cleared = False
+
+    async def get(self, phone):
+        return self.state
+
+    async def clear(self, phone):
+        self.cleared = True
+
+
+def _run_help(message, *, state=None, gate=None):
+    sent: list[str] = []
+    contact = {"userId": "u1", "contactId": "c1", "linkVersion": 1, "profileType": "personal"}
+
+    class FakeContact:
+        async def find_by_phone(self, phone):
+            return contact
+
+    class FakeMessenger:
+        async def send(self, phone, text):
+            sent.append(text)
+
+    class FakeAudit:
+        async def log_message(self, *a, **k):
+            return "id"
+
+    conversations = _FakeConversations(state or mp.ConversationState())
+    originals = _patch(
+        {
+            "audit_service": FakeAudit(),
+            "contact_service": FakeContact(),
+            "intent_classifier": _NoCallClassifier(),
+            "usage_limiter": _NoCallLimiter(),
+            "conversation_manager": conversations,
+            "messenger": FakeMessenger(),
+            "subscription_gate": gate or _FakeGate(allowed=True),
+        }
+    )
+    try:
+        reply = asyncio.run(mp.message_processor.process_buffered_message("+5511", message, ["m1"]))
+    finally:
+        _restore(originals)
+    return reply, sent, conversations
+
+
+def test_help_command_answers_without_llm_nor_daily_limit():
+    for message in ("ajuda", "Ajuda!", "  MENU ", "?", "como funciona?"):
+        reply, sent, _ = _run_help(message)
+        assert reply == mp.HELP_MESSAGE
+        assert sent == [mp.HELP_MESSAGE]
+
+
+def test_help_text_shows_examples_of_each_kind():
+    for example in ("gastei 50 no mercado", "recebi 3000", "vence dia 20", "em 3x", "todo mês"):
+        assert example in mp.HELP_MESSAGE
+
+
+def test_help_keeps_pending_question_and_reminds_it():
+    pending = mp.ConversationState(
+        pending_intent=FinancialIntent(intent=IntentType.create_transaction, amount=50),
+        awaiting_confirmation=True,
+        user_id="u1",
+        contact_id="c1",
+        link_version=1,
+    )
+    reply, _, conversations = _run_help("ajuda", state=pending)
+
+    assert reply == mp.HELP_MESSAGE + mp.PENDING_REMINDER
+    assert conversations.cleared is False
+
+
+def test_help_without_subscription_gets_the_block_message():
+    reply, _, _ = _run_help("ajuda", gate=_FakeGate(allowed=False, message="Assine o Zeloo."))
+
+    assert reply == "Assine o Zeloo."
+
+
+def test_only_a_bare_help_request_is_a_command():
+    assert mp.is_help_command("ajuda por favor.")
+    assert not mp.is_help_command("ajuda com o cartão")
+    assert not mp.is_help_command("gastei 50 de ajuda de custo")

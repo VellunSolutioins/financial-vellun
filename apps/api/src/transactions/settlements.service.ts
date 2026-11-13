@@ -80,6 +80,88 @@ export async function recordSettlement(
 }
 
 /**
+ * Contas das liquidações ativas dos lançamentos: quem vai chamar
+ * `reverseActiveSettlements` trava estas contas (junto com as do lançamento,
+ * numa só chamada de `lockAccounts`) antes de reverter.
+ */
+export async function activeSettlementAccounts(tx: Db, transactionIds: string[]) {
+  if (transactionIds.length === 0) return [];
+  const rows = await tx.transactionSettlement.findMany({
+    where: { transactionId: { in: transactionIds }, status: 'active', accountId: { not: null } },
+    select: { accountId: true },
+    distinct: ['accountId'],
+  });
+  return rows.map((r) => r.accountId).filter((id): id is string => id !== null);
+}
+
+/**
+ * Reverte todas as liquidações ativas dos lançamentos, na transação `tx` de
+ * quem chama — usado ao excluir ou cancelar: desfazer o pagamento é parte da
+ * operação, não um passo do usuário. O histórico fica (`reversed`). Quem chama
+ * já travou os lançamentos e as contas (`activeSettlementAccounts`) e
+ * recalcula o saldo das contas devolvidas depois.
+ */
+export async function reverseActiveSettlements(tx: Db, transactionIds: string[]) {
+  if (transactionIds.length === 0) return [];
+  const active = await tx.transactionSettlement.findMany({
+    where: { transactionId: { in: transactionIds }, status: 'active' },
+    select: { id: true, transactionId: true, accountId: true, amount: true },
+  });
+  if (active.length === 0) return [];
+
+  await tx.transactionSettlement.updateMany({
+    where: { id: { in: active.map((s) => s.id) } },
+    data: { status: 'reversed', reversedAt: new Date() },
+  });
+  const byTransaction = new Map<string, number>();
+  for (const s of active) {
+    byTransaction.set(s.transactionId, (byTransaction.get(s.transactionId) ?? 0) + cents(s.amount));
+  }
+  for (const [transactionId, reversedCents] of byTransaction) {
+    const transaction = await tx.transaction.update({
+      where: { id: transactionId },
+      data: { settledAmount: { decrement: reversedCents / 100 } },
+    });
+    await restoreFixedForecast(tx, transaction);
+  }
+  return [...new Set(active.map((s) => s.accountId).filter((id): id is string => id !== null))];
+}
+
+/**
+ * Fixo pago pelo valor real, depois de uma reversão: sem pagamento ativo,
+ * volta a ser a previsão em aberto; com algum ainda ativo, continua fechado
+ * pelo que sobrou.
+ */
+async function restoreFixedForecast(
+  tx: Db,
+  transaction: {
+    id: string;
+    recurrenceType: string | null;
+    settledAmount: Prisma.Decimal;
+    amount: Prisma.Decimal;
+    forecastAmount: Prisma.Decimal | null;
+  },
+) {
+  if (transaction.recurrenceType !== 'fixo') return;
+  const restore = cents(transaction.settledAmount) === 0;
+  await tx.transaction.update({
+    where: { id: transaction.id },
+    data: restore
+      ? {
+          forecast: true,
+          ...(transaction.forecastAmount !== null && {
+            amount: transaction.forecastAmount,
+            forecastAmount: null,
+          }),
+        }
+      : {
+          amount: transaction.settledAmount,
+          forecastAmount: transaction.forecastAmount ?? transaction.amount,
+        },
+  });
+}
+
+/**
  * Pagamentos, recebimentos e dispensas de lançamentos de conta comum
  * (docs/adrs/0018). O saldo da conta só muda por aqui (e por transferência):
  * vencer não paga nada.
@@ -308,26 +390,7 @@ export class SettlementsService {
       where: { id: settlement.transactionId },
       data: { settledAmount: { decrement: settlement.amount } },
     });
-    if (transaction.recurrenceType === 'fixo') {
-      // Fixo pago pelo valor real: sem pagamento ativo, volta a ser a previsão
-      // em aberto; com algum ainda ativo, continua fechado pelo que sobrou.
-      const restore = cents(transaction.settledAmount) === 0;
-      await tx.transaction.update({
-        where: { id: transaction.id },
-        data: restore
-          ? {
-              forecast: true,
-              ...(transaction.forecastAmount !== null && {
-                amount: transaction.forecastAmount,
-                forecastAmount: null,
-              }),
-            }
-          : {
-              amount: transaction.settledAmount,
-              forecastAmount: transaction.forecastAmount ?? transaction.amount,
-            },
-      });
-    }
+    await restoreFixedForecast(tx, transaction);
     if (settlement.accountId) {
       await this.accountsService.recalculateBalance(settlement.accountId, tx);
     }

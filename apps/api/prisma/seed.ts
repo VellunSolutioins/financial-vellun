@@ -279,18 +279,12 @@ async function main() {
 
   console.log('Criando planos de assinatura...');
 
+  // Só cria o que falta: depois de criado, o plano é editado no painel de
+  // operações (/ops/planos), e rodar o seed de novo não pode desfazer isso.
   for (const plan of plans) {
     await prisma.plan.upsert({
       where: { code: plan.code },
-      update: {
-        name: plan.name,
-        description: plan.description,
-        price: plan.price,
-        currency: plan.currency,
-        interval: plan.interval,
-        isActive: true,
-        features: plan.features,
-      },
+      update: {},
       create: {
         code: plan.code,
         name: plan.name,

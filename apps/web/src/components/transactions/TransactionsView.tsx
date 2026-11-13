@@ -55,6 +55,23 @@ function formatCurrency(v: number) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v);
 }
 
+/** Parcela de compra parcelada: não é excluída nem cancelada sozinha, só a compra. */
+function isParcel(tx: Transaction) {
+  return tx.recurrenceType === 'parcelado' && !!tx.seriesId;
+}
+
+/**
+ * Aviso do confirm de excluir/cancelar: a API reverte sozinha o que já foi
+ * pago ou recebido, e o saldo da conta acompanha.
+ */
+function settledNotice(tx: Transaction) {
+  const settled = Number(tx.settledAmount ?? 0);
+  if (settled <= 0) return '';
+  return tx.type === 'income'
+    ? ` O recebimento de ${formatCurrency(settled)} será desfeito e o valor sai do saldo da conta.`
+    : ` O pagamento de ${formatCurrency(settled)} será desfeito e o valor volta para o saldo da conta.`;
+}
+
 const statusLabels: Record<string, string> = {
   confirmed: 'Confirmado',
   cancelled: 'Cancelado',
@@ -361,7 +378,7 @@ function TransacoesContent() {
   const handleCancelTx = async (tx: Transaction) => {
     const ok = await confirm({
       title: 'Cancelar lançamento',
-      description: 'O lançamento ficará com status cancelado. Deseja continuar?',
+      description: `O lançamento ficará com status cancelado.${settledNotice(tx)} Deseja continuar?`,
       confirmText: 'Cancelar lançamento',
       cancelText: 'Voltar',
       variant: 'destructive',
@@ -376,13 +393,14 @@ function TransacoesContent() {
     }
   };
   const handleDelete = async (tx: Transaction) => {
-    if (tx.recurrenceType === 'parcelado' && tx.seriesId) {
+    // Parcela não sai sozinha: o diálogo exclui a compra parcelada inteira.
+    if (isParcel(tx)) {
       setDeletingParcel(tx);
       return;
     }
     const ok = await confirm({
       title: 'Excluir lançamento',
-      description: `Excluir o lançamento "${tx.description}"? Esta ação não pode ser desfeita.`,
+      description: `Excluir o lançamento "${tx.description}"?${settledNotice(tx)} Esta ação não pode ser desfeita.`,
       confirmText: 'Excluir',
       variant: 'destructive',
     });
@@ -838,7 +856,7 @@ function TransacoesContent() {
           )}
         {editingTx && (
           <div className="mt-3 flex flex-wrap justify-end gap-1 border-t pt-3">
-            {editingTx.status === 'confirmed' && (
+            {editingTx.status === 'confirmed' && !isParcel(editingTx) && (
               <Button
                 type="button"
                 size="sm"
@@ -859,7 +877,7 @@ function TransacoesContent() {
                 void handleDelete(editingTx);
               }}
             >
-              Excluir lançamento
+              {isParcel(editingTx) ? 'Excluir compra parcelada' : 'Excluir lançamento'}
             </Button>
           </div>
         )}
@@ -1075,7 +1093,6 @@ function TransacoesContent() {
 
       <DeleteInstallmentDialog
         seriesId={deletingParcel?.seriesId ?? undefined}
-        parcel={deletingParcel}
         open={!!deletingParcel}
         onClose={() => setDeletingParcel(undefined)}
         onDeleted={() => {

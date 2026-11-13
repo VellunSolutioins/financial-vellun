@@ -14,6 +14,13 @@ const navItems = [
   { href: '/ops/pagamentos', label: 'Pagamentos' },
   { href: '/ops/auditoria', label: 'Auditoria' },
   { href: '/ops/funcionalidades', label: 'Funcionalidades' },
+  { href: '/ops/planos', label: 'Planos' },
+];
+
+/** Só para `ops_admin`: dados de pessoas (telefones) e concessão de acesso. */
+const adminNavItems = [
+  { href: '/ops/isencoes', label: 'Isenções' },
+  { href: '/ops/operadores', label: 'Operadores' },
 ];
 
 const roleLabels: Record<string, string> = {
@@ -78,7 +85,7 @@ function OpsShell({ children }: { children: React.ReactNode }) {
           {/* Navegação rola horizontalmente em telas estreitas em vez de quebrar. */}
           <nav className="-mx-4 mt-3 overflow-x-auto px-4">
             <ul className="flex w-max gap-1">
-              {navItems.map((item) => {
+              {[...navItems, ...(hasRole('ops_admin') ? adminNavItems : [])].map((item) => {
                 const active =
                   item.href === '/ops' ? pathname === '/ops' : pathname.startsWith(item.href);
                 return (
@@ -97,21 +104,6 @@ function OpsShell({ children }: { children: React.ReactNode }) {
                   </li>
                 );
               })}
-              {hasRole('ops_admin') && (
-                <li>
-                  <Link
-                    href="/ops/operadores"
-                    className={[
-                      'block whitespace-nowrap rounded-md px-3 py-2 text-sm transition-colors',
-                      pathname.startsWith('/ops/operadores')
-                        ? 'bg-primary text-primary-foreground'
-                        : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-                    ].join(' ')}
-                  >
-                    Operadores
-                  </Link>
-                </li>
-              )}
             </ul>
           </nav>
         </div>

@@ -22,7 +22,7 @@ export interface Installment {
   totalAmount: number;
   installmentAmount: number;
   installmentTotal: number;
-  /** Parcelas que ainda existem (menos que o total se as futuras foram excluídas). */
+  /** Parcelas que existem (menos que o total em compras antigas com parcelas excluídas). */
   parcelCount: number;
   /** Parcelas com data anterior a hoje. */
   pastCount: number;
@@ -42,10 +42,9 @@ export interface Installment {
   categoryId: string | null;
   account?: { id: string; name: string; type?: string } | null;
   category?: { id: string; name: string; color?: string | null } | null;
-  canDeleteAll: boolean;
-  deleteAllBlockedReason: string | null;
-  canDeleteFuture: boolean;
-  deleteFutureBlockedReason: string | null;
+  /** Só a compra inteira é excluída; parcela em fatura fechada/paga ou estorno impede. */
+  canDelete: boolean;
+  deleteBlockedReason: string | null;
   /** Parcela usada para estornar a compra inteira; null se não há o que estornar. */
   refundAnchorId: string | null;
   /** Parcelas que podem ser adiantadas, da última para a primeira. */

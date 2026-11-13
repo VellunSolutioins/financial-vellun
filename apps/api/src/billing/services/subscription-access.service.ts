@@ -2,12 +2,15 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SubscriptionStatus } from '@prisma/client';
 
+import { phoneVariants } from '../../common/phone.util';
 import { PrismaService } from '../../prisma/prisma.service';
 
 export type SubscriptionAccessReason =
   | 'active'
   | 'trialing'
   | 'grace_period'
+  /** WhatsApp verificado da conta cadastrado como isento no painel de operações. */
+  | 'exempt'
   | 'no_subscription'
   | 'trial_expired'
   | 'grace_expired'
@@ -49,7 +52,34 @@ export class SubscriptionAccessService {
   }
 
   async canUseProduct(userId: string, now: Date = new Date()): Promise<SubscriptionAccess> {
-    return this.evaluate(await this.pick(userId, now), now);
+    return this.withExemption(userId, this.evaluate(await this.pick(userId, now), now));
+  }
+
+  /**
+   * Libera quem a assinatura não libera, se a conta for isenta. Quem já tem
+   * acesso não paga a consulta: ela roda só no caminho do bloqueio.
+   */
+  async withExemption(userId: string, access: SubscriptionAccess): Promise<SubscriptionAccess> {
+    if (access.allowed) return access;
+    return (await this.isExempt(userId)) ? { ...access, allowed: true, reason: 'exempt' } : access;
+  }
+
+  /**
+   * A conta é isenta quando o WhatsApp **verificado e ativo** dela está entre
+   * os números isentos (com ou sem o nono dígito). Telefone só declarado no
+   * cadastro não conta: qualquer um poderia digitar o número de um sócio.
+   */
+  async isExempt(userId: string): Promise<boolean> {
+    const contacts = await this.prisma.whatsappContact.findMany({
+      where: { userId, isVerified: true, revokedAt: null },
+      select: { phoneNumber: true },
+    });
+    const numbers = contacts.flatMap((contact) => phoneVariants(contact.phoneNumber));
+    if (numbers.length === 0) return false;
+    const exemptions = await this.prisma.subscriptionExemption.count({
+      where: { phoneNumber: { in: numbers } },
+    });
+    return exemptions > 0;
   }
 
   /**
