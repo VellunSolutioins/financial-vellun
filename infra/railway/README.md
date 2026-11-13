@@ -64,11 +64,11 @@ Conferir a cada serviço novo:
 O `financial-vellun-api` envia o link de "Esqueci minha senha" e o aviso de
 senha alterada. Variáveis no serviço:
 
-| Variável         | Valor                                                                          |
-| ---------------- | ------------------------------------------------------------------------------ |
-| `MAIL_PROVIDER`  | `resend`                                                                       |
-| `RESEND_API_KEY` | chave do Resend **restrita a envio**                                           |
-| `MAIL_FROM`      | remetente do domínio verificado, ex. `Financial Vellun <nao-responda@dominio>` |
+| Variável         | Valor                                                                    |
+| ---------------- | ------------------------------------------------------------------------ |
+| `MAIL_PROVIDER`  | `resend`                                                                 |
+| `RESEND_API_KEY` | chave do Resend **restrita a envio**                                     |
+| `MAIL_FROM`      | remetente do domínio verificado, ex. `Zeloo <nao-responda@zeloo.app.br>` |
 
 Com `NODE_ENV=production`, `MAIL_PROVIDER` ausente impede a API de subir, e
 `resend` sem chave ou remetente também. `MAIL_PROVIDER=log` sobe, mas não envia

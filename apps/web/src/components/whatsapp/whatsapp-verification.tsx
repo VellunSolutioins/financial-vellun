@@ -186,7 +186,7 @@ export function WhatsappVerification({
             </p>
           ) : (
             <p className="text-sm text-muted-foreground">
-              Envie a mensagem &quot;{challenge.message}&quot; para o WhatsApp do Financial Vellun.
+              Envie a mensagem &quot;{challenge.message}&quot; para o WhatsApp do Zeloo.
             </p>
           )}
 

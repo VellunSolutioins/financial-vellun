@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import { LegalPage, type LegalSection } from '@/components/marketing/legal-page';
 
 export const metadata: Metadata = {
-  title: 'Política de Privacidade — Financial Vellun',
-  description: 'Como o Financial Vellun coleta, usa, compartilha e protege os seus dados.',
+  title: 'Política de Privacidade — Zeloo',
+  description: 'Como o Zeloo coleta, usa, compartilha e protege os seus dados.',
 };
 
 const SECTIONS: LegalSection[] = [
@@ -46,7 +46,7 @@ const SECTIONS: LegalSection[] = [
   {
     title: 'Contato',
     paragraphs: [
-      'Para dúvidas sobre privacidade, entre em contato com o Financial Vellun pelos canais oficiais de atendimento.',
+      'Para dúvidas sobre privacidade, entre em contato com o Zeloo pelos canais oficiais de atendimento.',
     ],
   },
 ];

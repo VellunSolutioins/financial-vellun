@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { ZELOO_SLOGAN } from '@/components/brand/zeloo-logo';
 import { cn } from '@/lib/utils';
 import { Brand } from './brand';
 import { container, focusRing } from './styles';
@@ -21,8 +22,9 @@ export function SiteFooter() {
       >
         <div>
           <Brand />
-          <p className="text-sm text-ink-muted">
-            © {new Date().getFullYear()} Financial Vellun. Todos os direitos reservados.
+          <p className="text-sm font-medium text-ink">{ZELOO_SLOGAN}</p>
+          <p className="mt-1 text-sm text-ink-muted">
+            © {new Date().getFullYear()} Zeloo. Todos os direitos reservados.
           </p>
         </div>
         <nav aria-label="Rodapé" className="-ml-3 flex flex-wrap gap-x-2 sm:ml-0 sm:justify-end">

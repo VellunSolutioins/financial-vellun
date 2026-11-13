@@ -27,8 +27,8 @@ export default function VerificarWhatsappPage() {
         <CardHeader>
           <CardTitle className="text-xl sm:text-2xl">Ative seu WhatsApp</CardTitle>
           <CardDescription>
-            É pelo WhatsApp que você registra lançamentos conversando com o Financial Vellun. Para
-            ligar o número à sua conta, precisamos confirmar que ele é seu.
+            É pelo WhatsApp que você registra lançamentos conversando com o Zeloo. Para ligar o
+            número à sua conta, precisamos confirmar que ele é seu.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">

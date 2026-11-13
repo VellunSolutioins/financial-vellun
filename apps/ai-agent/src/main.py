@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Financial Vellun AI Agent",
+    title="Zeloo AI Agent",
     description="Agente de IA para processamento de mensagens WhatsApp",
     version="0.0.1",
     lifespan=lifespan,

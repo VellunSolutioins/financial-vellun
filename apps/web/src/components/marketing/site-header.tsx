@@ -19,7 +19,7 @@ export function SiteHeader() {
   return (
     <header className="sticky top-0 z-30 border-b bg-background">
       <div className={cn(container, 'flex h-16 items-center justify-between gap-2')}>
-        <Brand />
+        <Brand withSlogan />
         <nav aria-label="Principal" className="hidden md:flex md:items-center md:gap-2">
           {NAV_LINKS.map((link) => (
             <Link

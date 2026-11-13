@@ -26,7 +26,7 @@ from src.services.phone_verification import (
 )
 
 PHONE = "+5519999999999"
-PREFILLED = "Olá! Quero ativar meu WhatsApp no Financial Vellun. Código: 048213"
+PREFILLED = "Olá! Quero ativar meu WhatsApp no Zeloo. Código: 048213"
 
 
 # ── Reconhecimento do código ─────────────────────────────────────────────────

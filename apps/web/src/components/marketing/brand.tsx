@@ -1,25 +1,34 @@
 import Link from 'next/link';
+import { ZELOO_SLOGAN, ZelooLogo } from '@/components/brand/zeloo-logo';
 import { cn } from '@/lib/utils';
 import { focusRing } from './styles';
 
 /** Marca das páginas públicas, sempre com link para a home. */
-export function Brand({ className }: { className?: string }) {
+export function Brand({
+  className,
+  withSlogan = false,
+}: {
+  className?: string;
+  /** Slogan em uma linha pequena abaixo do logo. */
+  withSlogan?: boolean;
+}) {
   return (
     <Link
       href="/"
+      aria-label="Zeloo — página inicial"
       className={cn(
-        'inline-flex min-h-11 shrink-0 items-center gap-2 whitespace-nowrap rounded-lg text-base font-bold tracking-tight text-ink sm:text-lg',
+        'inline-flex min-h-11 shrink-0 flex-col items-start justify-center rounded-lg',
         focusRing,
         className,
       )}
     >
-      <span
-        aria-hidden
-        className="hidden h-8 w-8 items-center justify-center rounded-lg bg-primary text-xs font-bold text-primary-foreground sm:flex"
-      >
-        FV
-      </span>
-      Financial Vellun
+      <ZelooLogo alt="" priority className="h-7 sm:h-8" />
+      {/* Abaixo de 360px não cabe ao lado de "Criar conta" e do menu. */}
+      {withSlogan && (
+        <span className="mt-1 hidden whitespace-nowrap text-[11px] leading-none text-ink-muted min-[360px]:block sm:text-xs">
+          {ZELOO_SLOGAN}
+        </span>
+      )}
     </Link>
   );
 }

@@ -12,7 +12,12 @@
  * Lido a cada chamada, e não no carregamento do módulo, para que o ambiente
  * efetivo (e os testes) decidam.
  */
-const PRODUCTION_WEB_ORIGIN = 'https://financial-vellun-web.vercel.app';
+const PRODUCTION_WEB_ORIGINS = [
+  'https://zeloo.app.br',
+  // Endereço anterior ao domínio próprio, mantido durante a transição: quem tiver
+  // o link antigo aberto continua conseguindo usar o app.
+  'https://financial-vellun-web.vercel.app',
+];
 const LOCAL_WEB_ORIGIN = 'http://localhost:3000';
 const VERCEL_PREVIEW_ORIGIN =
   /^https:\/\/financial-vellun-web-git-[a-z0-9-]+-vellun-s-projects\.vercel\.app$/;
@@ -28,8 +33,8 @@ function isProduction(): boolean {
 function exactOrigins(): string[] {
   const configured = [process.env.WEB_URL, ...(process.env.WEB_ALLOWED_ORIGINS?.split(',') ?? [])];
   const defaults = isProduction()
-    ? [PRODUCTION_WEB_ORIGIN]
-    : [PRODUCTION_WEB_ORIGIN, LOCAL_WEB_ORIGIN];
+    ? PRODUCTION_WEB_ORIGINS
+    : [...PRODUCTION_WEB_ORIGINS, LOCAL_WEB_ORIGIN];
   return [...configured, ...defaults]
     .filter((origin): origin is string => Boolean(origin?.trim()))
     .map(normalizeOrigin);

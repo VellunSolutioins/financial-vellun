@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { ZelooLogo, ZelooSymbol } from '@/components/brand/zeloo-logo';
 import {
   LayoutDashboard,
   Receipt,
@@ -219,7 +220,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <line x1="3" y1="18" x2="21" y2="18" />
           </svg>
         </button>
-        <span className="font-bold text-primary">Financial Vellun</span>
+        <ZelooLogo priority className="h-6" />
         <span className="w-10" aria-hidden />
       </header>
 
@@ -247,14 +248,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           )}
         >
           <div className={cn('min-w-0', collapsed && 'lg:hidden')}>
-            <span className="font-bold text-primary">Financial Vellun</span>
-            <p className="text-xs text-muted-foreground mt-1 truncate">{user.name}</p>
+            <ZelooLogo className="h-7" />
+            <p className="text-xs text-muted-foreground mt-2 truncate">{user.name}</p>
           </div>
-          {collapsed && (
-            <span className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground lg:flex">
-              FV
-            </span>
-          )}
+          {collapsed && <ZelooSymbol className="hidden h-8 shrink-0 lg:block" />}
           <button
             type="button"
             aria-label="Fechar menu"

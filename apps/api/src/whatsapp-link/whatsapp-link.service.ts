@@ -139,7 +139,7 @@ export class WhatsappLinkService {
       }),
     ]);
 
-    const message = `Olá! Quero ativar meu WhatsApp no Financial Vellun. Código: ${code}`;
+    const message = `Olá! Quero ativar meu WhatsApp no Zeloo. Código: ${code}`;
     return {
       status: 'pending',
       code,

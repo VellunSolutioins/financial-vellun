@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     environment: str = "production"  # "development" | "production"
     log_level: str = "INFO"  # nível dos logs da aplicação (DEBUG | INFO | WARNING | ...)
     main_api_url: str = "http://localhost:3001"
-    web_url: str = "https://financial-vellun-web.vercel.app"  # base do link de regularização
+    web_url: str = "https://zeloo.app.br"  # base do link de regularização
     # Chaves internas, uma por direção (plano de segurança, S2). Vazar a que o
     # agente usa para chamar a API não permite chamar o agente, e vice-versa.
     # `INTERNAL_API_KEY` é a chave única antiga: continua aceita e é usada como

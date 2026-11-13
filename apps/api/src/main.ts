@@ -97,7 +97,7 @@ async function bootstrap() {
   // Swagger fica desabilitado em produção para não expor a superfície da API.
   if (!isProduction) {
     const swaggerConfig = new DocumentBuilder()
-      .setTitle('Financial Vellun API')
+      .setTitle('Zeloo API')
       .setDescription('API principal de controle financeiro')
       .setVersion('1.0')
       .addCookieAuth('access_token')

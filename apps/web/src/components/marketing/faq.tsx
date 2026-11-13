@@ -9,7 +9,7 @@ const QUESTIONS: { question: string; answer: React.ReactNode }[] = [
   {
     question: 'Como funciona o registro pelo WhatsApp?',
     answer:
-      'Depois de verificar seu número, você envia uma mensagem para o WhatsApp do Financial Vellun contando o gasto ou a receita. O lançamento é criado na sua conta e você recebe uma confirmação com valor, categoria e data.',
+      'Depois de verificar seu número, você envia uma mensagem para o WhatsApp do Zeloo contando o gasto ou a receita. O lançamento é criado na sua conta e você recebe uma confirmação com valor, categoria e data.',
   },
   {
     question: 'E se a mensagem estiver incompleta?',
