@@ -1,4 +1,5 @@
 import { ArrowDown, CheckCheck, ShoppingCart } from 'lucide-react';
+import { ZelooAppIcon } from '@/components/brand/zeloo-logo';
 import { cn } from '@/lib/utils';
 import { Reveal } from './reveal';
 import {
@@ -13,14 +14,9 @@ function ChatPanel() {
   return (
     <div className="overflow-hidden rounded-3xl border bg-card shadow-card">
       <div className="flex items-center gap-3 border-b px-4 py-3">
-        <span
-          aria-hidden
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground"
-        >
-          FV
-        </span>
+        <ZelooAppIcon alt="" className="shrink-0 rounded-full" />
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-ink">Financial Vellun</p>
+          <p className="truncate text-sm font-semibold text-ink">Zeloo</p>
           <p className="text-xs text-ink-muted">Conversa no WhatsApp</p>
         </div>
       </div>
@@ -37,7 +33,7 @@ function ChatPanel() {
         </div>
         <div className="reveal mr-auto w-fit max-w-[85%] rounded-2xl rounded-bl-[6px] border bg-card px-3.5 py-2.5 [--reveal-delay:900ms]">
           <p className="text-[15px] leading-snug text-ink">
-            <span className="sr-only">Financial Vellun: </span>
+            <span className="sr-only">Zeloo: </span>
             {demoChat.botReply}
           </p>
           <p className="mt-1 text-right text-xs text-ink-muted">{demoChat.time}</p>

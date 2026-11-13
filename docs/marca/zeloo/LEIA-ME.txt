@@ -1,0 +1,15 @@
+ZELOO — Arquivos para uso digital
+
+svg/: vetores reais com curvas; letras convertidas em contornos, sem dependencia de fontes.
+png/: imagens renderizadas a partir dos mesmos SVGs.
+
+zeloo-principal: simbolo azul e nome azul-marinho, fundo transparente.
+zeloo-monocromatico: azul-marinho, fundo transparente.
+zeloo-branco-transparente: marca branca, para fundos escuros.
+zeloo-branco-fundo-azul: marca branca com fundo azul.
+zeloo-icone-app: simbolo branco sobre quadrado azul arredondado.
+
+icones/: PNGs 16, 32, 48, 180, 192 e 512 px; favicon.ico.
+
+Cores: azul #2563EB; azul-marinho #0F172A; branco #FFFFFF.
+Os SVGs sao vetorizacoes do conceito aprovado, com bordas suavizadas e cores uniformes.

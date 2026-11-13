@@ -8,7 +8,11 @@ import './globals.css';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'Financial Vellun',
+  // Base dos links absolutos (prévia ao compartilhar, canonical). Previews e
+  // ambiente local podem trocar com NEXT_PUBLIC_SITE_URL.
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? 'https://zeloo.app.br'),
+  title: 'Zeloo',
+  applicationName: 'Zeloo',
   description: 'Controle financeiro pessoal e empresarial',
 };
 
