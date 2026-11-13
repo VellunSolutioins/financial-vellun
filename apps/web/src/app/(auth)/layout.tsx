@@ -19,7 +19,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
     <div className="min-h-screen bg-background text-ink supports-[min-height:100dvh]:min-h-dvh lg:grid lg:grid-cols-2">
       <div className="flex min-w-0 flex-col pb-[env(safe-area-inset-bottom)]">
         <header className="flex h-16 items-center justify-between gap-3 px-4 sm:px-8 lg:px-12">
-          <Brand />
+          <Brand withSlogan />
           <Link
             href="/"
             className={`inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-ink-muted hover:text-ink ${focusRing}`}
