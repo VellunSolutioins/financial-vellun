@@ -2,15 +2,15 @@ import type { Metadata } from 'next';
 import { LegalPage, type LegalSection } from '@/components/marketing/legal-page';
 
 export const metadata: Metadata = {
-  title: 'Termos de Serviço — Financial Vellun',
-  description: 'Condições de uso do site e do aplicativo Financial Vellun.',
+  title: 'Termos de Serviço — Zeloo',
+  description: 'Condições de uso do site e do aplicativo Zeloo.',
 };
 
 const SECTIONS: LegalSection[] = [
   {
     title: 'Objeto',
     paragraphs: [
-      'Estes termos regulam o uso do site e do aplicativo Financial Vellun, um serviço de controle financeiro com registro de lançamentos por mensagens no WhatsApp.',
+      'Estes termos regulam o uso do site e do aplicativo Zeloo, um serviço de controle financeiro com registro de lançamentos por mensagens no WhatsApp.',
     ],
   },
   {
@@ -24,15 +24,15 @@ const SECTIONS: LegalSection[] = [
   {
     title: 'Propriedade intelectual',
     paragraphs: [
-      'Conteúdos, marcas, textos e materiais do Financial Vellun são protegidos por direitos de propriedade intelectual e não podem ser reproduzidos sem autorização.',
+      'Conteúdos, marcas, textos e materiais do Zeloo são protegidos por direitos de propriedade intelectual e não podem ser reproduzidos sem autorização.',
     ],
   },
   {
     title: 'Limitação de responsabilidade',
     paragraphs: [
-      'O Financial Vellun é uma ferramenta de organização e não presta consultoria financeira, contábil ou de investimentos.',
+      'O Zeloo é uma ferramenta de organização e não presta consultoria financeira, contábil ou de investimentos.',
       'As mensagens são interpretadas de forma automatizada, e o resultado pode conter erros. Confira os lançamentos no aplicativo e corrija o que for necessário.',
-      'O Financial Vellun não se responsabiliza por indisponibilidades temporárias, por falhas de conexão ou de serviços de terceiros, como o WhatsApp, nem pelo uso inadequado da sua conta por terceiros.',
+      'O Zeloo não se responsabiliza por indisponibilidades temporárias, por falhas de conexão ou de serviços de terceiros, como o WhatsApp, nem pelo uso inadequado da sua conta por terceiros.',
     ],
   },
   {
@@ -44,7 +44,7 @@ const SECTIONS: LegalSection[] = [
   {
     title: 'Contato',
     paragraphs: [
-      'Dúvidas sobre estes termos podem ser enviadas pelos canais oficiais de atendimento do Financial Vellun.',
+      'Dúvidas sobre estes termos podem ser enviadas pelos canais oficiais de atendimento do Zeloo.',
     ],
   },
 ];

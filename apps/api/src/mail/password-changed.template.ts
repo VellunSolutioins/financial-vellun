@@ -45,7 +45,7 @@ export function passwordChangedMessage(mail: PasswordChangedMail): MailMessage {
   const text = [
     greeting,
     '',
-    `A senha da sua conta no Financial Vellun foi alterada em ${when}.`,
+    `A senha da sua conta no Zeloo foi alterada em ${when}.`,
     how,
     '',
     'Se foi você, não precisa fazer nada.',
@@ -64,7 +64,7 @@ export function passwordChangedMessage(mail: PasswordChangedMail): MailMessage {
       <tr>
         <td style="padding:32px 24px;font-size:16px;line-height:1.5;">
           <p style="margin:0 0 16px;">${escapeHtml(greeting)}</p>
-          <p style="margin:0 0 16px;">A senha da sua conta no Financial Vellun foi alterada em ${escapeHtml(when)}.</p>
+          <p style="margin:0 0 16px;">A senha da sua conta no Zeloo foi alterada em ${escapeHtml(when)}.</p>
           <p style="margin:0 0 24px;font-size:14px;color:#4b5563;">${escapeHtml(how)}</p>
           <p style="margin:0 0 16px;">Se foi você, não precisa fazer nada. Se não foi, crie uma senha nova agora:</p>
           <p style="margin:0 0 24px;">
@@ -81,5 +81,5 @@ export function passwordChangedMessage(mail: PasswordChangedMail): MailMessage {
   </body>
 </html>`;
 
-  return { to: mail.to, subject: 'Sua senha foi alterada — Financial Vellun', text, html };
+  return { to: mail.to, subject: 'Sua senha foi alterada — Zeloo', text, html };
 }

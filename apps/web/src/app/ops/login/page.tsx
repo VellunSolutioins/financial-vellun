@@ -55,8 +55,7 @@ function LoginCard() {
         </Button>
 
         <p className="text-xs text-muted-foreground">
-          Esta área é separada da sua conta do produto. Estar logado no Financial Vellun não dá
-          acesso aqui.
+          Esta área é separada da sua conta do produto. Estar logado no Zeloo não dá acesso aqui.
         </p>
       </CardContent>
     </Card>

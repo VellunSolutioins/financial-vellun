@@ -36,7 +36,7 @@ export function passwordResetMessage(mail: PasswordResetMail): MailMessage {
   const text = [
     greeting,
     '',
-    'Recebemos um pedido para redefinir a senha da sua conta no Financial Vellun.',
+    'Recebemos um pedido para redefinir a senha da sua conta no Zeloo.',
     'Para criar uma senha nova, abra o link abaixo:',
     '',
     mail.resetUrl,
@@ -55,7 +55,7 @@ export function passwordResetMessage(mail: PasswordResetMail): MailMessage {
       <tr>
         <td style="padding:32px 24px;font-size:16px;line-height:1.5;">
           <p style="margin:0 0 16px;">${escapeHtml(greeting)}</p>
-          <p style="margin:0 0 24px;">Recebemos um pedido para redefinir a senha da sua conta no Financial Vellun.</p>
+          <p style="margin:0 0 24px;">Recebemos um pedido para redefinir a senha da sua conta no Zeloo.</p>
           <p style="margin:0 0 24px;">
             <a href="${url}" style="display:inline-block;padding:14px 24px;border-radius:10px;background:#111827;color:#ffffff;text-decoration:none;font-weight:bold;">Criar senha nova</a>
           </p>
@@ -68,5 +68,5 @@ export function passwordResetMessage(mail: PasswordResetMail): MailMessage {
   </body>
 </html>`;
 
-  return { to: mail.to, subject: 'Redefinição de senha — Financial Vellun', text, html };
+  return { to: mail.to, subject: 'Redefinição de senha — Zeloo', text, html };
 }

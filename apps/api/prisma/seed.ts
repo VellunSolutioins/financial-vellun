@@ -14,8 +14,8 @@ const prisma = new PrismaClient();
 const plans = [
   {
     code: 'vellun-mensal',
-    name: 'Vellun Mensal',
-    description: 'Plano mensal com acesso completo ao Financial Vellun.',
+    name: 'Zeloo Mensal',
+    description: 'Plano mensal com acesso completo ao Zeloo.',
     price: '49.90',
     currency: 'BRL',
     interval: BillingInterval.monthly,
@@ -27,8 +27,8 @@ const plans = [
   },
   {
     code: 'vellun-anual',
-    name: 'Vellun Anual',
-    description: 'Plano anual com acesso completo ao Financial Vellun.',
+    name: 'Zeloo Anual',
+    description: 'Plano anual com acesso completo ao Zeloo.',
     price: '499.00',
     currency: 'BRL',
     interval: BillingInterval.annual,

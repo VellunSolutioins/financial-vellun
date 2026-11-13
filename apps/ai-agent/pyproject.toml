@@ -1,7 +1,7 @@
 [project]
 name = "financial-vellun-ai-agent"
 version = "0.0.1"
-description = "Financial Vellun AI Agent"
+description = "Zeloo AI Agent"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115.0",

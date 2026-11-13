@@ -14,7 +14,7 @@ def build_welcome_message(name: str | None) -> str:
 
     return (
         f"{greeting} Seu WhatsApp foi verificado e está ligado à sua conta do "
-        "Financial Vellun.\n\n"
+        "Zeloo.\n\n"
         "Este é o seu canal para registrar lançamentos direto pelo WhatsApp. "
         "É só me mandar uma mensagem em linguagem natural, por exemplo:\n"
         "• \"gastei 50 no mercado\"\n"
