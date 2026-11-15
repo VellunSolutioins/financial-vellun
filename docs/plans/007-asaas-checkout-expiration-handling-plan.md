@@ -1,6 +1,6 @@
 # Plano — Tratamento de Checkout Expirado e Correlação de Webhooks Asaas
 
-> **Substituído** pela entrega 3 de [billing-correcoes-plan.md](billing-correcoes-plan.md), já implementada. A correlação ficou pelo id do checkout, não pelo `externalReference`, que a documentação dos eventos de checkout do Asaas não lista. Mantido como registro do caso que motivou a mudança.
+> **Substituído** pela entrega 3 de [014-billing-correcoes-plan.md](014-billing-correcoes-plan.md), já implementada. A correlação ficou pelo id do checkout, não pelo `externalReference`, que a documentação dos eventos de checkout do Asaas não lista. Mantido como registro do caso que motivou a mudança.
 
 ## Summary
 
@@ -86,7 +86,7 @@ Decisão principal: criar a assinatura local `pending` antes de abrir o checkout
 
 ## Assumptions
 
-- Documento alvo: `plan/asaas-checkout-expiration-handling-plan.md`.
+- Documento alvo: `docs/plans/007-asaas-checkout-expiration-handling-plan.md`.
 - `externalReference` será o `Subscription.id`, não `userId`, para distinguir múltiplas tentativas do mesmo usuário.
 - `CHECKOUT_PAID` será ignorado para acesso; apenas `PAYMENT_CONFIRMED`/`PAYMENT_RECEIVED` ativam.
 - `SUBSCRIPTION_CREATED` registra vínculo externo, mas não concede acesso sozinho.

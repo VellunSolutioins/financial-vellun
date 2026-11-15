@@ -2,7 +2,7 @@
 
 Config de coleta, regras de alerta, dashboards e roteamento de notificação. A
 visão geral, o orçamento de cardinalidade e o roteiro de verificação estão em
-[docs/observability.md](../../docs/observability.md).
+[docs/006-observability.md](../../docs/006-observability.md).
 
 ```
 ../../Dockerfile.alloy             imagem do Alloy no Railway (copia config.alloy)
@@ -65,7 +65,7 @@ O Alloy local coleta a API, o agente e o worker rodando no host, com o
 `METRICS_TOKEN` padrão (`local-dev-metrics-token`) — se trocar o token nos
 `.env`, exporte o mesmo valor antes do `obs:up`. Para derrubar: `pnpm obs:down`.
 O roteiro completo de verificação está em
-[docs/observability.md](../../docs/observability.md#verificação-local).
+[docs/006-observability.md](../../docs/006-observability.md#verificação-local).
 
 ## Verificar
 

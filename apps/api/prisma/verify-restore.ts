@@ -12,7 +12,7 @@
  *   horário do backup.
  *
  * Sai com código 1 se as migrations divergirem ou houver migration inacabada.
- * O procedimento completo está em docs/retencao-e-backups.md.
+ * O procedimento completo está em docs/011-retencao-e-backups.md.
  */
 import { readdirSync, statSync } from 'fs';
 import { join } from 'path';

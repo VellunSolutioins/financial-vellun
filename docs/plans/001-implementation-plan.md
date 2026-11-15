@@ -2,7 +2,7 @@
 
 ## Contexto
 
-O projeto `financial-vellun` é greenfield — atualmente só existe `docs/technical-requirements.md`. Esse documento descreve por completo a arquitetura (monorepo com `apps/web`, `apps/api`, `apps/ai-agent`), o modelo de dados, os módulos funcionais, requisitos não funcionais e um roadmap em 5 fases (§15).
+O projeto `financial-vellun` é greenfield — atualmente só existe `docs/002-technical-requirements.md`. Esse documento descreve por completo a arquitetura (monorepo com `apps/web`, `apps/api`, `apps/ai-agent`), o modelo de dados, os módulos funcionais, requisitos não funcionais e um roadmap em 5 fases (§15).
 
 O objetivo é produzir **um único arquivo Markdown** contendo prompts incrementais — lógicos, sequenciais e coesos — que poderão ser executados, um a um, para implementar a aplicação posteriormente. Cada prompt deve ser autossuficiente o bastante para ser colado em um agente de codificação e produzir um passo concreto e verificável, construindo sobre o anterior.
 
@@ -18,7 +18,7 @@ O objetivo é produzir **um único arquivo Markdown** contendo prompts increment
 
 ## Arquivo a ser criado
 
-- `docs/implementation-prompts.md` (novo arquivo; único arquivo a ser escrito na fase de execução).
+- `docs/001-implementation-prompts.md` (novo arquivo; único arquivo a ser escrito na fase de execução).
 
 ## Estrutura do documento de prompts
 

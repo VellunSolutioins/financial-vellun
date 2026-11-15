@@ -2,7 +2,7 @@
 
 ## Contexto
 
-A análise em `docs/analise-billing-2026-10-12.md` encontrou, no módulo `apps/api/src/billing/`:
+A análise em `docs/016-analise-billing-2026-10-12.md` encontrou, no módulo `apps/api/src/billing/`:
 
 - duas falhas que devolvem acesso a quem não pagou (2.1 e 2.2);
 - processamento de webhook em até seis escritas sem transação, com handlers que não são idempotentes (5.2, 5.3, 6);
@@ -29,7 +29,7 @@ Confirmadas pelo Bruno em 12/10/2026.
 
 | Entrega | Situação                                                                                                                                                                               |
 | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0       | Feita em 12/10/2026. Resultado na seção 9 de `docs/analise-billing-2026-10-12.md`.                                                                                                     |
+| 0       | Feita em 12/10/2026. Resultado na seção 9 de `docs/016-analise-billing-2026-10-12.md`.                                                                                                     |
 | 1       | Implementada no branch `fix/billing-acesso-sem-pagamento`. Falta a verificação com webhook real.                                                                                       |
 | 2       | Implementada no mesmo branch. O teste de integração com Postgres (`webhook-transaction.integration.spec.ts`) passou no banco de validação local. Falta a verificação com webhook real. |
 | 3       | Implementada no mesmo branch, com a tela de assinatura conferida em celular, tablet e desktop. Falta a verificação com webhook real.                                                   |
@@ -239,7 +239,7 @@ Para isso, estes métodos ganham um parâmetro opcional `db: Db = this.prisma` (
 
 ## Entrega 3 — Checkout e cancelamento (2.3, 2.7, 5.5, 5.6, 3.2 em parte)
 
-Substitui `plan/asaas-checkout-expiration-handling-plan.md`. A correlação passa a ser por `checkout.id` e `payment.checkoutSession`, não por `externalReference` no payload do webhook, que a documentação não lista. (3.3)
+Substitui `docs/plans/007-asaas-checkout-expiration-handling-plan.md`. A correlação passa a ser por `checkout.id` e `payment.checkoutSession`, não por `externalReference` no payload do webhook, que a documentação não lista. (3.3)
 
 ### Schema
 

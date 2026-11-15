@@ -1,7 +1,7 @@
 # Tuning e escala
 
 Como escolher concorrência, réplicas e limites — e em que ordem mexer neles.
-Referência: P6 do [plano de performance](../plan/plano-implementacao-performance.md).
+Referência: P6 do [plano de performance](plans/011-plano-implementacao-performance.md).
 
 A regra que organiza tudo:
 
@@ -29,7 +29,7 @@ configurada nunca é alcançada. Padrão atual: prefetch 10 para 5 + 3 + 3.
 ## A ordem de mexer
 
 1. **Meça primeiro.** Os perfis do capacity review
-   ([runbook](whatsapp-messaging-runbook.md#capacity-review)) dizem onde está o
+   ([runbook](005-whatsapp-messaging-runbook.md#capacity-review)) dizem onde está o
    tempo: `receive_to_process`, `processing_duration`, `llm_latency`,
    `outbound_send`. Mexer sem isso é adivinhação cara.
 2. **Escale em processos, não em concorrência.** O joelho do webhook fica entre
@@ -42,7 +42,7 @@ configurada nunca é alcançada. Padrão atual: prefetch 10 para 5 + 3 + 3.
 4. **API só depois do throttler em Redis** (contrato C11, já entregue) **e com o
    connection budget refeito**: `réplicas × connection_limit` precisa caber no
    `max_connections` contando a sobreposição do deploy. Ver
-   [connection-budget.md](connection-budget.md).
+   [012-connection-budget.md](012-connection-budget.md).
 
 ## O que não adianta escalar
 

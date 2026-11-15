@@ -13,7 +13,7 @@ O diagnóstico do repositório desmentiu três premissas do pedido original:
    API ou web, nenhum gestor de segredos. O único host comprovado é o frontend na Vercel
    (`financial-vellun-web.vercel.app`, org `vellun-s-projects`, hard-coded em
    `apps/api/src/common/http-origin.util.ts:5`). O próprio repo mantém "Estratégia de deploy" como
-   decisão em aberto (`docs/technical-requirements.md:720`).
+   decisão em aberto (`docs/002-technical-requirements.md:720`).
 2. **Não existe nenhuma noção de papel ou permissão.** `User` não tem `role`/`isAdmin`, o JWT carrega
    só `sub` e `email`, e não há `RolesGuard`, `@Roles`, `@Public` nem `@CurrentUser`. O `/internal/*`
    é chave compartilhada **sem identidade de chamador** — hoje é impossível auditar quem agiu.
@@ -72,7 +72,7 @@ Verificadas contra documentação oficial ou contra o sistema no ar, e corrigida
 
 1. **O Railway não tem log drain** (Entrega 2). As aplicações passaram a empurrar
    para o `loki.source.api` do Alloy, com transporte que nunca interrompe a
-   aplicação, nunca bloqueia e nunca cresce sem limite. Ver `docs/observability.md`.
+   aplicação, nunca bloqueia e nunca cresce sem limite. Ver `docs/006-observability.md`.
 2. **O Grafana Cloud não suporta provisionamento por arquivo** (Entrega 3). Regras
    em formato Prometheus, carregadas com `mimirtool rules load`. Ganho colateral:
    viraram testáveis com `promtool test rules`.
@@ -396,7 +396,7 @@ falha definitiva de pagamento; pressão de memória e disco; **ausência inesper
 ou `absent()`).
 
 Cada alerta carrega resumo, serviço, ambiente, link do dashboard e link do procedimento no
-`docs/whatsapp-messaging-runbook.md`.
+`docs/005-whatsapp-messaging-runbook.md`.
 
 **Canais de notificação ficam declarados mas sem destino configurado.** Nada é enviado para fora
 durante a implementação.
@@ -409,7 +409,7 @@ Firing_ do Grafana, sem envio externo.
 
 ### Entrega 4 — RabbitMQ Management como ponte ✅
 
-Documental, sem código. Estende `docs/whatsapp-messaging-runbook.md` com: verificar filas e
+Documental, sem código. Estende `docs/005-whatsapp-messaging-runbook.md` com: verificar filas e
 consumidores, identificar mensagens na DLQ, interpretar o envelope (`DlqEnvelopeV1` —
 `apps/ai-agent/src/messaging/contracts.py`), investigar a causa **antes** de reprocessar, republicar
 o payload original, confirmar o resultado.

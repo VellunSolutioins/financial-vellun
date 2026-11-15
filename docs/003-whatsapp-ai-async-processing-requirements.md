@@ -7,7 +7,7 @@
 > consumers com ack manual, retry por buckets e DLQ.
 >
 > - Visão geral e variáveis: [README](../README.md#arquitetura-de-processamento-de-mensagens-whatsapp--ia)
-> - Operação (DLQ, retries, reprocesso): [whatsapp-messaging-runbook.md](whatsapp-messaging-runbook.md)
+> - Operação (DLQ, retries, reprocesso): [005-whatsapp-messaging-runbook.md](005-whatsapp-messaging-runbook.md)
 > - Decisões e por quê: [docs/adrs/](adrs/README.md)
 
 ## 1. Objetivo

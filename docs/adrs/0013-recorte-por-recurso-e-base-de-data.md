@@ -2,7 +2,7 @@
 
 - **Status:** Aceito — substituído em parte pela [0018](0018-gasto-obrigacao-liquidacao.md) quanto a a base de data (gastos pela data da compra, receitas recebidas)
 - **Data:** 2026-09-24
-- **Plano:** [`plan/contas-cartoes-faturas.md`](../../plan/contas-cartoes-faturas.md), fase 2
+- **Plano:** [`docs/plans/013-contas-cartoes-faturas.md`](../plans/013-contas-cartoes-faturas.md), fase 2
 
 ## Contexto
 

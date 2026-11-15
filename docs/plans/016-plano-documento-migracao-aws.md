@@ -19,7 +19,7 @@ Decisões já tomadas com o Bruno:
 ## Entregável
 
 Um arquivo novo: `plan/migracao-para-aws.md`, em português, no formato dos outros planos da
-pasta (`plan/recuperacao-de-senha-por-email.md` é a referência: aviso de status no topo,
+pasta (`docs/plans/003-recuperacao-de-senha-por-email.md` é a referência: aviso de status no topo,
 "Contexto", tabelas, passos numerados, "Verificação"). Leitor: quem vai executar a migração,
 conhece o projeto e não necessariamente a AWS.
 
@@ -85,7 +85,7 @@ dos docs de operação entra no documento como tarefa pós-migração, não é f
   - nomes internos por Service Connect/Cloud Map no lugar de `*.railway.internal`;
   - `prisma migrate deploy` continua no start da API (1 réplica).
 - **RDS PostgreSQL 16**: Multi-AZ, backup automático com PITR (preenche a tabela "a definir" de
-  `docs/retencao-e-backups.md`), `timezone` no parameter group, TLS na URL, recriar
+  `docs/011-retencao-e-backups.md`), `timezone` no parameter group, TLS na URL, recriar
   `vellun_monitor`. Connection budget atual (pico 19) cabe; sem RDS Proxy por ora.
 - **Amazon MQ (RabbitMQ)** — verificado na documentação da AWS em 2026-10-11:
   - 3.13 roda em `mq.t3`/`m5`/`m7g`, mas **não** expõe endpoint Prometheus;
@@ -96,7 +96,7 @@ dos docs de operação entra no documento como tarefa pós-migração, não é f
   - conexão só por `amqps://`.
 - **ElastiCache**: não há AOF. O documento recomenda primário + réplica Multi-AZ com
   `noeviction`, e registra que a durabilidade nova do Valkey 9 exige cluster mode (mudança de
-  cliente) e que `docs/tuning-e-escala.md` precisa ser reescrito nesse ponto.
+  cliente) e que `docs/014-tuning-e-escala.md` precisa ser reescrito nesse ponto.
 - **Segredos**: SSM Parameter Store/Secrets Manager referenciados na task definition; rotação
   de tudo no corte.
 - **Observabilidade**: Alloy como serviço Fargate, stdout em CloudWatch Logs com retenção
@@ -120,7 +120,7 @@ API); o Redis não é migrado (estado de TTL curto, confirmações pendentes se 
 ## Passos de execução
 
 1. Reler os trechos que o documento cita para fixar nomes e linhas exatas (`session.service.ts`,
-   `config.alloy`, `plan/operacoes-e-observabilidade-plan.md`, ADR 0010).
+   `config.alloy`, `docs/plans/010-operacoes-e-observabilidade-plan.md`, ADR 0010).
 2. Consultar os preços atuais de `sa-east-1` (Fargate, RDS, Amazon MQ `mq.m7g`, ElastiCache,
    NAT, ALB) e os tipos de instância disponíveis na região, registrando a data da consulta.
 3. Conferir na documentação o comportamento de retentativa dos webhooks da Meta e do Asaas, que
@@ -131,7 +131,7 @@ API); o Redis não é migrado (estado de TTL curto, confirmações pendentes se 
 
 - Todo caminho de arquivo citado no documento existe no repositório (Glob por cada um).
 - Toda afirmação sobre serviço da AWS tem data de conferência e link, como em
-  `docs/observability.md`; o que não foi possível confirmar aparece na seção de riscos como
+  `docs/006-observability.md`; o que não foi possível confirmar aparece na seção de riscos como
   "a validar", não como fato.
 - `pnpm exec prettier --check plan/migracao-para-aws.md` passa.
 - As quatro decisões da tabela inicial aparecem refletidas em todas as seções (nenhum trecho

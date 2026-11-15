@@ -41,7 +41,7 @@ tests:
               description: >-
                 O alvo api.railway.internal:3001 (api) está inalcançável há mais de 2 minutos.
               dashboard: 'DASHBOARD_BASE/d/vellun-overview/visao-geral'
-              runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#saúde'
+              runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#saúde'
 
   - interval: 30s
     name: deploy curto não dispara alerta
@@ -101,7 +101,7 @@ tests:
               description: >-
                 Nenhuma série `up` para um dos serviços há 10 minutos. Isso não é o serviço fora — é a **coleta** fora (Alloy caído, alvo removido da config, ou credencial do remote_write inválida). O painel parece saudável porque não há dado, e é justamente o pior caso.
               dashboard: 'DASHBOARD_BASE/d/vellun-overview/visao-geral'
-              runbook: 'RUNBOOK_BASE/observability.md#verificação-local'
+              runbook: 'RUNBOOK_BASE/006-observability.md#verificação-local'
 
   # ── Recursos ─────────────────────────────────────────────────────────────
   - interval: 1m
@@ -126,7 +126,7 @@ tests:
               description: >-
                 Um alarme de disco, memória ou descritores está ativo. Nesse estado o broker bloqueia publicação, e o webhook passa a devolver 503.
               dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
-              runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#webhook-devolvendo-503'
+              runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#webhook-devolvendo-503'
 
   - interval: 1m
     name: sem alarme de recurso não alerta
@@ -186,7 +186,7 @@ tests:
               summary: 'Redis acima de 85% da memória'
               description: '90% da memória máxima em uso.'
               dashboard: 'DASHBOARD_BASE/d/vellun-overview/visao-geral'
-              runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#confirmações-pendentes-travadas'
+              runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#confirmações-pendentes-travadas'
 
   # ── API ──────────────────────────────────────────────────────────────────
   - interval: 30s
@@ -220,7 +220,7 @@ tests:
               summary: 'API com mais de 5% de erro 5xx'
               description: '16.67% das requisições nos últimos 5 minutos.'
               dashboard: 'DASHBOARD_BASE/d/vellun-api/api'
-              runbook: 'RUNBOOK_BASE/observability.md'
+              runbook: 'RUNBOOK_BASE/006-observability.md'
 
   - interval: 30s
     name: API sem trafego não alerta por divisao por zero
@@ -254,7 +254,7 @@ tests:
               description: >-
                 A API está no ar mas o readiness responde 503, o que significa que o `SELECT 1` no Postgres está falhando.
               dashboard: 'DASHBOARD_BASE/d/vellun-api/api'
-              runbook: 'RUNBOOK_BASE/observability.md'
+              runbook: 'RUNBOOK_BASE/006-observability.md'
 
   # ── Pagamentos ───────────────────────────────────────────────────────────
   - interval: 1m
@@ -292,7 +292,7 @@ tests:
               description: >-
                 1 evento(s) de webhook do PSP esgotou(esgotaram) o retry nos últimos 10 minutos. Pode haver pagamento confirmado sem acesso concedido.
               dashboard: 'DASHBOARD_BASE/d/vellun-payments/pagamentos'
-              runbook: 'RUNBOOK_BASE/observability.md'
+              runbook: 'RUNBOOK_BASE/006-observability.md'
 
   - interval: 1m
     name: fila de retry de pagamento pequena não alerta
@@ -343,7 +343,7 @@ tests:
               description: >-
                 1 envio(s) de password_reset falharam nos últimos 15 minutos. O erro do provedor está no log da API (MailService).
               dashboard: 'DASHBOARD_BASE/d/vellun-api/api'
-              runbook: 'RUNBOOK_BASE/observability.md'
+              runbook: 'RUNBOOK_BASE/006-observability.md'
 
   - interval: 1m
     name: e-mail descartado em produção alerta
@@ -363,7 +363,7 @@ tests:
               description: >-
                 1 e-mail(s) de password_reset deixaram de sair na última hora porque MAIL_PROVIDER=log. Configure MAIL_PROVIDER=resend na API.
               dashboard: 'DASHBOARD_BASE/d/vellun-api/api'
-              runbook: 'RUNBOOK_BASE/observability.md'
+              runbook: 'RUNBOOK_BASE/006-observability.md'
 
   - interval: 1m
     name: transporte log fora de produção não alerta

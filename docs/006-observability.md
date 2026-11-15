@@ -4,7 +4,7 @@ Como métricas e logs saem dos três serviços e chegam ao Grafana Cloud, quanto
 isso custa em séries, e como validar tudo nesta máquina antes de tocar em
 produção.
 
-Complementa o [runbook do pipeline WhatsApp](whatsapp-messaging-runbook.md), que
+Complementa o [runbook do pipeline WhatsApp](005-whatsapp-messaging-runbook.md), que
 cobre o que fazer quando um alerta dispara.
 
 ---
@@ -475,7 +475,7 @@ primeiro `apply` disparar a bateria inteira para pessoas de verdade.
 
 Estas etapas não estão no repositório porque o Railway e o Grafana Cloud são
 operados pelo painel — a maior fragilidade do conjunto, registrada em
-[Riscos do plano](../plan/operacoes-e-observabilidade-plan.md).
+[Riscos do plano](plans/010-operacoes-e-observabilidade-plan.md).
 
 - criar a stack no Grafana Cloud e gerar o token de escrita;
 - criar o serviço do Alloy no Railway a partir de `Dockerfile.alloy`, seguindo a

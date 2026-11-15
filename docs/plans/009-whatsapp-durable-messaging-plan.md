@@ -224,7 +224,7 @@ testes e modo `legacy`.
 - `README.md`: substituir a seção "Webhook → Buffer → Worker" pela nova arquitetura, filas, como rodar, como
   publicar mensagem de teste, DLQ e o painel do RabbitMQ.
 - Raiz `package.json`: `db:up` já sobe o compose inteiro (mesmo arquivo); adicionar `agent:worker`.
-- `docs/whatsapp-ai-async-processing-requirements.md`: seção nova descrevendo a arquitetura de mensageria e o
+- `docs/003-whatsapp-ai-async-processing-requirements.md`: seção nova descrevendo a arquitetura de mensageria e o
   runbook operacional (drenar DLQ, reprocessar).
 - `CLAUDE.md`: atualizar tabela de comandos/serviços.
 

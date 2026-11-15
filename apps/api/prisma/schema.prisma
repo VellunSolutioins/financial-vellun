@@ -6,7 +6,7 @@ datasource db {
   provider  = "postgresql"
   // Caminho da aplicação: pode passar por pooler (PgBouncer em transaction
   // mode), e por isso carrega `pgbouncer=true`, `connection_limit` e
-  // `pool_timeout` — ver docs/connection-budget.md.
+  // `pool_timeout` — ver docs/012-connection-budget.md.
   url       = env("DATABASE_URL")
   // Caminho das migrations e do `prisma db push`: conexão direta, sem pooler.
   // `migrate deploy` usa advisory lock e prepared statements nomeados, que um

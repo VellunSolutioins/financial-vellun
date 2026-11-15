@@ -35,7 +35,7 @@ financial-vellun/
     docker/
     database/
   docs/
-    technical-requirements.md
+    002-technical-requirements.md
 ```
 
 ### 3.1 `apps/web`

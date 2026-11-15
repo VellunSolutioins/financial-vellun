@@ -29,7 +29,7 @@ groups:
             O alvo {{ $labels.instance }} ({{ $labels.job }}) está inalcançável há
             mais de 2 minutos.
           dashboard: 'DASHBOARD_BASE/d/vellun-overview/visao-geral'
-          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#saúde'
+          runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#saúde'
 
       - alert: InfraestruturaIndisponivel
         expr: up{job=~"rabbitmq|postgres|redis"} == 0
@@ -40,7 +40,7 @@ groups:
           summary: '{{ $labels.job }} não responde ao scrape'
           description: 'O alvo {{ $labels.instance }} está inalcançável há mais de 2 minutos.'
           dashboard: 'DASHBOARD_BASE/d/vellun-overview/visao-geral'
-          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#saúde'
+          runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#saúde'
 
       - alert: AusenciaInesperadaDeDados
         # O alerta mais fácil de esquecer, e o que mais importa: `up == 0` só
@@ -68,7 +68,7 @@ groups:
             config, ou credencial do remote_write inválida). O painel parece
             saudável porque não há dado, e é justamente o pior caso.
           dashboard: 'DASHBOARD_BASE/d/vellun-overview/visao-geral'
-          runbook: 'RUNBOOK_BASE/observability.md#verificação-local'
+          runbook: 'RUNBOOK_BASE/006-observability.md#verificação-local'
 
   # ── Recursos ─────────────────────────────────────────────────────────────
   - name: recursos
@@ -92,7 +92,7 @@ groups:
             Um alarme de disco, memória ou descritores está ativo. Nesse estado o
             broker bloqueia publicação, e o webhook passa a devolver 503.
           dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
-          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#webhook-devolvendo-503'
+          runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#webhook-devolvendo-503'
 
       - alert: DiscoDoRabbitMqAcabando
         # Antecede o alarme acima: avisa enquanto ainda há tempo de agir.
@@ -109,7 +109,7 @@ groups:
             Restam {{ $value | humanize1024 }}B, menos de três vezes o limite que
             dispara o bloqueio de publicação.
           dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
-          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#webhook-devolvendo-503'
+          runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#webhook-devolvendo-503'
 
       - alert: MemoriaDoRedisAcabando
         # O Redis guarda o agrupamento e as confirmações pendentes. Sem memória, o
@@ -126,7 +126,7 @@ groups:
           summary: 'Redis acima de 85% da memória'
           description: '{{ $value | humanizePercentage }} da memória máxima em uso.'
           dashboard: 'DASHBOARD_BASE/d/vellun-overview/visao-geral'
-          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#confirmações-pendentes-travadas'
+          runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#confirmações-pendentes-travadas'
 
       - alert: ConexoesDoPostgresProximasDoLimite
         expr: |
@@ -143,7 +143,7 @@ groups:
             e é quando isto costuma estourar — o connection budget dimensiona
             para esse pico.
           dashboard: 'DASHBOARD_BASE/d/vellun-overview/visao-geral'
-          runbook: 'RUNBOOK_BASE/connection-budget.md'
+          runbook: 'RUNBOOK_BASE/012-connection-budget.md'
 
   # ── API ──────────────────────────────────────────────────────────────────
   - name: api
@@ -166,7 +166,7 @@ groups:
           summary: 'API com mais de 5% de erro 5xx'
           description: '{{ $value | humanizePercentage }} das requisições nos últimos 5 minutos.'
           dashboard: 'DASHBOARD_BASE/d/vellun-api/api'
-          runbook: 'RUNBOOK_BASE/observability.md'
+          runbook: 'RUNBOOK_BASE/006-observability.md'
 
       - alert: ApiComLatenciaAlta
         # p95 por rota, para o alerta dizer **qual** rota degradou. Sem o `by`, uma
@@ -184,7 +184,7 @@ groups:
           summary: 'p95 de {{ $labels.route }} acima de 3s'
           description: 'O percentil 95 de {{ $labels.route }} está em {{ $value | humanizeDuration }}.'
           dashboard: 'DASHBOARD_BASE/d/vellun-api/api'
-          runbook: 'RUNBOOK_BASE/observability.md'
+          runbook: 'RUNBOOK_BASE/006-observability.md'
 
       - alert: BancoDeDadosNaoPronto
         # `/health/ready` respondendo 503: a API está de pé mas não consegue falar
@@ -201,7 +201,7 @@ groups:
             A API está no ar mas o readiness responde 503, o que significa que o
             `SELECT 1` no Postgres está falhando.
           dashboard: 'DASHBOARD_BASE/d/vellun-api/api'
-          runbook: 'RUNBOOK_BASE/observability.md'
+          runbook: 'RUNBOOK_BASE/006-observability.md'
 
   # ── Pagamentos ───────────────────────────────────────────────────────────
   - name: pagamentos
@@ -226,7 +226,7 @@ groups:
             {{ $value }} evento(s) de webhook do PSP esgotou(esgotaram) o retry nos
             últimos 10 minutos. Pode haver pagamento confirmado sem acesso concedido.
           dashboard: 'DASHBOARD_BASE/d/vellun-payments/pagamentos'
-          runbook: 'RUNBOOK_BASE/observability.md'
+          runbook: 'RUNBOOK_BASE/006-observability.md'
 
       - alert: EventosDePagamentoAcumulandoParaRetry
         expr: |
@@ -240,7 +240,7 @@ groups:
           summary: 'Fila de retry de webhook de pagamento crescendo'
           description: '{{ $value }} eventos aguardando nova tentativa.'
           dashboard: 'DASHBOARD_BASE/d/vellun-payments/pagamentos'
-          runbook: 'RUNBOOK_BASE/observability.md'
+          runbook: 'RUNBOOK_BASE/006-observability.md'
 
   # ── E-mail transacional ──────────────────────────────────────────────────
   - name: email
@@ -264,7 +264,7 @@ groups:
             {{ $value }} envio(s) de {{ $labels.template }} falharam nos últimos 15
             minutos. O erro do provedor está no log da API (MailService).
           dashboard: 'DASHBOARD_BASE/d/vellun-api/api'
-          runbook: 'RUNBOOK_BASE/observability.md'
+          runbook: 'RUNBOOK_BASE/006-observability.md'
 
       - alert: EmailNaoEnviadoEmProducao
         # `MAIL_PROVIDER=log` em produção: a API sobe, porque o valor é aceito quando
@@ -284,4 +284,4 @@ groups:
             {{ $value }} e-mail(s) de {{ $labels.template }} deixaram de sair na última
             hora porque MAIL_PROVIDER=log. Configure MAIL_PROVIDER=resend na API.
           dashboard: 'DASHBOARD_BASE/d/vellun-api/api'
-          runbook: 'RUNBOOK_BASE/observability.md'
+          runbook: 'RUNBOOK_BASE/006-observability.md'

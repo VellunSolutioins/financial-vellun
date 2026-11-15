@@ -30,7 +30,7 @@ financial-vellun/
 │   └── config/         # @financial-vellun/config — tsconfig/eslint/prettier base
 ├── infra/
 │   └── docker/         # docker-compose.yml (PostgreSQL + RabbitMQ + Redis)
-├── docs/               # requisitos, runbook e ADRs (docs/adrs/)
+├── docs/               # requisitos, runbook, ADRs (docs/adrs/) e planos (docs/plans/)
 ├── package.json        # raiz: scripts dev/db/lint/format
 ├── pnpm-workspace.yaml
 ├── tsconfig.json       # raiz (references)
@@ -231,12 +231,12 @@ Em modo edição, converter o valor vindo da API para display antes de passar ao
 ## Documentação
 
 - [ADRs — decisões arquiteturais](docs/adrs/README.md)
-- [Runbook do pipeline WhatsApp](docs/whatsapp-messaging-runbook.md)
-- [Connection budget do PostgreSQL](docs/connection-budget.md)
-- [Tuning e escala](docs/tuning-e-escala.md)
+- [Runbook do pipeline WhatsApp](docs/005-whatsapp-messaging-runbook.md)
+- [Connection budget do PostgreSQL](docs/012-connection-budget.md)
+- [Tuning e escala](docs/014-tuning-e-escala.md)
 - [Serviços no Railway](infra/railway/README.md)
-- [Retenção de dados e backups](docs/retencao-e-backups.md)
-- [Requisitos técnicos](docs/technical-requirements.md)
-- [Prompts de implementação](docs/implementation-prompts.md)
+- [Retenção de dados e backups](docs/011-retencao-e-backups.md)
+- [Requisitos técnicos](docs/002-technical-requirements.md)
+- [Prompts de implementação](docs/001-implementation-prompts.md)
 - [README](README.md) — setup detalhado, variáveis de ambiente e troubleshooting
 - [Swagger da API](http://localhost:3001/api/docs) _(com o servidor rodando)_

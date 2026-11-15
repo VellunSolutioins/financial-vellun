@@ -2,7 +2,7 @@
 --
 -- Rode **antes** da migration `20260922210000_add_hot_path_indexes` e **depois**
 -- dela, com o mesmo `:user_id`, e guarde os dois resultados em
--- `docs/explain-consultas-quentes.md`. Sem o "antes", o "depois" não prova nada:
+-- `docs/013-explain-consultas-quentes.md`. Sem o "antes", o "depois" não prova nada:
 -- um plano com índice pode ser pior que um seq scan numa tabela pequena, e é
 -- exatamente isso que se quer descobrir antes de carregar índice em produção.
 --

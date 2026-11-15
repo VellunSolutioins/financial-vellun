@@ -12,7 +12,7 @@ cartões de crédito com fatura, recorrências, metas por categoria, caixinhas, 
 ## Decisões de modelagem (validadas no código)
 
 1. **Cartão de crédito = Account `type=credit_card` + tabela 1:1 `CreditCard`** (brand, limit, closingDay/dueDay 1–28, color). `Transaction.accountId` é obrigatório em todo o código, então despesas de cartão são transactions normais na conta-cartão; saldo negativo = dívida. **Fatura é derivada** (transações do ciclo `(fechamento M-1, fechamento M]`), sem tabela de invoice. Pagamento de fatura = Transaction `transfer` conta bancária → conta-cartão. Dashboard passa a **excluir contas `credit_card` do totalBalance**.
-2. **Pré-requisito (Fase 0): completar `transfer`** — hoje `recalculateBalance` ([accounts.service.ts:61-84](apps/api/src/accounts/accounts.service.ts#L61-L84)) ignora transfers e não existe conta destino. Adicionar `transferAccountId` em Transaction; transfer confirmado subtrai da origem e soma no destino; agregados do dashboard já filtram income/expense, então não há dupla contagem.
+2. **Pré-requisito (Fase 0): completar `transfer`** — hoje `recalculateBalance` ([accounts.service.ts:61-84](../../apps/api/src/accounts/accounts.service.ts#L61-L84)) ignora transfers e não existe conta destino. Adicionar `transferAccountId` em Transaction; transfer confirmado subtrai da origem e soma no destino; agregados do dashboard já filtram income/expense, então não há dupla contagem.
 3. **Recorrências: cron diário** com `@nestjs/schedule` (já instalado e `ScheduleModule.forRoot()` já registrado) — `@Cron` ~04:00 com `timeZone: 'America/Sao_Paulo'`. Modelo `RecurringRule` (type income|expense, amount, frequency enum `monthly` extensível, dueDay 1–31 clampado ao fim do mês, startDate/endDate, isActive). Gera Transaction `source=recurring`, `status=pending` (confirmação via `PendingTransactionsView` existente). **Idempotência**: campos `recurringRuleId` + `competenceMonth "YYYY-MM"` em Transaction com `@@unique([recurringRuleId, competenceMonth])`; capturar P2002. Endpoint manual `POST /recurring-rules/generate` para catch-up/testes.
 4. **Metas: tabela própria `CategoryGoal`** (`@@unique([userId, categoryId])`, monthlyGoal) — não campo em Category, pois categorias padrão têm `userId=null` (compartilhadas).
 5. **Caixinhas: earmarking virtual** — `SavingsBox` (name, targetAmount, targetDate, color) + `SavingsContribution` (amount, contributedAt, note). Aporte **não gera Transaction** (não distorce relatórios; dinheiro segue na conta). Só aporte positivo no MVP.
@@ -39,7 +39,7 @@ cartões de crédito com fatura, recorrências, metas por categoria, caixinhas, 
   - `PATCH /credit-cards/:id`; `DELETE` desativa card+account (bloquear se houver transações, como `accounts.service.deactivate`).
   - `POST /credit-cards/:id/pay-invoice` `{accountId, amount, date}` → Transaction transfer.
 - Web: `app/app/pessoal/cartoes/page.tsx` + `components/credit-cards/` (`CreditCardForm`, `CreditCardItem` com fatura/disponível/progresso de limite, `PayInvoiceDialog`). Contas-cartão com badge/agrupadas no `TransactionForm` e filtradas ou marcadas em `/app/pessoal/contas`.
-- Nav: "Cartões" em `navItems.individual` ([layout.tsx](apps/web/src/app/app/layout.tsx)).
+- Nav: "Cartões" em `navItems.individual` ([layout.tsx](../../apps/web/src/app/app/layout.tsx)).
 - Shared: enum `CardBrand`, schema `credit-card.ts`.
 
 ### Fase 2 — Recorrências
@@ -52,7 +52,7 @@ cartões de crédito com fatura, recorrências, metas por categoria, caixinhas, 
 ### Fase 3 — Metas por categoria + dashboard
 
 - Migration: `category_goals`.
-- API: módulo `goals` — `PUT /goals/:categoryId` (upsert), `DELETE /goals/:categoryId`, `GET /goals/progress?month=` → `[{categoryId, categoryName, color, goal, spent, percentage}]` (mesmo groupBy do [dashboard.service.ts:34](apps/api/src/dashboard/dashboard.service.ts#L34)). `getSummary` ganha `spendingProjection {projected, dailyAverage}` (gasto/diasDecorridos × diasNoMês) e dados de real vs previsto.
+- API: módulo `goals` — `PUT /goals/:categoryId` (upsert), `DELETE /goals/:categoryId`, `GET /goals/progress?month=` → `[{categoryId, categoryName, color, goal, spent, percentage}]` (mesmo groupBy do [dashboard.service.ts:34](../../apps/api/src/dashboard/dashboard.service.ts#L34)). `getSummary` ganha `spendingProjection {projected, dailyAverage}` (gasto/diasDecorridos × diasNoMês) e dados de real vs previsto.
 - Web: `app/app/pessoal/metas/page.tsx` (barras com faixas: <75% verde, 75–99% amarelo, ≥100% vermelho); dashboard pessoal ganha card "Projeção do mês" e BarChart Recharts "Real vs Previsto" (padrão do gráfico de evolução existente). Nav: "Metas".
 
 ### Fase 4 — Caixinhas
@@ -81,7 +81,7 @@ cartões de crédito com fatura, recorrências, metas por categoria, caixinhas, 
 ## Convenções obrigatórias (CLAUDE.md) em todas as fases
 
 - Mobile-first; listas paginadas com **10 itens/página** (passar `limit=10` no front — o default atual da API é 20).
-- Máscaras BR (`maskCurrency` etc. de [lib/masks.ts](apps/web/src/lib/masks.ts)) + Zod no front + class-validator no back; moeda enviada como `"1500.00"`.
+- Máscaras BR (`maskCurrency` etc. de [lib/masks.ts](../../apps/web/src/lib/masks.ts)) + Zod no front + class-validator no back; moeda enviada como `"1500.00"`.
 - Reutilizar `components/ui` (Card, Dialog, Select, Badge, Toast, Confirm), `lib/api-client.ts`, `date.util.ts`/`parseDateOnly` da API.
 - Todos os controllers novos com `JwtAuthGuard + ActiveSubscriptionGuard`; DTOs com `@ApiProperty` (Swagger).
 - `prisma generate` + rebuild do shared a cada fase; migrations aditivas (colunas nullable/tabelas novas).

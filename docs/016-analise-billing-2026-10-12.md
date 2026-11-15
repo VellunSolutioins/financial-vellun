@@ -143,7 +143,7 @@ Um evento desconhecido é persistido, normalizado como `ignore`, marcado como pr
 
 | Evento                                                                                      | Consequência hoje                                                                                                                        |
 | ------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `CHECKOUT_EXPIRED`, `CHECKOUT_CANCELED`                                                     | A assinatura fica presa em `pending`. O plano em `plan/asaas-checkout-expiration-handling-plan.md` não foi implementado.                 |
+| `CHECKOUT_EXPIRED`, `CHECKOUT_CANCELED`                                                     | A assinatura fica presa em `pending`. O plano em `docs/plans/007-asaas-checkout-expiration-handling-plan.md` não foi implementado.                 |
 | `SUBSCRIPTION_CREATED`                                                                      | O `providerSubscriptionId` só é gravado no primeiro pagamento. Até lá, a correlação é feita pelo cliente.                                |
 | `PAYMENT_CREDIT_CARD_CAPTURE_REFUSED`, `PAYMENT_REPROVED_BY_RISK_ANALYSIS`                  | Cartão recusado na primeira cobrança não gera retorno ao usuário. Na renovação, só o `PAYMENT_OVERDUE` do dia seguinte sinaliza a falha. |
 | `PAYMENT_DELETED`, `PAYMENT_RESTORED`, `PAYMENT_UPDATED`, `PAYMENT_RECEIVED_IN_CASH_UNDONE` | A tabela `payments` diverge do Asaas quando alguém altera cobranças pelo painel do Asaas.                                                |

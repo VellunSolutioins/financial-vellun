@@ -2,7 +2,7 @@
 
 - **Status:** Aceito
 - **Data:** 2026-09-24
-- **Plano:** [`plan/contas-cartoes-faturas.md`](../../plan/contas-cartoes-faturas.md), fase 1
+- **Plano:** [`docs/plans/013-contas-cartoes-faturas.md`](../plans/013-contas-cartoes-faturas.md), fase 1
 
 ## Contexto
 

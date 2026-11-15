@@ -119,7 +119,7 @@ lá só como label `service:` de roteamento de notificação.
 > em todo socket IPv6, então `uvicorn --host ::` é **só IPv6** e recusaria o
 > webhook público por IPv4. Conferido subindo a imagem: `[::1]` responde,
 > `127.0.0.1` não. O agente segue em `0.0.0.0`, que basta num ambiente
-> dual-stack do Railway; o ponto ficou registrado em `docs/observability.md`.
+> dual-stack do Railway; o ponto ficou registrado em `docs/006-observability.md`.
 > O texto abaixo é o plano original.
 
 [Dockerfile.ai-agent](../Dockerfile.ai-agent): `--host 0.0.0.0` → `--host ::`,
@@ -131,7 +131,7 @@ precisa de mudança: `app.listen(port)` sem host
 
 ### Commit 5 — documentação
 
-[docs/observability.md](observability.md):
+[docs/006-observability.md](006-observability.md):
 
 - seção nova **"Subir o Alloy no Railway"** com: o `Dockerfile.alloy`, os nomes
   reais dos serviços, a exigência de `PORT=3001` na API e `PORT=8010` no agente
@@ -149,7 +149,7 @@ precisa de mudança: `app.listen(port)` sem host
 [README.md](../README.md), seção `### 5. Observabilidade`: hoje ela só fala de
 `/health` e `/metrics` e termina dizendo que exportar para Prometheus está "fora
 do escopo do MVP", o que ficou desatualizado. Atualizar em poucas linhas, com
-ponteiro para `docs/observability.md` — sem duplicar o passo a passo.
+ponteiro para `docs/006-observability.md` — sem duplicar o passo a passo.
 
 [infra/observability/README.md](../infra/observability/README.md): acrescentar
 `Dockerfile.alloy` ao mapa de arquivos.

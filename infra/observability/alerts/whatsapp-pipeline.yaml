@@ -58,7 +58,7 @@ groups:
             {{ $value }} mensagem(ns) pronta(s) em {{ $labels.queue }} sem nenhum
             consumidor conectado há mais de 2 minutos. Nada está sendo processado.
           dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
-          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#backlog-crescendo'
+          runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#backlog-crescendo'
 
       - alert: BacklogCrescendoDeFormaSustentada
         # Consumidores existem, mas não dão conta. Olhamos a **derivada**, não o
@@ -80,7 +80,7 @@ groups:
             pendentes e crescendo). Os consumidores não estão dando conta da taxa
             de entrada.
           dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
-          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#backlog-crescendo'
+          runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#backlog-crescendo'
 
       - alert: RespostaLentaFimAFim
         # O SLO do produto, e a única latência que corresponde ao que o usuário
@@ -106,7 +106,7 @@ groups:
             webhook e a resposta sair. Veja em qual etapa: receive_to_process,
             processing_duration, llm_latency ou outbound_send.
           dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
-          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#backlog-crescendo'
+          runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#backlog-crescendo'
 
       - alert: MensagemEsperandoHaMuitoTempo
         # Profundidade responde "quanto"; **idade da mais antiga** responde "há
@@ -133,7 +133,7 @@ groups:
             5 minutos. Se a fila for whatsapp.outbound.v1, o problema é entrega (a
             Meta), não processamento — os lançamentos estão sendo registrados.
           dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
-          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#backlog-crescendo'
+          runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#backlog-crescendo'
 
   # ── Falha definitiva ─────────────────────────────────────────────────────
   - name: whatsapp-dlq
@@ -161,7 +161,7 @@ groups:
             {{ $value }} mensagem(ns) entrou(entraram) no catálogo de falhas nos
             últimos 5 minutos. Investigue a causa ANTES de reprocessar.
           dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
-          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#mensagens-na-dlq'
+          runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#mensagens-na-dlq'
 
       - alert: DlqNaoEstaSendoDrenada
         # Desde a Entrega 5 a DLQ deve ficar praticamente vazia: o consumer do
@@ -185,7 +185,7 @@ groups:
             minutos. O consumer do catálogo deveria tê-las registrado em segundos.
             Nada se perdeu, mas o painel de operações está incompleto.
           dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
-          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#mensagens-na-dlq'
+          runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#mensagens-na-dlq'
 
   # ── Processamento ────────────────────────────────────────────────────────
   - name: whatsapp-processamento
@@ -205,7 +205,7 @@ groups:
             {{ $value }} falha(s) de publicação nos últimos 5 minutos. O webhook
             está devolvendo 503 e a Meta vai reenviar — com limite de tentativas.
           dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
-          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#webhook-devolvendo-503'
+          runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#webhook-devolvendo-503'
 
       - alert: TaxaDeErroDeProcessamentoAlta
         # Proporção, não contagem: 10 erros em 10 mensagens é um incidente, 10 em
@@ -227,7 +227,7 @@ groups:
             {{ $value | humanizePercentage }} dos jobs processados nos últimos 10
             minutos terminaram em erro.
           dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
-          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#mensagens-na-dlq'
+          runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#mensagens-na-dlq'
 
       - alert: LatenciaDeProcessamentoSubindo
         # p95 acima de 30s: o usuário mandou uma mensagem e não teve resposta em
@@ -247,7 +247,7 @@ groups:
             O percentil 95 do processamento está em {{ $value | humanizeDuration }}.
             Normalmente dominado pela latência do LLM.
           dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
-          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#backlog-crescendo'
+          runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#backlog-crescendo'
 
   # ── Entrega ao usuário ───────────────────────────────────────────────────
   - name: whatsapp-entrega
@@ -270,7 +270,7 @@ groups:
             {{ $value }} tentativa(s) de envio recusada(s) nos últimos 10 minutos.
             O lançamento pode ter sido criado sem o usuário saber.
           dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
-          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#webhook-deu-202-mas-o-usuário-não-recebeu-resposta'
+          runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#webhook-deu-202-mas-o-usuário-não-recebeu-resposta'
 
       - alert: UsuarioAvisadoDeFalha
         # O aviso de "tive um problema para processar" sai quando um job esgota as
@@ -288,4 +288,4 @@ groups:
             {{ $value }} aviso(s) de falha enviado(s) a usuários nos últimos 15
             minutos. Confira a mensagem original em /ops/falhas antes de reprocessar.
           dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
-          runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#mensagens-na-dlq'
+          runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#mensagens-na-dlq'
