@@ -1,9 +1,9 @@
 # Plano de implementação — Performance, escalabilidade e disponibilidade
 
 Data: 22/09/2026. **Base: branch `main`** (commit `2fca515`).
-Origem: [recomendações de performance](../docs/financial-vellun-recomendacoes-performance-escalabilidade-disponibilidade.md),
-analisadas em conjunto com a [análise de segurança](../docs/analise-seguranca-2026-09-21.md).
-Plano irmão: [plano de implementação de segurança](plano-implementacao-seguranca.md).
+Origem: [recomendações de performance](../010-financial-vellun-recomendacoes-performance-escalabilidade-disponibilidade.md),
+analisadas em conjunto com a [análise de segurança](../009-analise-seguranca-2026-09-21.md).
+Plano irmão: [plano de implementação de segurança](012-plano-implementacao-seguranca.md).
 
 > Itens que só se aplicam ao código da `feature/melhorias` (Análise Financeira, recorrências, índices
 > para `createdByUserId`) estão na seção
@@ -33,7 +33,7 @@ Decisões já tomadas:
 >   prendia a um event loop que ainda não existia.
 > - **P2 — EXPLAIN pendente.** Script e formato do registro estão prontos
 >   (`infra/database/explain-hot-queries.sql`,
->   `docs/explain-consultas-quentes.md`), mas a medição precisa de um Postgres
+>   `docs/013-explain-consultas-quentes.md`), mas a medição precisa de um Postgres
 >   com volume representativo. **Os índices foram criados sem ela**, com a
 >   justificativa de cada um na migration; o índice `[userId, createdAt]` é o de
 >   argumento mais fraco e deve ser removido se o EXPLAIN não o justificar.

@@ -65,7 +65,7 @@ services:
   # Depois, aponte só a DATABASE_URL da API para a 6432, acrescentando
   # `?pgbouncer=true&connection_limit=5&pool_timeout=10`. A DIRECT_URL continua
   # na 5432: `prisma migrate` não pode passar por pooler (contrato C7).
-  # Ver docs/connection-budget.md.
+  # Ver docs/012-connection-budget.md.
   pgbouncer:
     image: edoburu/pgbouncer:v1.23.1-p2
     container_name: financial-vellun-pgbouncer

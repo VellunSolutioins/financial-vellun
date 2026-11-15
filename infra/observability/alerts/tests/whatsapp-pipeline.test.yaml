@@ -57,7 +57,7 @@ tests:
               description: >-
                 120 mensagem(ns) pronta(s) em whatsapp.processing.v1 sem nenhum consumidor conectado há mais de 2 minutos. Nada está sendo processado.
               dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
-              runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#backlog-crescendo'
+              runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#backlog-crescendo'
 
   - interval: 30s
     name: fila vazia sem consumidor não alerta
@@ -112,7 +112,7 @@ tests:
               description: >-
                 1 mensagem(ns) entrou(entraram) no catálogo de falhas nos últimos 5 minutos. Investigue a causa ANTES de reprocessar.
               dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
-              runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#mensagens-na-dlq'
+              runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#mensagens-na-dlq'
 
   - interval: 30s
     name: catalogo parado no zero não alerta
@@ -158,7 +158,7 @@ tests:
               description: >-
                 7 mensagem(ns) parada(s) em whatsapp.processing.dlq há mais de 5 minutos. O consumer do catálogo deveria tê-las registrado em segundos. Nada se perdeu, mas o painel de operações está incompleto.
               dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
-              runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#mensagens-na-dlq'
+              runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#mensagens-na-dlq'
 
   # ── Publicação e processamento ───────────────────────────────────────────
   - interval: 30s
@@ -179,7 +179,7 @@ tests:
               description: >-
                 1 falha(s) de publicação nos últimos 5 minutos. O webhook está devolvendo 503 e a Meta vai reenviar — com limite de tentativas.
               dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
-              runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#webhook-devolvendo-503'
+              runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#webhook-devolvendo-503'
 
   - interval: 30s
     name: proporcao baixa de erro de processamento não alerta
@@ -215,7 +215,7 @@ tests:
               description: >-
                 30% dos jobs processados nos últimos 10 minutos terminaram em erro.
               dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
-              runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#mensagens-na-dlq'
+              runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#mensagens-na-dlq'
 
   - interval: 30s
     name: sem trafego nenhum não alerta por divisao por zero
@@ -253,7 +253,7 @@ tests:
               description: >-
                 1 tentativa(s) de envio recusada(s) nos últimos 10 minutos. O lançamento pode ter sido criado sem o usuário saber.
               dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
-              runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#webhook-deu-202-mas-o-usuário-não-recebeu-resposta'
+              runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#webhook-deu-202-mas-o-usuário-não-recebeu-resposta'
 
   - interval: 30s
     name: envio sem falha não alerta
@@ -286,7 +286,7 @@ tests:
               description: >-
                 1 aviso(s) de falha enviado(s) a usuários nos últimos 15 minutos. Confira a mensagem original em /ops/falhas antes de reprocessar.
               dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
-              runbook: 'RUNBOOK_BASE/whatsapp-messaging-runbook.md#mensagens-na-dlq'
+              runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#mensagens-na-dlq'
 
   - interval: 30s
     name: nenhum aviso de falha não alerta

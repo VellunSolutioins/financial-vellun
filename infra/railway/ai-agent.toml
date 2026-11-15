@@ -24,7 +24,7 @@ dockerfilePath = "Dockerfile.ai-agent"
 # uvicorn passa a **recusar IPv4**, e o webhook público da Meta chega por IPv4.
 # O ambiente deste projeto é dual-stack (criado depois de 2025-10-16), então
 # IPv4 atende tanto o webhook quanto o scrape interno. Ver a seção "IPv6 na rede
-# privada" em docs/observability.md antes de mexer aqui.
+# privada" em docs/006-observability.md antes de mexer aqui.
 startCommand = "uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8010}"
 
 # Readiness, não liveness: o deploy só recebe tráfego quando o agente consegue

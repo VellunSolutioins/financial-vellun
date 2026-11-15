@@ -2,13 +2,13 @@
 
 ## Context
 
-O documento [payment-gateway-implementation-plan.md](payment-gateway-implementation-plan.md) define a estratégia de cobrança recorrente do Financial Vellun: somente usuários com assinatura vigente podem usar o produto, via **Asaas** (checkout hospedado + webhooks, cartão de crédito recorrente em BRL). Hoje o produto não tem nenhuma noção de estado comercial:
+O documento [004-payment-gateway-implementation-plan.md](004-payment-gateway-implementation-plan.md) define a estratégia de cobrança recorrente do Financial Vellun: somente usuários com assinatura vigente podem usar o produto, via **Asaas** (checkout hospedado + webhooks, cartão de crédito recorrente em BRL). Hoje o produto não tem nenhuma noção de estado comercial:
 
-- `User` não tem assinatura nem estado comercial ([apps/api/prisma/schema.prisma](../apps/api/prisma/schema.prisma) linha 71);
-- `JwtAuthGuard` só valida identidade ([apps/api/src/auth/guards/jwt-auth.guard.ts](../apps/api/src/auth/guards/jwt-auth.guard.ts));
-- o módulo `internal` (usado pela IA) libera por telefone sem checar assinatura ([apps/api/src/internal/controllers/internal.controller.ts](../apps/api/src/internal/controllers/internal.controller.ts));
-- o WhatsApp gasta com LLM/STT/Vision sem qualquer verificação ([apps/ai-agent/src/services/message_processor.py](../apps/ai-agent/src/services/message_processor.py), [apps/ai-agent/src/services/media_processor.py](../apps/ai-agent/src/services/media_processor.py));
-- o [apps/web/src/middleware.ts](../apps/web/src/middleware.ts) não protege rotas.
+- `User` não tem assinatura nem estado comercial ([apps/api/prisma/schema.prisma](../../apps/api/prisma/schema.prisma) linha 71);
+- `JwtAuthGuard` só valida identidade ([apps/api/src/auth/guards/jwt-auth.guard.ts](../../apps/api/src/auth/guards/jwt-auth.guard.ts));
+- o módulo `internal` (usado pela IA) libera por telefone sem checar assinatura ([apps/api/src/internal/controllers/internal.controller.ts](../../apps/api/src/internal/controllers/internal.controller.ts));
+- o WhatsApp gasta com LLM/STT/Vision sem qualquer verificação ([apps/ai-agent/src/services/message_processor.py](../../apps/ai-agent/src/services/message_processor.py), [apps/ai-agent/src/services/media_processor.py](../../apps/ai-agent/src/services/media_processor.py));
+- o [apps/web/src/middleware.ts](../../apps/web/src/middleware.ts) não protege rotas.
 
 O objetivo deste plano é transformar a estratégia em **prompts incrementais e sequenciais** de implementação. Cada prompt é auto-contido, depende apenas dos anteriores e termina num estado testável.
 
@@ -51,9 +51,9 @@ Não são executáveis por mim, mas **bloqueiam produção**. Registrar status a
 
 **Arquivos:**
 
-- [apps/api/prisma/schema.prisma](../apps/api/prisma/schema.prisma) — novos enums e models; relação em `User`.
+- [apps/api/prisma/schema.prisma](../../apps/api/prisma/schema.prisma) — novos enums e models; relação em `User`.
 - `apps/api/prisma/migrations/` — nova migration.
-- [apps/api/prisma/seed.ts](../apps/api/prisma/seed.ts) (ou equivalente do `db:seed`) — seed dos planos.
+- [apps/api/prisma/seed.ts](../../apps/api/prisma/seed.ts) (ou equivalente do `db:seed`) — seed dos planos.
 - `packages/shared/src/` — enums e tipos de billing (espelhar enums do Prisma, ex. em `packages/shared/src/enums` e schemas Zod em `packages/shared/src/schemas`).
 
 **Detalhes:**
@@ -74,7 +74,7 @@ Não são executáveis por mim, mas **bloqueiam produção**. Registrar status a
 
 **Objetivo:** módulo `billing` com a máquina de estados, regra de acesso e auditoria — testável isoladamente, sem rede.
 
-**Arquivos (novos):** `apps/api/src/billing/` com `billing.module.ts`, serviços e `dto/`; registrar em [apps/api/src/app.module.ts](../apps/api/src/app.module.ts).
+**Arquivos (novos):** `apps/api/src/billing/` com `billing.module.ts`, serviços e `dto/`; registrar em [apps/api/src/app.module.ts](../../apps/api/src/app.module.ts).
 
 **Detalhes:**
 
@@ -92,7 +92,7 @@ Não são executáveis por mim, mas **bloqueiam produção**. Registrar status a
 
 **Objetivo:** implementar `AsaasPaymentProvider` (único ponto que conhece o Asaas).
 
-**Arquivos:** `apps/api/src/billing/providers/asaas/`; `apps/api/.env.example` ([apps/api/.env.example](../apps/api/.env.example)); ConfigModule já é global.
+**Arquivos:** `apps/api/src/billing/providers/asaas/`; `apps/api/.env.example` ([apps/api/.env.example](../../apps/api/.env.example)); ConfigModule já é global.
 
 **Detalhes:**
 
@@ -132,7 +132,7 @@ Não são executáveis por mim, mas **bloqueiam produção**. Registrar status a
 
 **Detalhes:**
 
-- Garantir **raw body** para validação de assinatura (configurar no [apps/api/src/main.ts](../apps/api/src/main.ts) sem quebrar o `ValidationPipe`/`cookie-parser` existentes).
+- Garantir **raw body** para validação de assinatura (configurar no [apps/api/src/main.ts](../../apps/api/src/main.ts) sem quebrar o `ValidationPipe`/`cookie-parser` existentes).
 - `verifyWebhook` (via adapter); rejeitar assinaturas inválidas; validar timestamp se houver.
 - Persistir `PaymentWebhookEvent` com `providerEventId` **antes** de processar; suportar duplicados e fora de ordem; responder rápido ao Asaas.
 - Processamento assíncrono (fila — avaliar `@nestjs/bull`/Redis já presente no agente, ou fila in-process no MVP); retry com backoff; DLQ; histórico de tentativas; payload sanitizado (sem dados sensíveis).
@@ -165,8 +165,8 @@ Não são executáveis por mim, mas **bloqueiam produção**. Registrar status a
 
 - `ActiveSubscriptionGuard` usa `SubscriptionAccessService.canUseProduct(userId)`.
 - Decorator (metadata via `Reflector`) para liberar rotas permitidas sem assinatura: login/cadastro/refresh/logout, `/billing/*`, exportação/exclusão de dados, suporte.
-- Aplicar o guard em: `accounts`, `categories`, `contacts`, `dashboard`, `transactions` (controllers em [apps/api/src/](../apps/api/src/)) — em conjunto com o `JwtAuthGuard` existente.
-- **Endpoints internos** ([internal.controller.ts](../apps/api/src/internal/controllers/internal.controller.ts)): após resolver `userId`, validar assinatura antes de listar contas/categorias e criar lançamentos via IA; nunca aceitar `userId` arbitrário sem validar vínculo (doc seção 8.4).
+- Aplicar o guard em: `accounts`, `categories`, `contacts`, `dashboard`, `transactions` (controllers em [apps/api/src/](../../apps/api/src/)) — em conjunto com o `JwtAuthGuard` existente.
+- **Endpoints internos** ([internal.controller.ts](../../apps/api/src/internal/controllers/internal.controller.ts)): após resolver `userId`, validar assinatura antes de listar contas/categorias e criar lançamentos via IA; nunca aceitar `userId` arbitrário sem validar vínculo (doc seção 8.4).
 - Erro padrão `403` `{ code: "SUBSCRIPTION_REQUIRED" }` (doc seção 5); inadimplente em grace continua liberado.
 - **Testes**: aplicação do guard, usuário sem assinatura na API, manipulação de `userId`.
 
@@ -178,7 +178,7 @@ Não são executáveis por mim, mas **bloqueiam produção**. Registrar status a
 
 **Objetivo:** não gastar com IA para contas sem acesso (doc seção 5, Fase 4).
 
-**Arquivos (Python):** [apps/ai-agent/src/services/message_processor.py](../apps/ai-agent/src/services/message_processor.py), [apps/ai-agent/src/services/media_processor.py](../apps/ai-agent/src/services/media_processor.py), [apps/ai-agent/src/services/api_client.py](../apps/ai-agent/src/services/api_client.py); novo endpoint interno na API.
+**Arquivos (Python):** [apps/ai-agent/src/services/message_processor.py](../../apps/ai-agent/src/services/message_processor.py), [apps/ai-agent/src/services/media_processor.py](../../apps/ai-agent/src/services/media_processor.py), [apps/ai-agent/src/services/api_client.py](../../apps/ai-agent/src/services/api_client.py); novo endpoint interno na API.
 
 **Detalhes:**
 
@@ -197,7 +197,7 @@ Não são executáveis por mim, mas **bloqueiam produção**. Registrar status a
 
 **Objetivo:** contratação, gestão e estados de assinatura (doc Fase 5), mobile-first.
 
-**Arquivos:** rotas em [apps/web/src/app/](../apps/web/src/app/) (ex. `app/app/conta/assinatura`, páginas de planos e retorno/cancelamento do checkout); [apps/web/src/contexts/auth-context.tsx](../apps/web/src/contexts/auth-context.tsx); [apps/web/src/lib/auth.ts](../apps/web/src/lib/auth.ts); [apps/web/src/lib/api-client.ts](../apps/web/src/lib/api-client.ts); [apps/web/src/middleware.ts](../apps/web/src/middleware.ts).
+**Arquivos:** rotas em [apps/web/src/app/](../../apps/web/src/app/) (ex. `app/app/conta/assinatura`, páginas de planos e retorno/cancelamento do checkout); [apps/web/src/contexts/auth-context.tsx](../../apps/web/src/contexts/auth-context.tsx); [apps/web/src/lib/auth.ts](../../apps/web/src/lib/auth.ts); [apps/web/src/lib/api-client.ts](../../apps/web/src/lib/api-client.ts); [apps/web/src/middleware.ts](../../apps/web/src/middleware.ts).
 
 **Detalhes:**
 
@@ -221,10 +221,10 @@ Não são executáveis por mim, mas **bloqueiam produção**. Registrar status a
 
 - CSRF para operações autenticadas por cookie (atenção ao `SameSite=None` em produção — doc seção 8.3).
 - Rate limiting em login, cadastro, checkout e billing (`@nestjs/throttler`).
-- Helmet + CSP + headers de segurança no [main.ts](../apps/api/src/main.ts); proteger/desabilitar Swagger em produção.
+- Helmet + CSP + headers de segurança no [main.ts](../../apps/api/src/main.ts); proteger/desabilitar Swagger em produção.
 - Rotação/revogação de refresh tokens; cookies `Secure`/`HttpOnly`/`SameSite` revisados.
 - Revisar logs (API + agente) para garantir ausência de segredos/dados de cartão.
-- **Verificação de telefone por OTP** (doc seção 8.5): hoje o cadastro marca WhatsApp como verificado sem confirmação ([apps/web/src/app/(auth)/cadastro/page.tsx](<../apps/web/src/app/(auth)/cadastro/page.tsx>) + registro na API). Implementar fluxo de OTP antes de usar WhatsApp para ações financeiras.
+- **Verificação de telefone por OTP** (doc seção 8.5): hoje o cadastro marca WhatsApp como verificado sem confirmação ([apps/web/src/app/(auth)/cadastro/page.tsx](<../../apps/web/src/app/(auth)/cadastro/page.tsx>) + registro na API). Implementar fluxo de OTP antes de usar WhatsApp para ações financeiras.
 - Rotação da `INTERNAL_API_KEY` e comparação segura (doc seção 8.4).
 - Exportação e exclusão de dados (direitos do titular — doc seção 10.4); política de retenção/descarte.
 - Scanners no CI: SAST, análise de dependências, secret scanning.
@@ -277,7 +277,7 @@ Itens de segurança/privacidade desmembrados do Prompt 10 por alterarem fluxos s
 
 **Detalhes:**
 
-- Hoje o cadastro marca `whatsappContact.isVerified = true` sem confirmação ([apps/web/src/app/(auth)/cadastro/page.tsx](<../apps/web/src/app/(auth)/cadastro/page.tsx>) + registro na API).
+- Hoje o cadastro marca `whatsappContact.isVerified = true` sem confirmação ([apps/web/src/app/(auth)/cadastro/page.tsx](<../../apps/web/src/app/(auth)/cadastro/page.tsx>) + registro na API).
 - Gerar OTP (curto, com expiração e rate limit), armazenar hash, enviar pelo canal (WhatsApp/SMS), endpoint de verificação; só então `isVerified = true`.
 - Frontend: passo de confirmação no cadastro/edição de telefone.
 - **Testes:** geração/expiração/limite de OTP, verificação correta/incorreta.

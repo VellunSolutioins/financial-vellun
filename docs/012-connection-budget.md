@@ -5,7 +5,7 @@ global e silencioso: ninguém percebe que está no limite até um deploy falhar
 inteiro com `FATAL: sorry, too many clients already` — e o deploy é justamente
 quando duas versões do mesmo serviço coexistem.
 
-Referência: P2 do [plano de performance](../plan/plano-implementacao-performance.md).
+Referência: P2 do [plano de performance](plans/011-plano-implementacao-performance.md).
 
 ## Quem fala com o Postgres
 

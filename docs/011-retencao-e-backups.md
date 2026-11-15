@@ -3,7 +3,7 @@
 Escrito para quem opera o Financial Vellun. Responde três perguntas: o que o
 sistema guarda, por quanto tempo, e como recuperar se algo for perdido.
 
-Origem: etapa S4 do [plano de segurança](../plan/plano-implementacao-seguranca.md).
+Origem: etapa S4 do [plano de segurança](plans/012-plano-implementacao-seguranca.md).
 
 ## O que é guardado e por quanto tempo
 
@@ -81,7 +81,7 @@ qualquer mudança de plano ou de instância no Railway.
 
 ## Exclusão de conta (LGPD)
 
-O plano está em [plan/account-deletion-lgpd-plan.md](../plan/account-deletion-lgpd-plan.md).
+O plano está em [docs/plans/008-account-deletion-lgpd-plan.md](plans/008-account-deletion-lgpd-plan.md).
 Dois pontos que a S4 fixou e que a implementação precisa respeitar:
 
 - `user_security_events` sai junto com a conta (cascata a partir de `users`); o

@@ -10,7 +10,7 @@ correspondente. Sem isso, os arquivos aqui são só documentação.
 | `financial-vellun-web`             | `web.toml`             | Next.js (enquanto não está na Vercel) |
 | `financial-vellun-ai-agent`        | `ai-agent.toml`        | Webhook do WhatsApp (HTTP)            |
 | `financial-vellun-ai-agent-worker` | `ai-agent-worker.toml` | Consumers das filas                   |
-| `alloy`                            | —                      | Ver `docs/observability.md`           |
+| `alloy`                            | —                      | Ver `docs/006-observability.md`           |
 | `rabbitmq`, `postgres`, `redis`    | —                      | Plugins/imagens do próprio Railway    |
 
 O nome do serviço importa: ele vira o endereço na rede privada
@@ -55,7 +55,7 @@ Conferir a cada serviço novo:
 - `MAIN_API_URL` do agente aponta para `http://financial-vellun-api.railway.internal:3001`;
 - `LOKI_PUSH_URL` aponta para `http://alloy.railway.internal:3100`;
 - a rede privada do Railway é **IPv6**: quem serve HTTP precisa escutar em `::`,
-  não em `0.0.0.0` (ver `docs/observability.md`);
+  não em `0.0.0.0` (ver `docs/006-observability.md`);
 - `PORT` fixo onde o Alloy scrapa (3001 na API, 8010 no agente, 8011 no worker);
   se o Railway atribuir outra porta, o alvo fica `down` em silêncio.
 

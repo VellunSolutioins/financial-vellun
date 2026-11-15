@@ -4,7 +4,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PasswordResetService } from './password-reset.service';
 
 /**
- * Limpeza diária dos links de redefinição vencidos (docs/retencao-e-backups.md).
+ * Limpeza diária dos links de redefinição vencidos (docs/011-retencao-e-backups.md).
  *
  * Com mais de uma réplica, o `@Cron` dispara em todas; tudo bem, o
  * `deleteMany` é idempotente e a segunda execução não encontra nada.

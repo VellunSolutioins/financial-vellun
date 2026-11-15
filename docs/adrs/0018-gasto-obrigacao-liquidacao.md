@@ -190,7 +190,7 @@ tocam os usuários de uma tabela temporária (na migração, todos). O teste
 do arquivo, restritos ao usuário de teste, duas vezes, e confere saldo,
 classificação e ausência de duplicação.
 
-**Antes de liberar:** restaurar um backup (docs/retencao-e-backups.md), aplicar
+**Antes de liberar:** restaurar um backup (docs/011-retencao-e-backups.md), aplicar
 as migrations nele e rodar `pnpm --filter @financial-vellun/api
 db:verify:financial-model` (só leitura). Ele compara regra antiga × nova por
 conta (código 1 se divergir), separa saldo gravado apenas defasado (cron que

@@ -1,7 +1,7 @@
 # Fluxo do WhatsApp: análise de gaps e plano de correção
 
 > Escrito para quem mantém o pipeline `webhook → RabbitMQ → consumers → resposta`.
-> Complementa o [runbook operacional](whatsapp-messaging-runbook.md), que descreve o fluxo
+> Complementa o [runbook operacional](005-whatsapp-messaging-runbook.md), que descreve o fluxo
 > como ele **deveria** operar. Este documento descreve como ele **está**.
 
 ## Contexto
@@ -17,7 +17,7 @@ O `202` prova que o _publisher confirm_ do RabbitMQ voltou — a mensagem **entr
 `whatsapp.inbound.v1`. Logo o defeito está depois da publicação. O problema real é que
 **hoje não dá para saber onde**: o pipeline tem vários pontos que reportam sucesso sem
 entregar nada, e no Railway o Alloy ainda não existe
-([plano](alloy-no-railway-plan.md)), então os logs dos consumers não são consultáveis.
+([plano](008-alloy-no-railway-plan.md)), então os logs dos consumers não são consultáveis.
 
 ---
 
@@ -111,7 +111,7 @@ responde `NOT_LINKED_MESSAGE` — que, com G1 ativo, o usuário nunca vê.
 
 `LOKI_PUSH_URL` está vazio no Railway e não há Alloy, então **nenhum log de consumer é
 consultável** e os quatro dashboards estão vazios. É por isso que a investigação para no
-`202`. Plano já escrito em [`alloy-no-railway-plan.md`](alloy-no-railway-plan.md).
+`202`. Plano já escrito em [`008-alloy-no-railway-plan.md`](008-alloy-no-railway-plan.md).
 
 ### G6 — Menores
 
@@ -238,7 +238,7 @@ criado. Reaproveitar os fixtures de `tests/conftest.py`.
 
 ### Fora de escopo aqui
 
-Subir o Alloy no Railway — já planejado em [`alloy-no-railway-plan.md`](alloy-no-railway-plan.md).
+Subir o Alloy no Railway — já planejado em [`008-alloy-no-railway-plan.md`](008-alloy-no-railway-plan.md).
 Sem ele o G5 permanece, mas o Passo 1 já torna o defeito visível pelos logs do próprio Railway.
 
 ---

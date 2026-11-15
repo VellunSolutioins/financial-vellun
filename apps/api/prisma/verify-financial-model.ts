@@ -4,7 +4,7 @@
  *
  *   DATABASE_URL=<banco migrado> pnpm --filter @financial-vellun/api db:verify:financial-model
  *
- * Rode contra uma cópia restaurada de backup (docs/retencao-e-backups.md),
+ * Rode contra uma cópia restaurada de backup (docs/011-retencao-e-backups.md),
  * nunca direto em produção:
  *
  * - **saldo**: para cada conta comum, o saldo pela regra antiga recalculada

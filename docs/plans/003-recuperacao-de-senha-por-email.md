@@ -38,7 +38,7 @@
 > - `common/web-url.util.ts` centraliza a leitura de `WEB_URL` (auth, billing e ops).
 
 > **Revisão de 2026-10-29, ajustes aplicados** (detalhes em
-> [recuperacao-de-senha-ajustes.md](recuperacao-de-senha-ajustes.md)): a branch passou a seguir
+> [017-recuperacao-de-senha-ajustes.md](017-recuperacao-de-senha-ajustes.md)): a branch passou a seguir
 > esta versão do plano onde ela divergia.
 >
 > - Token no fragmento (`#token=`), limpo da barra ao ser lido; validade de **30 min**.
@@ -99,7 +99,7 @@ senha.
 
 ### API (`apps/api`)
 
-**1. Prisma** — [schema.prisma](apps/api/prisma/schema.prisma)
+**1. Prisma** — [schema.prisma](../../apps/api/prisma/schema.prisma)
 
 - Model `PasswordResetToken { id, userId, tokenHash @unique, expiresAt, usedAt?, createdAt }`,
   com `onDelete: Cascade`, `@@index([userId, createdAt])` e `@@map("password_reset_tokens")`.
@@ -114,21 +114,21 @@ Partir dos arquivos da branch `feat/implements-password-recovery` (commit `a2401
 
 - **Produção sem provedor derruba o boot.** Hoje a branch cai em silêncio para o transport `log`,
   e ninguém receberia e-mail. Seguir o padrão de `WHATSAPP_BOT_NUMBER` em
-  [whatsapp-link.service.ts](apps/api/src/whatsapp-link/whatsapp-link.service.ts): com
+  [whatsapp-link.service.ts](../../apps/api/src/whatsapp-link/whatsapp-link.service.ts): com
   `NODE_ENV=production`, exigir `MAIL_PROVIDER=resend`, `RESEND_API_KEY` e `MAIL_FROM`.
 - **Log com `maskEmail`** (de `security-events.service.ts`) no lugar do endereço em claro.
 - **`sendPasswordChanged(to, name)`**, além de `sendPasswordReset(to, name, resetUrl)`.
 - Texto do e-mail com validade de 30 minutos. Manter versão `text` e `html`, e `escapeHtml` no
   nome.
 - Contador de falha de envio em
-  [metrics.service.ts](apps/api/src/observability/metrics.service.ts): envio é _best-effort_, e
+  [metrics.service.ts](../../apps/api/src/observability/metrics.service.ts): envio é _best-effort_, e
   sem métrica uma falha do provedor fica invisível.
 - Dependência nova: `resend`. `.env.example`: `MAIL_PROVIDER=log`, `RESEND_API_KEY=`, `MAIL_FROM=`.
 
 **3. Módulo `src/password-reset/`** (`*.module.ts`, `*.controller.ts`, `*.service.ts`, `dto/`)
 
 - `request(email, context)`: busca sem diferenciar maiúsculas, como `findUserByEmail` em
-  [auth.service.ts](apps/api/src/auth/auth.service.ts). Sem conta ou acima do limite, não faz
+  [auth.service.ts](../../apps/api/src/auth/auth.service.ts). Sem conta ou acima do limite, não faz
   nada. Caso contrário, numa transação: apaga linhas com mais de 24 h, expira os links abertos,
   cria o novo. Registra `password_reset_requested` e dispara o e-mail sem aguardar.
 - `complete(token, newPassword, context)`: busca pelo hash; inexistente, usado ou expirado →
@@ -141,12 +141,12 @@ Partir dos arquivos da branch `feat/implements-password-recovery` (commit `a2401
   `ResetPasswordDto { @IsString @MaxLength(128) token, @MinLength(8) newPassword }`, com
   `@ApiProperty`.
 - `PasswordResetModule` importa `AuthModule` (pelo `SessionService`) e `MailModule`; entra no
-  [app.module.ts](apps/api/src/app.module.ts).
+  [app.module.ts](../../apps/api/src/app.module.ts).
 - `SecurityEventType` ganha `password_reset_requested` e `password_reset_completed`.
 - O `CsrfGuard` não muda: sem cookie de sessão a requisição passa, e com cookie antigo vale a
   origem permitida.
 
-**4. Troca logada** — [users.service.ts](apps/api/src/users/users.service.ts): `updatePassword`
+**4. Troca logada** — [users.service.ts](../../apps/api/src/users/users.service.ts): `updatePassword`
 passa a chamar `sendPasswordChanged`.
 
 ### Web (`apps/web`) — mobile first
@@ -160,8 +160,8 @@ passa a chamar `sendPasswordChanged`.
   `history.replaceState`. Nova senha e confirmar com `PasswordInput`; Zod mínimo 8 e coincidência.
   Sucesso → toast e `/login`. Sem token, ou link recusado pela API → tela "Link inválido ou
   expirado" com botão para `/esqueci-senha`. `robots: noindex` na página.
-- [login-form.tsx](apps/web/src/components/auth/login-form.tsx): link "Esqueci minha senha".
-- [lib/auth.ts](apps/web/src/lib/auth.ts): `forgotPassword(email)` e
+- [login-form.tsx](../../apps/web/src/components/auth/login-form.tsx): link "Esqueci minha senha".
+- [lib/auth.ts](../../apps/web/src/lib/auth.ts): `forgotPassword(email)` e
   `resetPassword({ token, newPassword })`.
 - Reuso: `FormField`, `FormAlert` e `apiErrorMessages` de `components/auth/`, e o layout de
   `app/(auth)/`. O `middleware.ts` é no-op e o `api-client` só tenta refresh em 401: nenhum dos
@@ -169,15 +169,15 @@ passa a chamar `sendPasswordChanged`.
 
 ### Privacidade (LGPD)
 
-- [privacidade/page.tsx](apps/web/src/app/privacidade/page.tsx): incluir o serviço de envio de
+- [privacidade/page.tsx](../../apps/web/src/app/privacidade/page.tsx): incluir o serviço de envio de
   e-mails entre os prestadores do parágrafo de compartilhamento e atualizar a data.
 - Pendências que dependem do Bruno, anteriores a este plano: a política não cita transferência
   internacional de dados e aponta para "canais oficiais de atendimento" sem publicar nenhum.
 
 ### Documentação
 
-[README.md](README.md) (variáveis `MAIL_*`), [infra/railway/README.md](infra/railway/README.md)
-(variáveis no serviço da API) e [CLAUDE.md](CLAUDE.md) (`mail/`, `password-reset/` e as duas
+[README.md](../../README.md) (variáveis `MAIL_*`), [infra/railway/README.md](../../infra/railway/README.md)
+(variáveis no serviço da API) e [CLAUDE.md](../../CLAUDE.md) (`mail/`, `password-reset/` e as duas
 rotas novas em `app/(auth)/`).
 
 ## Pré-requisitos fora do código
@@ -200,7 +200,7 @@ rotas novas em `app/(auth)/`).
 
 1. **Migration:** `prisma migrate dev` cria `password_reset_tokens`.
 2. **Unitários da API**, no estilo de
-   [whatsapp-link.service.spec.ts](apps/api/src/whatsapp-link/whatsapp-link.service.spec.ts):
+   [whatsapp-link.service.spec.ts](../../apps/api/src/whatsapp-link/whatsapp-link.service.spec.ts):
    - `request`: conta existente cria token (só o hash) e chama o e-mail; inexistente não cria
      nada; 4º pedido da hora não cria nada; novo pedido expira o anterior; a resposta é igual nos
      três casos.

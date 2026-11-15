@@ -18,7 +18,7 @@ financial-vellun/
     observability/  # Alloy, alertas, dashboards (ver infra/observability/README.md)
     railway/        # configuração declarativa por serviço (ver infra/railway/README.md)
   docs/             # requisitos, runbook, observabilidade e ADRs (docs/adrs/)
-  plan/             # planos de implementação
+    plans/          # planos de implementação
   Dockerfile.ai-agent  # imagem do agente (produção)
   Dockerfile.alloy     # imagem do Alloy no Railway
 ```
@@ -401,7 +401,7 @@ pnpm obs:check   # valida configs do Alloy, regras de alerta e PromQL dos dashbo
 
 Detalhes (usuário de monitoramento do Postgres, alvos, envio ao Grafana Cloud)
 em [infra/observability/README.md](infra/observability/README.md) e
-[docs/observability.md](docs/observability.md#verificação-local).
+[docs/006-observability.md](docs/006-observability.md#verificação-local).
 
 ---
 
@@ -502,7 +502,7 @@ Acompanhe o caminho da mensagem em http://localhost:15672 e em
 
 ### Runbook: DLQ, retries e reprocesso
 
-Ver [docs/whatsapp-messaging-runbook.md](docs/whatsapp-messaging-runbook.md).
+Ver [docs/005-whatsapp-messaging-runbook.md](docs/005-whatsapp-messaging-runbook.md).
 As decisões arquiteturais e o porquê de cada uma estão em
 [docs/adrs/](docs/adrs/README.md).
 
@@ -634,7 +634,7 @@ O Alloy encontra os serviços pelo nome (`financial-vellun-api`,
 o agente de `PORT=8010`. Ordem: subir o Alloy → conferir os alvos `up` → só então
 preencher `LOKI_PUSH_URL=http://alloy.railway.internal:3100` na API e no agente.
 O passo a passo, as variáveis e as armadilhas (IPv6, alvos comentados) estão em
-[docs/observability.md](docs/observability.md#produção-no-railway).
+[docs/006-observability.md](docs/006-observability.md#produção-no-railway).
 
 ---
 
@@ -795,11 +795,11 @@ assinatura.
 ## Documentação
 
 - [ADRs — decisões arquiteturais](docs/adrs/README.md)
-- [Runbook do pipeline WhatsApp](docs/whatsapp-messaging-runbook.md)
-- [Observabilidade](docs/observability.md) · [arquivos versionados](infra/observability/README.md)
-- [Rollout do billing](docs/billing-rollout.md)
-- [Requisitos técnicos](docs/technical-requirements.md)
-- [Prompts de implementação](docs/implementation-prompts.md)
-- [Requisitos — processamento assíncrono WhatsApp/IA](docs/whatsapp-ai-async-processing-requirements.md)
-- [Plano — processamento assíncrono WhatsApp/IA](plan/whatsapp-ai-async-processing-plan.md)
+- [Runbook do pipeline WhatsApp](docs/005-whatsapp-messaging-runbook.md)
+- [Observabilidade](docs/006-observability.md) · [arquivos versionados](infra/observability/README.md)
+- [Rollout do billing](docs/004-billing-rollout.md)
+- [Requisitos técnicos](docs/002-technical-requirements.md)
+- [Prompts de implementação](docs/001-implementation-prompts.md)
+- [Requisitos — processamento assíncrono WhatsApp/IA](docs/003-whatsapp-ai-async-processing-requirements.md)
+- [Plano — processamento assíncrono WhatsApp/IA](docs/plans/002-whatsapp-ai-async-processing-plan.md)
 - [Swagger da API](http://localhost:3001/api/docs) _(com o servidor rodando)_

@@ -282,7 +282,7 @@ dashboard; o `/metrics.json` que o script lê só tem média.
 | ------------------------ | --------------------------------------------------------- | ------------------------------------------------- |
 | Operações no Redis       | ~8: buffer, lock (acquire/extend/release), dedupe, estado | `redis_commands_processed_total`                  |
 | Chamadas à API principal | 3–5: contato, assinatura, categorias, contas, lançamento  | `vellun_agent_internal_api_*_seconds_count`       |
-| Queries no Postgres      | as das chamadas acima, todas pelo pool da API             | `pg_stat_statements`, `docs/connection-budget.md` |
+| Queries no Postgres      | as das chamadas acima, todas pelo pool da API             | `pg_stat_statements`, `docs/012-connection-budget.md` |
 | Chamadas à OpenAI        | 1 por mensagem de texto; +1 para áudio; +1 para imagem    | `vellun_agent_llm_latency_seconds_count`          |
 | Publicações no broker    | 3: inbound, processing, outbound                          | `vellun_agent_publish_confirmed_total`            |
 | Chamadas à Meta          | 1 por resposta entregue                                   | `vellun_agent_outbound_sent_total`                |
@@ -580,7 +580,7 @@ exige um usuário com escrita no vhost, e isso é decisão consciente, não o pa
 O `202` só prova que a mensagem entrou em `whatsapp.inbound.v1`. Para achar onde
 ela parou, leia os contadores em `/metrics.json` do agente: o último que subiu
 aponta o salto. O passo a passo, com a tabela de leitura, está em
-[whatsapp-flow-gap-analysis.md](whatsapp-flow-gap-analysis.md#roteiro-de-diagnóstico).
+[007-whatsapp-flow-gap-analysis.md](007-whatsapp-flow-gap-analysis.md#roteiro-de-diagnóstico).
 
 Sinais que só existem desde essa análise:
 

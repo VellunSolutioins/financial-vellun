@@ -25,7 +25,7 @@ tipos de problema:
   - ninguém é avisado quando a senha muda;
   - uma falha de envio de e-mail não aparece em lugar nenhum.
 - **Divergência entre planos.** A branch seguiu a versão do plano de 2026-10-10. A `main` tem uma
-  revisão de 2026-10-11 ([recuperacao-de-senha-por-email.md](recuperacao-de-senha-por-email.md),
+  revisão de 2026-10-11 ([003-recuperacao-de-senha-por-email.md](003-recuperacao-de-senha-por-email.md),
   versão da `main`) com requisitos que não chegaram à branch:
   - token no fragmento (`#token=`), não na query;
   - e-mail "sua senha foi alterada";
@@ -48,7 +48,7 @@ tipos de problema:
 ## Fase 0 — Sincronizar com a `main`
 
 1. `git merge main` na branch.
-2. Resolver [recuperacao-de-senha-por-email.md](recuperacao-de-senha-por-email.md): partir da
+2. Resolver [003-recuperacao-de-senha-por-email.md](003-recuperacao-de-senha-por-email.md): partir da
    versão da `main`, porque ela tem o "Por que não WhatsApp", a seção de LGPD e os pré-requisitos.
    Trocar o aviso "Não implementado" do topo pelo bloco de status da branch (o que foi feito e as
    diferenças), apontando para este plano.
@@ -61,16 +61,16 @@ tipos de problema:
 Hoje o link é `/redefinir-senha?token=…`. A query string fica nos logs HTTP da plataforma que
 serve o web, e o token vale até 30 min. O fragmento (`#token=…`) não sai do navegador.
 
-- **API** — [password-reset.service.ts](../apps/api/src/auth/password-reset.service.ts): montar
+- **API** — [password-reset.service.ts](../../apps/api/src/auth/password-reset.service.ts): montar
   `resetUrl` com `#token=`.
-- **Web** — [reset-password-form.tsx](../apps/web/src/components/auth/reset-password-form.tsx):
+- **Web** — [reset-password-form.tsx](../../apps/web/src/components/auth/reset-password-form.tsx):
   - trocar `useSearchParams` por leitura de `window.location.hash` num `useEffect` de montagem;
   - guardar o token em estado e, em seguida, limpar a barra com
     `history.replaceState(null, '', location.pathname)`;
   - enquanto o token não foi lido, não renderizar nada (evita piscar a tela de link inválido);
   - sem token, a mensagem passa a orientar: "abra de novo o link do e-mail". Recarregar a página
     perde o token de propósito.
-- **Página** — [redefinir-senha/page.tsx](<../apps/web/src/app/(auth)/redefinir-senha/page.tsx>):
+- **Página** — [redefinir-senha/page.tsx](<../../apps/web/src/app/(auth)/redefinir-senha/page.tsx>):
   sem `useSearchParams`, o `Suspense` sai. `referrer: 'no-referrer'` fica.
 - A branch não foi publicada, então não é preciso aceitar `?token=` por compatibilidade.
 
@@ -90,7 +90,7 @@ serve o web, e o token vale até 30 min. O fragmento (`#token=…`) não sai do 
 Hoje o vínculo só muda trocando de número. Quem retoma a conta não tem como tirar o número de um
 invasor, que continua lançando e lendo categorias e contas pelo bot.
 
-**API** ([whatsapp-link/](../apps/api/src/whatsapp-link/)):
+**API** ([whatsapp-link/](../../apps/api/src/whatsapp-link/)):
 
 - `WhatsappLinkService.unlink(userId, currentPassword, context)`:
   - **exige a senha atual**, como a troca de número, para que uma sessão roubada não consiga
@@ -112,27 +112,27 @@ invasor, que continua lançando e lendo categorias e contas pelo bot.
   clientes.
 - O campo `users.phone` (dado de cadastro) não muda. Só o vínculo sai.
 - O agente não muda: o `isLinked` do
-  [internal.service.ts](../apps/api/src/internal/internal.service.ts) já ignora contato revogado,
+  [internal.service.ts](../../apps/api/src/internal/internal.service.ts) já ignora contato revogado,
   e o `linkVersion` incrementado descarta as confirmações pendentes. Conferir no teste ponta a
   ponta que o bot passa a tratar o número como não vinculado.
 
-**Web** ([whatsapp-card.tsx](../apps/web/src/components/whatsapp/whatsapp-card.tsx)):
+**Web** ([whatsapp-card.tsx](../../apps/web/src/components/whatsapp/whatsapp-card.tsx)):
 
 - Botão **"Desvincular"** ao lado de "Trocar número", só com vínculo ativo.
-- Abre um diálogo ([dialog.tsx](../apps/web/src/components/ui/dialog.tsx)). Ele:
+- Abre um diálogo ([dialog.tsx](../../apps/web/src/components/ui/dialog.tsx)). Ele:
   - explica o efeito: "esse número deixa de lançar na sua conta; para voltar, é só vincular de
     novo";
   - pede a senha atual (`PasswordInput`).
 - Erro de senha aparece no campo. No sucesso, toast e o card volta ao estado "sem número
   vinculado".
-- `unlinkWhatsapp({ currentPassword })` em [whatsapp.ts](../apps/web/src/lib/whatsapp.ts).
+- `unlinkWhatsapp({ currentPassword })` em [whatsapp.ts](../../apps/web/src/lib/whatsapp.ts).
 - Mobile first: botões empilhados e em largura total no celular. Diálogo sem rolagem horizontal e
   com o teclado aberto.
 
 ### 4. Aviso "sua senha foi alterada"
 
 - `mail/password-changed.template.ts`, no mesmo formato do
-  [password-reset.template.ts](../apps/api/src/mail/password-reset.template.ts). Conteúdo:
+  [password-reset.template.ts](../../apps/api/src/mail/password-reset.template.ts). Conteúdo:
   - data e hora da troca (fuso `America/Sao_Paulo`);
   - se foi por redefinição, que as sessões foram encerradas;
   - **se houver WhatsApp vinculado**, o número mascarado (`(41) •••••-1234`), "não reconhece?
@@ -145,12 +145,12 @@ invasor, que continua lançando e lendo categorias e contas pelo bot.
   envio só é registrada, item 6), em dois lugares:
   - `PasswordResetService.resetPassword` — pegar `email` e `name` no `tx.user.update` com
     `select`, e o número vinculado com uma consulta ao `whatsappContact` ativo;
-  - `UsersService.changePassword` em [users.service.ts](../apps/api/src/users/users.service.ts) —
+  - `UsersService.changePassword` em [users.service.ts](../../apps/api/src/users/users.service.ts) —
     o `UsersModule` passa a importar o `MailModule`.
 
 ### 5. Limpar cookies de sessão na redefinição
 
-[auth.controller.ts](../apps/api/src/auth/auth.controller.ts): `reset-password` recebe
+[auth.controller.ts](../../apps/api/src/auth/auth.controller.ts): `reset-password` recebe
 `@Res({ passthrough: true })` e chama `sessions.clearAuthCookies(res)` no sucesso. Assim um
 navegador que ainda tinha cookies da sessão revogada não fica com lixo.
 
@@ -158,32 +158,32 @@ navegador que ainda tinha cookies da sessão revogada não fica com lixo.
 
 ### 6. Métrica e alerta de envio de e-mail
 
-- [metrics.service.ts](../apps/api/src/observability/metrics.service.ts): contador
+- [metrics.service.ts](../../apps/api/src/observability/metrics.service.ts): contador
   `vellun_api_mail_sent_total` com labels `template` (`password_reset`, `password_changed`) e
   `result` (`sent`, `failed`, `skipped`). Inicializar as combinações em 0 no construtor, para as
   séries existirem antes do primeiro envio. É a mesma lição dos alertas de pagamento, inertes até
   existirem.
-- [mail-transport.ts](../apps/api/src/mail/mail-transport.ts): `send` passa a retornar
+- [mail-transport.ts](../../apps/api/src/mail/mail-transport.ts): `send` passa a retornar
   `'sent' | 'skipped'`. O `LogMailTransport` em produção retorna `skipped`.
-- [mail.service.ts](../apps/api/src/mail/mail.service.ts) registra o resultado. Exceção conta como
+- [mail.service.ts](../../apps/api/src/mail/mail.service.ts) registra o resultado. Exceção conta como
   `failed` e é relançada. O `ObservabilityModule` é `@Global`, então não precisa de import.
-- [plataforma.yaml](../infra/observability/alerts/plataforma.yaml):
+- [plataforma.yaml](../../infra/observability/alerts/plataforma.yaml):
   - `EmailTransacionalFalhando`:
     `increase(vellun_api_mail_sent_total{result="failed"}[15m]) > 0`, severidade `warning`;
   - `EmailNaoEnviadoEmProducao`: `increase(...{result="skipped", env="production"}[1h]) > 0`,
     severidade `warning`;
   - casos nos testes em
-    [plataforma.test.yaml](../infra/observability/alerts/tests/plataforma.test.yaml).
+    [plataforma.test.yaml](../../infra/observability/alerts/tests/plataforma.test.yaml).
 
 ## Fase 3 — LGPD e documentação
 
 ### 7. Política de privacidade e docs
 
-- [privacidade/page.tsx](../apps/web/src/app/privacidade/page.tsx): incluir o serviço de envio de
+- [privacidade/page.tsx](../../apps/web/src/app/privacidade/page.tsx): incluir o serviço de envio de
   e-mails entre os prestadores e atualizar a data.
-- [infra/railway/README.md](../infra/railway/README.md): `MAIL_PROVIDER`, `RESEND_API_KEY` e
+- [infra/railway/README.md](../../infra/railway/README.md): `MAIL_PROVIDER`, `RESEND_API_KEY` e
   `MAIL_FROM` no serviço da API.
-- [CLAUDE.md](../CLAUDE.md):
+- [CLAUDE.md](../../CLAUDE.md):
   - `mail/` na estrutura da API;
   - `esqueci-senha` e `redefinir-senha` em `app/(auth)/`.
 - Plano original: status final, com as decisões D1–D4.
@@ -199,7 +199,7 @@ navegador que ainda tinha cookies da sessão revogada não fica com lixo.
 
 ### 8. Comentário duplicado
 
-[session.service.ts](../apps/api/src/auth/session.service.ts): juntar os dois blocos `/** */` do
+[session.service.ts](../../apps/api/src/auth/session.service.ts): juntar os dois blocos `/** */` do
 `revokeAllForUser` num só.
 
 ## Ordem e tamanho

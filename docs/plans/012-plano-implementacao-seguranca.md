@@ -1,9 +1,9 @@
 # Plano de implementação — Segurança
 
 Data: 22/09/2026. **Base: branch `main`** (commit `2fca515`).
-Origem: [análise de segurança](../docs/analise-seguranca-2026-09-21.md), analisada em conjunto com as
-[recomendações de performance](../docs/financial-vellun-recomendacoes-performance-escalabilidade-disponibilidade.md).
-Plano irmão: [plano de implementação de performance](plano-implementacao-performance.md).
+Origem: [análise de segurança](../009-analise-seguranca-2026-09-21.md), analisada em conjunto com as
+[recomendações de performance](../010-financial-vellun-recomendacoes-performance-escalabilidade-disponibilidade.md).
+Plano irmão: [plano de implementação de performance](011-plano-implementacao-performance.md).
 
 > O relatório de segurança foi produzido sobre a `feature/melhorias`, por isso algumas referências
 > de linha dele não batem com a `main`. Este plano usa as referências da `main`. Itens que só existem
@@ -213,7 +213,7 @@ Decisões já tomadas:
   (tabela de serviços cita `guest/guest`).
 - **Checklist Railway:**
   - Postgres, Redis e RabbitMQ sem domínio público;
-  - rotacionar as credenciais do RabbitMQ (pendência registrada em `docs/alloy-no-railway-plan.md`).
+  - rotacionar as credenciais do RabbitMQ (pendência registrada em `docs/008-alloy-no-railway-plan.md`).
 
 ## S2 — Alto: origens, limites, Redis/rate limit, ops
 
@@ -336,7 +336,7 @@ Decisões já tomadas:
 >     essas linhas. O que o trigger impede é reescrever o passado para esconder uma tomada
 >     de conta.
 > - **Backups:** procedimento e o que sai do sistema documentados em
->   [docs/retencao-e-backups.md](../docs/retencao-e-backups.md). **O ensaio de restauração
+>   [docs/011-retencao-e-backups.md](../011-retencao-e-backups.md). **O ensaio de restauração
 >   continua pendente** — depende de acesso ao Railway.
 > - **Medição da retenção:** a varredura filtra por `created_at`, sem índice próprio. No
 >   volume atual é irrelevante (roda de madrugada); se passar a doer, o índice entra pelo
