@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 import { AuthAside } from '@/components/auth/auth-aside';
 import { Brand } from '@/components/marketing/brand';
+import { CompanyInfo } from '@/components/marketing/company-info';
 import { focusRing } from '@/components/marketing/styles';
 
 const LEGAL_LINKS = [
@@ -41,6 +42,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
               </Link>
             ))}
           </nav>
+          <CompanyInfo className="mt-2" />
         </footer>
       </div>
       <AuthAside />

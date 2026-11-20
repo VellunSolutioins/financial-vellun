@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { ZELOO_SLOGAN } from '@/components/brand/zeloo-logo';
 import { cn } from '@/lib/utils';
 import { Brand } from './brand';
+import { CompanyInfo } from './company-info';
 import { container, focusRing } from './styles';
 
 const FOOTER_LINKS = [
@@ -41,6 +42,9 @@ export function SiteFooter() {
             </Link>
           ))}
         </nav>
+      </div>
+      <div className={cn(container, 'border-t py-6')}>
+        <CompanyInfo />
       </div>
     </footer>
   );
