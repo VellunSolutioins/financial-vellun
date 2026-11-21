@@ -9,5 +9,7 @@ import { CreditCardsModule } from '../credit-cards/credit-cards.module';
   imports: [BillingModule, CreditCardsModule],
   controllers: [DashboardController],
   providers: [DashboardService, ResourceScope],
+  // O agente de WhatsApp responde o resumo com os mesmos números do app.
+  exports: [DashboardService],
 })
 export class DashboardModule {}

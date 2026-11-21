@@ -520,3 +520,55 @@ async def test_ontem_na_resposta_e_relativo_a_mensagem_original(mundo):
     await mundo.enviar("ontem", recebida=datetime(2026, 9, 28, 15, 0, tzinfo=timezone.utc))
 
     assert mundo.payload["transactionDate"] == "2026-09-26"
+
+
+# ── Consulta de resumo (docs/plans/018, Fase 1) ──────────────────────────────
+async def test_pergunta_de_gasto_responde_o_resumo_sem_criar_nem_perguntar(mundo, monkeypatch):
+    from src.schemas.financial_intent import SummaryFocusEnum
+    from src.services import summary_service as summary_module
+
+    chamadas: list[tuple[str, dict]] = []
+
+    class Resposta:
+        status_code = 200
+
+        def json(self):
+            return {
+                "profileType": "individual",
+                "period": {"start": "2026-09-01", "end": "2026-09-30"},
+                "spent": 820.5,
+                "byCategory": [{"name": "Mercado", "total": 500}],
+                "byCategoryComplete": True,
+            }
+
+    class Api:
+        async def get(self, path, params=None):
+            chamadas.append((path, params))
+            return Resposta()
+
+    monkeypatch.setattr(summary_module, "api_client", Api())
+    mundo.llm["quanto gastei com mercado?"] = FinancialIntent(
+        intent=IntentType.query_summary,
+        summary_focus=SummaryFocusEnum.spending,
+        category_name="Mercado",
+    )
+
+    resposta = await mundo.enviar("quanto gastei com mercado?")
+
+    assert resposta.startswith("💸 Gastos com *Mercado* em setembro: R$ 500,00")
+    assert chamadas == [("/internal/users/u1/summary", {})]
+    assert mundo.enviados == []
+    assert (await pendente()).awaiting_confirmation is False
+
+
+async def test_pergunta_no_meio_de_uma_pendencia_nao_a_conclui(mundo, monkeypatch):
+    # A pendência de criação tem prioridade: "quanto gastei?" não é a categoria.
+    mundo.llm["gastei 50 no mercado"] = despesa(category_name=None)
+
+    pergunta = await mundo.enviar("gastei 50 no mercado")
+    assert pergunta.startswith("Em qual categoria")
+
+    resposta = await mundo.enviar("quanto gastei?")
+
+    assert "categoria" in resposta.lower()
+    assert mundo.enviados == []

@@ -55,6 +55,16 @@ class AmountBasisEnum(str, Enum):
     installment = "installment"
 
 
+class SummaryFocusEnum(str, Enum):
+    """O que a consulta de resumo quer saber (docs/plans/018, Fase 1)."""
+
+    overview = "overview"  # "resumo", "como estou esse mês"
+    spending = "spending"  # "quanto gastei", "quanto gastei com mercado"
+    income = "income"  # "quanto recebi"
+    balance = "balance"  # "qual meu saldo"
+    upcoming = "upcoming"  # "o que tenho pra pagar", "o que vence"
+
+
 class FinancialIntent(BaseModel):
     """Resultado estruturado da interpretação de uma mensagem (§9.3).
 
@@ -81,6 +91,17 @@ class FinancialIntent(BaseModel):
     )
     installments: int | None = Field(default=None, description="No parcelado: número de parcelas")
     amount_basis: AmountBasisEnum | None = None
+    # Consulta de resumo (``query_summary``). Opcionais com default: estado
+    # pendente gravado antes deles continua sendo lido.
+    summary_focus: SummaryFocusEnum | None = Field(
+        default=None, description="No query_summary: o que o usuário quer saber"
+    )
+    period_start: str | None = Field(
+        default=None, description="No query_summary: início do período (YYYY-MM-DD)"
+    )
+    period_end: str | None = Field(
+        default=None, description="No query_summary: fim do período (YYYY-MM-DD)"
+    )
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     needs_confirmation: bool = False
     confirmation_question: str | None = None

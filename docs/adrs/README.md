@@ -40,3 +40,4 @@ decisão não seja revertida sem que o contexto original seja considerado.
 | [0021](0021-pagamento-antes-do-fechamento.md)               | Pagamento da fatura antes do fechamento             | Aceito |
 | [0022](0022-parcela-do-cartao-na-abertura-da-fatura.md)     | Parcela do cartão na abertura da fatura             | Aceito |
 | [0023](0023-feature-flags-globais.md)                       | Feature flags globais controladas pelo /ops         | Aceito |
+| [0024](0024-agente-age-sobre-lancamentos-existentes.md)     | Agente do WhatsApp age sobre lançamentos existentes | Aceito |

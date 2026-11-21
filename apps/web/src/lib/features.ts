@@ -14,6 +14,8 @@ export type { FeatureFlags, FeatureKey };
 export const FEATURE_ROUTES: Record<FeatureKey, string[]> = {
   agenda: ['/app/pessoal/agenda', '/app/pessoal/lembretes'],
   notes: ['/app/pessoal/anotacoes'],
+  // Só liga uma ação do agente no WhatsApp: não esconde nenhuma tela do app.
+  whatsapp_summary: [],
 };
 
 /** Funcionalidade dona da rota, ou `null` para rotas essenciais (sempre disponíveis). */

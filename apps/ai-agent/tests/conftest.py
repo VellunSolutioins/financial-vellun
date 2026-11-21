@@ -37,6 +37,29 @@ from src.services.outbound import outbound_dispatcher  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
+def no_feature_flags():
+    """Flags desligadas, sem consultar a API principal.
+
+    Sem isto, a ajuda chamava ``/internal/features`` de verdade — na máquina do
+    desenvolvedor, a API local respondia e o texto da ajuda dependia dela.
+    Testes que precisam de uma flag ligada trocam ``feature_flags.enabled``.
+
+    Sem ``monkeypatch`` de propósito: num fixture autouse ele seria criado
+    antes dos fixtures do teste e desfeito depois deles, invertendo a ordem
+    de teardown de quem usa ``client`` + ``monkeypatch`` (o lifespan fecharia
+    os dublês em vez dos clientes reais).
+    """
+    from src.services.feature_flags import feature_flags
+
+    async def _none() -> dict[str, bool]:
+        return {}
+
+    feature_flags.enabled = _none  # type: ignore[method-assign]
+    yield
+    del feature_flags.enabled
+
+
+@pytest.fixture(autouse=True)
 def isolated_state():
     """Zera todo estado global compartilhado entre testes."""
     # O `.env` do desenvolvedor pode trazer outros valores; o teste manda.

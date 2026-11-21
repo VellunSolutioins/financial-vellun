@@ -80,7 +80,7 @@ export const DASHBOARD_BASES = {
  * Período pedido ou, sem ele, o mês corrente **em America/Sao_Paulo** — o
  * relógio do servidor (UTC) já virou o mês às 21h do último dia.
  */
-function periodBounds(periodStart?: string, periodEnd?: string) {
+export function periodBounds(periodStart?: string, periodEnd?: string) {
   const today = todaySaoPaulo();
   return {
     start: periodStart ? startOfDayUtc(periodStart) : startOfMonthUtc(today.year, today.monthIndex),

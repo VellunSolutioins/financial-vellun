@@ -43,7 +43,10 @@ Sua tarefa é preencher o schema FinancialIntent com base na mensagem do usuári
 
 Regras:
 - `intent`: classifique a intenção. Use "create_transaction" para registrar \
-gastos/receitas; "query_summary" para consultas de resumo; "correct_last"/\
+gastos/receitas; "query_summary" para perguntas sobre os próprios números \
+(quanto gastou ou recebeu, saldo, resumo, o que tem a pagar) — uma pergunta \
+sem valor, como "quanto gastei com mercado?", nunca é "create_transaction"; \
+"correct_last"/\
 "cancel_last" para corrigir/cancelar o último lançamento; "help" para pedidos \
 de ajuda; "unsupported_movement" para dinheiro que só muda de lugar entre \
 contas do próprio usuário — transferência entre as contas dele, empréstimo \
@@ -100,6 +103,16 @@ sempre o número que o usuário escreveu.
 informada ou for outra (semanal, diária).
 - `occurrences`: no fixo, quantas vezes o lançamento se repete ("por 12 meses" \
 no mensal = 12; "por 2 anos" no mensal = 24), se informado; senão nulo.
+- `summary_focus`: só no "query_summary": "spending" (quanto gastou), \
+"income" (quanto recebeu), "balance" (saldo), "upcoming" (o que tem a pagar \
+ou o que vence) ou "overview" (resumo geral); nulo nas outras intenções.
+- `period_start`/`period_end`: só no "query_summary", o período perguntado em \
+ISO (YYYY-MM-DD), a partir da "Data atual": "esse mês" é do dia 1 ao último \
+dia do mês atual; "mês passado", o mês anterior inteiro; "outubro", outubro \
+inteiro (do ano atual, ou do anterior se outubro ainda não chegou); "essa \
+semana", de segunda a domingo; "hoje", só hoje. Sem período na pergunta, \
+deixe os dois nulos. Numa consulta sobre uma categoria ("quanto gastei com \
+mercado?"), preencha `category_name` com a categoria de despesa do usuário.
 - `confidence`: 0.0 a 1.0, sua confiança na extração.
 - `needs_confirmation`: true quando faltar valor, tipo, ou houver ambiguidade.
 - `confirmation_question`: pergunta a fazer ao usuário quando \

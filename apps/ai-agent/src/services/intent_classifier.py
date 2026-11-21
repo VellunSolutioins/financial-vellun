@@ -15,6 +15,7 @@ from ..schemas.financial_intent import (
     FinancialIntent,
     IntentType,
     RecurrenceTypeEnum,
+    SummaryFocusEnum,
     TransactionTypeEnum,
 )
 from .clock import today_local
@@ -27,7 +28,10 @@ from .reply_parsers import (
     normalize,
     parse_amount,
     parse_date,
+    parse_period,
+    parse_summary_focus,
     tokens,
+    without_period,
 )
 
 logger = logging.getLogger(__name__)
@@ -39,6 +43,16 @@ INCOME_KEYWORDS = (
     "recebi", "ganhei", "recebimento", "entrou", "receita", "caiu", "vendi", "venda",
 )
 QUERY_KEYWORDS = ("resumo", "saldo", "quanto", "balanço", "balanco", "relatório", "relatorio")
+# Perguntas sobre contas em aberto ("o que tenho pra pagar?"). Só valem como
+# consulta numa pergunta (ver QUESTION_RE): "conta de luz a pagar vence dia
+# 20", sem valor, é um lançamento a que falta o valor.
+UPCOMING_QUERY_KEYWORDS = ("pra pagar", "para pagar", "a pagar", "a vencer", "o que vence")
+#: Sinal de pergunta: "?" ou uma abertura típica ("quanto…", "qual…", "o que…").
+QUESTION_RE = re.compile(
+    r"\?"
+    r"|^\s*(quanto|quantos|quanta|qual|quais|o que|oque|como|cade|mostra"
+    r"|me (mostra|manda|passa|diz))\b"
+)
 HELP_KEYWORDS = ("ajuda", "help", "socorro", "como funciona", "o que voce faz", "o que você faz")
 CANCEL_KEYWORDS = ("cancela", "cancelar", "apaga", "apagar", "desfaz", "desfazer", "remove")
 CORRECT_KEYWORDS = ("corrige", "corrigir", "errei", "na verdade", "muda", "mudar", "ajusta")
@@ -172,6 +186,10 @@ class IntentClassifier:
                         intent.intent,
                     )
                     return self._classify_with_rules(message, context)
+                if self._should_prefer_rule_query(message, intent):
+                    logger.info("LLM pediu valor de uma pergunta; tratando como consulta")
+                    metrics.incr("llm_rules_override_intent")
+                    return self._summary_query(message, context)
                 return self._finalize(self._reconcile_with_rules(message, intent))
             except Exception:  # noqa: BLE001 — falha do LLM aciona o fallback
                 metrics.incr("llm_fallback")
@@ -214,10 +232,8 @@ class IntentClassifier:
             return FinancialIntent(intent=IntentType.cancel_last, confidence=0.85)
         if self._has_any(text, CORRECT_KEYWORDS):
             return FinancialIntent(intent=IntentType.correct_last, confidence=0.8)
-        if self._has_any(text, QUERY_KEYWORDS) and not self._has_any(
-            text, EXPENSE_KEYWORDS + INCOME_KEYWORDS
-        ):
-            return FinancialIntent(intent=IntentType.query_summary, confidence=0.85)
+        if self._is_query(text):
+            return self._summary_query(message, context)
         if self._has_any(text, MOVEMENT_KEYWORDS) and not self._has_any(
             text, ("juros", "tarifa", "rendimento", "rendeu")
         ):
@@ -251,6 +267,51 @@ class IntentClassifier:
 
         intent.confidence = self._estimate_confidence(intent)
         return self._finalize(intent)
+
+    def _is_query(self, text: str) -> bool:
+        """Pergunta sobre os próprios números ("quanto gastei com mercado?").
+
+        Sem valor na frase: "quanto" com valor ("paguei 50, quanto sobra?") não
+        é consulta. Antes, "quanto gastei" tinha "gastei" e caía na criação,
+        que perguntava o valor do lançamento.
+        """
+        if parse_amount(without_period(text)) is not None:
+            return False
+        if self._has_any(text, QUERY_KEYWORDS):
+            return True
+        return self._has_any(text, UPCOMING_QUERY_KEYWORDS) and self._is_question(text)
+
+    @staticmethod
+    def _is_question(text: str) -> bool:
+        return QUESTION_RE.search(normalize(text)) is not None
+
+    def _summary_query(self, message: str, context: dict) -> FinancialIntent:
+        """Consulta de resumo pelas regras: foco, período e categoria."""
+        text = message.lower().strip()
+        focus = parse_summary_focus(message)
+        period = parse_period(message, _reference_date(context))
+        category = None
+        if focus == SummaryFocusEnum.spending:
+            category = self._detect_category(text, context, TransactionTypeEnum.expense)
+        return FinancialIntent(
+            intent=IntentType.query_summary,
+            summary_focus=focus,
+            period_start=period[0].isoformat() if period else None,
+            period_end=period[1].isoformat() if period else None,
+            category_name=category,
+            confidence=0.85,
+        )
+
+    def _should_prefer_rule_query(self, message: str, intent: FinancialIntent) -> bool:
+        """O LLM tomou uma pergunta por lançamento sem valor.
+
+        Só com sinal de pergunta: sem ele, o LLM pode ter razão e faltar só o
+        valor ("paguei o saldo do cartão"), e quem decide é a pergunta do valor.
+        """
+        if intent.intent != IntentType.create_transaction or intent.amount:
+            return False
+        text = message.lower().strip()
+        return self._is_query(text) and self._is_question(text)
 
     def _detect_type(self, text: str) -> TransactionTypeEnum | None:
         if self._has_any(text, INCOME_KEYWORDS):

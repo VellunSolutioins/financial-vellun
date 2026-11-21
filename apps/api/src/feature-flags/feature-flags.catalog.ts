@@ -10,7 +10,8 @@ export interface FeatureDefinition {
 }
 
 /**
- * Funcionalidades do app que podem ser desligadas pelo /ops.
+ * Funcionalidades do app (e ações do agente de WhatsApp) que podem ser
+ * desligadas pelo /ops.
  *
  * Os itens essenciais do menu (Dashboard, Lançamentos, Recorrências,
  * Parcelamentos, Faturas, Metas, Cartões, Contas, Categorias) **não** entram
@@ -28,6 +29,13 @@ export const FEATURE_CATALOG = {
     label: 'Anotações',
     description: 'Bloco de anotações livres do usuário.',
     defaultEnabled: true,
+  },
+  // Ações do agente no WhatsApp (docs/plans/018): nascem desligadas e são
+  // ligadas no /ops depois de validadas. Não têm tela no app.
+  whatsapp_summary: {
+    label: 'Resumo pelo WhatsApp',
+    description: 'O agente responde resumo, saldo e "quanto gastei?" pelo WhatsApp.',
+    defaultEnabled: false,
   },
 } as const satisfies Record<FeatureKey, FeatureDefinition>;
 
