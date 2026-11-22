@@ -122,4 +122,34 @@ integration('próximas contas a pagar (PostgreSQL)', () => {
     const after = (await dashboard.getSummary(userId)).upcomingBills;
     expect(after.some((b) => b.id === closedInvoiceId)).toBe(false);
   });
+
+  it('receita em aberto não entra em contas a pagar', async () => {
+    // Produção: um salário fixo ("pagamento Kazap", receita) aparecia como conta
+    // a pagar — o filtro de "em aberto" sobrescrevia o `type: 'expense'`.
+    const accounts = new AccountsService(prisma);
+    const transactions = new TransactionsService(prisma, accounts);
+    const checking = (await accounts.create(userId, { name: 'Salário', type: 'checking' })).id;
+    const salary = await transactions.create(userId, {
+      accountId: checking,
+      type: 'income',
+      amount: 6825,
+      description: 'pagamento Kazap',
+      transactionDate: inDays(5),
+      recurrenceType: 'fixo',
+      recurrenceMonths: 3,
+    });
+    const bill = await transactions.create(userId, {
+      accountId: checking,
+      type: 'expense',
+      amount: 90,
+      description: 'Internet',
+      transactionDate: inDays(5),
+    });
+
+    const bills = (await dashboard.getSummary(userId)).upcomingBills;
+
+    expect(bills.some((b) => b.id === bill.id)).toBe(true);
+    expect(bills.some((b) => b.description === 'pagamento Kazap')).toBe(false);
+    expect(bills.some((b) => b.id === salary.id)).toBe(false);
+  });
 });

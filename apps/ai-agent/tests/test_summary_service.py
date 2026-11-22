@@ -293,3 +293,50 @@ def test_mes_corrente_ate_hoje_vira_o_mes_inteiro():
         date(2026, 11, 1),
         date(2026, 11, 15),
     )
+
+
+# ── Receitas previstas ───────────────────────────────────────────────────────
+COM_RECEITAS = {
+    **PESSOAL,
+    "upcomingIncome": [
+        {
+            "description": "pagamento Kazap",
+            "remaining": 6825,
+            "dueDate": "2026-12-01",
+            "isOverdue": False,
+        },
+        {"description": "Freela", "remaining": 300, "dueDate": "2026-11-15", "isOverdue": True},
+    ],
+}
+
+
+def test_resumo_mostra_receitas_previstas_separadas_das_contas():
+    # Produção: o salário fixo aparecia em "Próximas contas" com vencimento.
+    resposta = format_summary(COM_RECEITAS, consulta(), HOJE)
+
+    contas, receitas = resposta.split("Receitas previstas:")
+    assert "pagamento Kazap" not in contas
+    linhas = receitas.strip().splitlines()
+    assert linhas[0] == "1. Freela — R$ 300,00 — ⚠️ atrasada, era para 15/11"
+    assert linhas[1] == "2. pagamento Kazap — R$ 6.825,00 — previsto para 01/12"
+
+
+def test_pergunta_sobre_recebimentos_lista_as_receitas_previstas():
+    resposta = format_summary(
+        COM_RECEITAS, consulta(summary_focus=SummaryFocusEnum.income), HOJE
+    )
+    assert "Receitas previstas:" in resposta
+    assert "pagamento Kazap — R$ 6.825,00 — previsto para 01/12" in resposta
+
+
+def test_contas_a_pagar_nao_mostram_receitas():
+    resposta = format_summary(
+        COM_RECEITAS, consulta(summary_focus=SummaryFocusEnum.upcoming), HOJE
+    )
+    assert "pagamento Kazap" not in resposta
+    assert "Receitas previstas" not in resposta
+
+
+def test_api_antiga_sem_receitas_previstas_nao_quebra():
+    resposta = format_summary(PESSOAL, consulta(), HOJE)
+    assert "Receitas previstas" not in resposta

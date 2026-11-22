@@ -507,4 +507,29 @@ integration('vencimento × pagamento (PostgreSQL)', () => {
     const summary = await env.dashboard.getBusinessSummary(businessId);
     expect(summary.accountsPayable).toMatchObject({ total: 120, count: 1 });
   });
+
+  it('PJ: a receber e a pagar não misturam receitas e despesas em aberto', async () => {
+    // O filtro de "em aberto" sobrescrevia o `type` da prévia: cada lista
+    // trazia os itens em aberto dos dois tipos.
+    const businessId = await env.createUser('business');
+    const accountId = await env.account(businessId, 0);
+    const create = (type: 'income' | 'expense', amount: number, description: string) =>
+      env.transactions.create(businessId, {
+        accountId,
+        type,
+        amount,
+        description,
+        transactionDate: dayFromToday(5),
+        settle: false,
+      });
+    await create('expense', 120, 'Fornecedor');
+    await create('income', 900, 'Cliente');
+
+    const summary = await env.dashboard.getBusinessSummary(businessId);
+
+    expect(summary.accountsPayable.items.map((t) => t.description)).toEqual(['Fornecedor']);
+    expect(summary.accountsReceivable.items.map((t) => t.description)).toEqual(['Cliente']);
+    expect(summary.accountsPayable).toMatchObject({ total: 120, count: 1 });
+    expect(summary.accountsReceivable).toMatchObject({ total: 900, count: 1 });
+  });
 });

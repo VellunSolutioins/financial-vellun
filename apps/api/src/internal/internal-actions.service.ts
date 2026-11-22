@@ -56,6 +56,10 @@ export class InternalActionsService {
         dateOnlyString(todaySaoPaulo()),
       );
     }
-    return fromPersonalSummary(await this.dashboard.getSummary(userId, periodStart, periodEnd));
+    const [summary, receivables] = await Promise.all([
+      this.dashboard.getSummary(userId, periodStart, periodEnd),
+      this.dashboard.upcomingReceivables(userId),
+    ]);
+    return fromPersonalSummary(summary, receivables, dateOnlyString(todaySaoPaulo()));
   }
 }
