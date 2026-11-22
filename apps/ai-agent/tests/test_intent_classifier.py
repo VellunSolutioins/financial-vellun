@@ -12,6 +12,7 @@ from src.schemas.financial_intent import (
     IntentType,
     RecurrenceFrequencyEnum,
     RecurrenceTypeEnum,
+    SummaryFocusEnum,
     TransactionTypeEnum,
 )
 from src.services.clock import today_local
@@ -147,3 +148,82 @@ def test_juros_do_emprestimo_continuam_sendo_gasto():
     result = classify("paguei 150 de juros do empréstimo")
     assert result.intent == IntentType.create_transaction
     assert result.transaction_type == TransactionTypeEnum.expense
+
+
+CONTEXTO_CONSULTA = {
+    "today": "2026-11-21",
+    "expense_categories": ["Mercado", "Transporte"],
+    "income_categories": ["Salário"],
+}
+
+
+def test_quanto_gastei_e_consulta_e_nao_lancamento_sem_valor():
+    # Antes "gastei" levava à criação, que perguntava o valor do lançamento.
+    result = classify("quanto gastei esse mês?", CONTEXTO_CONSULTA)
+    assert result.intent == IntentType.query_summary
+    assert result.summary_focus == SummaryFocusEnum.spending
+
+
+def test_consulta_de_categoria_com_periodo():
+    result = classify("quanto gastei com mercado em outubro de 2025?", CONTEXTO_CONSULTA)
+    assert result.intent == IntentType.query_summary
+    assert result.category_name == "Mercado"
+    assert (result.period_start, result.period_end) == ("2025-10-01", "2025-10-31")
+    assert result.amount is None
+
+
+def test_consulta_de_contas_a_pagar():
+    result = classify("o que tenho pra pagar?", CONTEXTO_CONSULTA)
+    assert result.intent == IntentType.query_summary
+    assert result.summary_focus == SummaryFocusEnum.upcoming
+
+
+def test_conta_a_pagar_com_valor_continua_sendo_lancamento():
+    result = classify("conta a pagar de 100 de internet vence dia 30", CONTEXTO_CONSULTA)
+    assert result.intent == IntentType.create_transaction
+    assert result.amount == 100
+
+
+def test_llm_que_toma_pergunta_por_lancamento_sem_valor_vira_consulta():
+    from src.schemas.financial_intent import FinancialIntent
+
+    class Llm:
+        async def extract_intent(self, message, context):
+            return FinancialIntent(
+                intent=IntentType.create_transaction,
+                transaction_type=TransactionTypeEnum.expense,
+                category_name="Mercado",
+            )
+
+    result = asyncio.run(
+        IntentClassifier(provider=Llm()).classify(
+            "quanto gastei com mercado?", CONTEXTO_CONSULTA
+        )
+    )
+    assert result.intent == IntentType.query_summary
+    assert result.category_name == "Mercado"
+
+
+def test_conta_a_pagar_sem_valor_e_sem_pergunta_nao_vira_consulta():
+    # Sem "?" nem abertura de pergunta, "a pagar" descreve a conta, não pergunta.
+    assert classify("conta de luz a pagar vence dia 20", CONTEXTO_CONSULTA).intent != (
+        IntentType.query_summary
+    )
+    assert classify("o que tenho a pagar", CONTEXTO_CONSULTA).intent == IntentType.query_summary
+
+
+def test_llm_sem_sinal_de_pergunta_continua_valendo():
+    from src.schemas.financial_intent import FinancialIntent
+
+    class Llm:
+        async def extract_intent(self, message, context):
+            return FinancialIntent(
+                intent=IntentType.create_transaction,
+                transaction_type=TransactionTypeEnum.expense,
+                description="saldo do cartão",
+            )
+
+    result = asyncio.run(
+        IntentClassifier(provider=Llm()).classify("paguei o saldo do cartão", CONTEXTO_CONSULTA)
+    )
+    assert result.intent == IntentType.create_transaction

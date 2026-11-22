@@ -418,3 +418,23 @@ def test_only_a_bare_help_request_is_a_command():
     assert mp.is_help_command("ajuda por favor.")
     assert not mp.is_help_command("ajuda com o cartão")
     assert not mp.is_help_command("gastei 50 de ajuda de custo")
+
+
+def test_help_lists_summary_only_with_the_flag_on(monkeypatch):
+    from src.services.feature_flags import feature_flags
+
+    assert "*Resumos*" not in mp.HELP_MESSAGE
+    assert "ver resumos" in mp.HELP_MESSAGE
+
+    async def ligada():
+        return {"whatsapp_summary": True}
+
+    monkeypatch.setattr(feature_flags, "enabled", ligada)
+    reply, _, _ = _run_help("ajuda")
+
+    assert "*Resumos*" in reply
+    assert "quanto gastei esse mês?" in reply
+    assert "ver resumos" not in reply
+    assert reply.endswith(
+        "Para corrigir ou excluir um lançamento ou transferir entre suas contas, use o app."
+    )

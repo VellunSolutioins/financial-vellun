@@ -47,6 +47,7 @@ from .confirmation_rules import (
 )
 from .contact_service import contact_service
 from .conversation_manager import ConversationState, conversation_manager
+from .feature_flags import feature_flags
 from .intent_classifier import intent_classifier
 from .messenger import messenger
 from .metrics import metrics
@@ -57,6 +58,7 @@ from .phone_verification import (
     phone_verification_service,
 )
 from .subscription_gate import subscription_gate
+from .summary_service import summary_service
 from .transaction_creator import transaction_creator
 from .usage_limiter import DAILY_LIMIT_MESSAGE, usage_limiter
 
@@ -66,7 +68,7 @@ NOT_LINKED_MESSAGE = (
     "Seu número ainda não está vinculado a uma conta. No app, abra Minha Conta, "
     "toque em \"Verificar WhatsApp\" e envie o código aqui."
 )
-HELP_MESSAGE = (
+_HELP_REGISTER = (
     "Oi! 👋 Eu registro seus lançamentos no Zeloo. É só me mandar uma mensagem "
     "do jeito que você falaria com alguém.\n\n"
     "*Gastos*\n"
@@ -84,11 +86,42 @@ HELP_MESSAGE = (
     "*Conta e data*\n"
     "• \"almoço 35 no Itaú dia 5\" — sem conta, uso a sua conta padrão; sem "
     "data, o dia de hoje.\n\n"
-    "Também entendo *áudio* 🎙️ e *foto de comprovante* 📸.\n\n"
-    "Se faltar alguma informação, eu pergunto antes de registrar. Para corrigir "
-    "ou excluir um lançamento, ver resumos ou transferir entre suas contas, use "
-    "o app."
 )
+_HELP_SUMMARY = (
+    "*Resumos*\n"
+    "• \"quanto gastei esse mês?\"\n"
+    "• \"quanto gastei com mercado?\"\n"
+    "• \"qual meu saldo?\"\n"
+    "• \"o que tenho pra pagar?\"\n\n"
+)
+_HELP_MEDIA = "Também entendo *áudio* 🎙️ e *foto de comprovante* 📸.\n\n"
+
+
+def build_help_message(features: dict[str, bool] | None = None) -> str:
+    """Ajuda com as ações ligadas no /ops (docs/plans/018).
+
+    Cada ação nova só aparece com a flag dela ligada; as que ainda não estão
+    disponíveis continuam na frase final, que manda para o app.
+    """
+    features = features or {}
+    sections = [_HELP_REGISTER]
+    in_app = ["corrigir ou excluir um lançamento"]
+    if features.get("whatsapp_summary"):
+        sections.append(_HELP_SUMMARY)
+    else:
+        in_app.append("ver resumos")
+    in_app.append("transferir entre suas contas")
+    sections.append(_HELP_MEDIA)
+    listed = ", ".join(in_app[:-1]) + " ou " + in_app[-1]
+    sections.append(
+        "Se faltar alguma informação, eu pergunto antes de registrar. "
+        f"Para {listed}, use o app."
+    )
+    return "".join(sections)
+
+
+#: Ajuda sem nenhuma ação nova ligada (o texto de antes das flags).
+HELP_MESSAGE = build_help_message()
 #: Mensagens que são só um pedido de ajuda: respondidas na hora, sem LLM e sem
 #: contar no limite diário. Frases mais longas ("como registro no cartão?")
 #: seguem pelo classificador, que também reconhece ``help``.
@@ -304,8 +337,9 @@ class MessageProcessor:
             metrics.incr("help_requested")
             state = await conversation_manager.get(phone)
             pending = state.awaiting_confirmation and state.belongs_to(contact)
+            help_text = build_help_message(await feature_flags.enabled())
             return await self._respond(
-                phone, response_prefix + HELP_MESSAGE + (PENDING_REMINDER if pending else "")
+                phone, response_prefix + help_text + (PENDING_REMINDER if pending else "")
             )
 
         # Depois do vínculo e da assinatura, antes de qualquer chamada paga. O
@@ -454,13 +488,12 @@ class MessageProcessor:
         reference = reference_date or today_local()
         # Intenções não-transacionais.
         if intent.intent == IntentType.help:
-            return await self._respond(phone, response_prefix + HELP_MESSAGE)
+            help_text = build_help_message(await feature_flags.enabled())
+            return await self._respond(phone, response_prefix + help_text)
         if intent.intent == IntentType.query_summary:
-            return await self._respond(
-                phone,
-                response_prefix
-                + "Consulta de resumo via WhatsApp ainda não está disponível. Veja no app.",
-            )
+            metrics.incr("intent_query_summary")
+            answer = await summary_service.answer(user_id, intent, reference)
+            return await self._respond(phone, response_prefix + answer)
         if intent.intent == IntentType.unsupported_movement:
             metrics.incr("intent_unsupported_movement")
             return await self._respond(phone, response_prefix + UNSUPPORTED_MOVEMENT_MESSAGE)

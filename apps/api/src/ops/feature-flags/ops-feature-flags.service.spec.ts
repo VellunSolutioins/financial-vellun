@@ -39,7 +39,7 @@ describe('OpsFeatureFlagsService', () => {
     const { service } = setup({ key: 'notes', enabled: false });
     const list = await service.list();
 
-    expect(list.map((flag) => flag.key)).toEqual(['agenda', 'notes']);
+    expect(list.map((flag) => flag.key)).toEqual(['agenda', 'notes', 'whatsapp_summary']);
     expect(list[0]).toMatchObject({
       key: 'agenda',
       enabled: true,

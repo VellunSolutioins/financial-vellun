@@ -10,6 +10,7 @@ from src.schemas.financial_intent import (
     AmountBasisEnum,
     RecurrenceFrequencyEnum,
     RecurrenceTypeEnum,
+    SummaryFocusEnum,
     TransactionTypeEnum,
 )
 from src.services import reply_parsers as p
@@ -211,3 +212,48 @@ def test_match_names_exato_antes_de_parcial_e_sem_acento():
     assert p.match_names("platinum", nomes) == [0]
     assert p.match_names("cartao nubank", nomes) == [2]
     assert p.match_names("a", nomes) == []
+
+# ── Consultas de resumo ──────────────────────────────────────────────────────
+HOJE_CONSULTA = date(2026, 11, 21)  # sábado
+
+
+@pytest.mark.parametrize(
+    ("texto", "esperado"),
+    [
+        ("quanto gastei mês passado", (date(2026, 10, 1), date(2026, 10, 31))),
+        ("gastos de outubro", (date(2026, 10, 1), date(2026, 10, 31))),
+        # Dezembro ainda não chegou: é o do ano passado.
+        ("e em dezembro?", (date(2025, 12, 1), date(2025, 12, 31))),
+        ("março de 2025", (date(2025, 3, 1), date(2025, 3, 31))),
+        ("essa semana", (date(2026, 11, 16), date(2026, 11, 22))),
+        ("semana passada", (date(2026, 11, 9), date(2026, 11, 15))),
+        ("nos últimos 7 dias", (date(2026, 11, 15), date(2026, 11, 21))),
+        ("hoje", (date(2026, 11, 21), date(2026, 11, 21))),
+        ("ontem", (date(2026, 11, 20), date(2026, 11, 20))),
+        ("mês que vem", (date(2026, 12, 1), date(2026, 12, 31))),
+        ("esse ano", (date(2026, 1, 1), date(2026, 12, 31))),
+        ("resumo", None),
+    ],
+)
+def test_parse_period(texto, esperado):
+    assert p.parse_period(texto, HOJE_CONSULTA) == esperado
+
+
+@pytest.mark.parametrize(
+    ("texto", "esperado"),
+    [
+        ("qual meu saldo?", SummaryFocusEnum.balance),
+        ("o que tenho pra pagar?", SummaryFocusEnum.upcoming),
+        ("o que vence essa semana", SummaryFocusEnum.upcoming),
+        ("quanto recebi", SummaryFocusEnum.income),
+        ("quanto gastei com mercado", SummaryFocusEnum.spending),
+        ("resumo do mês", SummaryFocusEnum.overview),
+    ],
+)
+def test_parse_summary_focus(texto, esperado):
+    assert p.parse_summary_focus(texto) == esperado
+
+
+def test_periodo_nao_conta_como_valor():
+    assert p.parse_amount(p.without_period("quanto gastei nos últimos 30 dias")) is None
+    assert p.parse_amount(p.without_period("gastos de outubro de 2025")) is None

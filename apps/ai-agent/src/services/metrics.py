@@ -84,6 +84,14 @@ KNOWN_COUNTERS = (
     # Mensagem sem intenção reconhecida nem valor ("oi")
     "intent_not_understood",
     "intent_unsupported_movement",
+    # Consulta de resumo (docs/plans/018, Fase 1): pedida, respondida, com a
+    # flag desligada ou com falha da API. `llm_rules_override_intent` é a
+    # pergunta que o LLM tomou por lançamento sem valor.
+    "intent_query_summary",
+    "summary_answered",
+    "summary_disabled",
+    "summary_failed",
+    "llm_rules_override_intent",
     "help_requested",
     "message_too_long",
     "subscription_blocked",

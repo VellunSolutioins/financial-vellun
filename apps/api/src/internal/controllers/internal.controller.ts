@@ -8,6 +8,7 @@ import { AiEventDto } from '../dto/ai-event.dto';
 import { ListMessagesQueryDto } from '../dto/list-messages.dto';
 import { ConfirmPhoneVerificationDto } from '../../whatsapp-link/dto/confirm-verification.dto';
 import { WhatsappLinkService } from '../../whatsapp-link/whatsapp-link.service';
+import { FeatureFlagsService } from '../../feature-flags/feature-flags.service';
 
 @SkipThrottle()
 @ApiExcludeController()
@@ -17,7 +18,17 @@ export class InternalController {
   constructor(
     private internalService: InternalService,
     private whatsappLink: WhatsappLinkService,
+    private featureFlags: FeatureFlagsService,
   ) {}
+
+  /**
+   * Estado das feature flags globais. O agente consulta para montar a ajuda
+   * só com as ações ligadas no /ops.
+   */
+  @Get('features')
+  features() {
+    return this.featureFlags.getAll();
+  }
 
   @Get('whatsapp/contacts/:phone')
   findContact(@Param('phone') phone: string) {

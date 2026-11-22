@@ -675,6 +675,33 @@ mais de 60 vezes deixam de ser adiados e caminham para a DLQ, por desenho
 
 ---
 
+## Ações do agente atrás de feature flag
+
+As ações além de criar lançamento ([ADR 0024](adrs/0024-agente-age-sobre-lancamentos-existentes.md))
+entram desligadas e são ligadas em `/ops/funcionalidades`:
+
+| Flag               | O que o agente passa a fazer                    |
+| ------------------ | ----------------------------------------------- |
+| `whatsapp_summary` | Resumo, saldo, "quanto gastei?", contas a pagar |
+
+Com a flag desligada, a rota interna responde `403 FEATURE_DISABLED` e o agente
+manda o usuário para o app. A ajuda ("ajuda", "menu") só mostra as ações ligadas.
+
+**"O resumo não responde" ou "a ajuda não mostra o resumo":**
+
+1. A flag está ligada em `/ops/funcionalidades`?
+2. Contadores no `/metrics` do worker:
+   - `summary_disabled` sobe: a flag está desligada.
+   - `summary_failed` sobe: a API falhou ou recusou. Procure `Falha ao buscar resumo` no log do
+     worker e o `GET /internal/users/<id>/summary` no log da API.
+   - `summary_answered` sobe: a resposta saiu. Se não chegou ao usuário, siga
+     [Webhook deu 202, mas o usuário não recebeu resposta](#webhook-deu-202-mas-o-usuário-não-recebeu-resposta).
+3. A ajuda lê as flags em `GET /internal/features`. Se a API não responder, a ajuda
+   sai sem as ações novas (estado seguro) e o log do worker mostra
+   `Não consegui consultar as feature flags`.
+
+---
+
 ## Deploy
 
 O shutdown é gracioso: o worker de agrupamento para, os consumers cancelam o

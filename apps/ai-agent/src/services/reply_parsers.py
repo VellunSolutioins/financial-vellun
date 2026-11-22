@@ -24,6 +24,7 @@ from ..schemas.financial_intent import (
     AmountBasisEnum,
     RecurrenceFrequencyEnum,
     RecurrenceTypeEnum,
+    SummaryFocusEnum,
     TransactionTypeEnum,
 )
 
@@ -346,3 +347,92 @@ def match_names(reply: str, names: list[str]) -> list[int]:
         for i, name in enumerate(normalized)
         if len(name) >= 3 and (target in name or name in target)
     ]
+
+
+# ── Consultas de resumo ──────────────────────────────────────────────────────
+_MONTHS = {
+    "janeiro": 1, "fevereiro": 2, "marco": 3, "abril": 4, "maio": 5, "junho": 6,
+    "julho": 7, "agosto": 8, "setembro": 9, "outubro": 10, "novembro": 11, "dezembro": 12,
+}
+_LAST_DAYS_RE = re.compile(r"\bultimos?\s+(\d{1,3})\s+dias\b")
+_YEAR_RE = re.compile(r"\b(20\d{2})\b")
+
+
+def month_bounds(year: int, month: int) -> tuple[date, date]:
+    """Primeiro e último dia do mês."""
+    return date(year, month, 1), date(year, month, calendar.monthrange(year, month)[1])
+
+
+def _shift_month(today: date, months: int) -> tuple[int, int]:
+    index = today.year * 12 + today.month - 1 + months
+    return index // 12, index % 12 + 1
+
+
+def parse_period(text: str, today: date) -> tuple[date, date] | None:
+    """Período de uma consulta ("quanto gastei mês passado?"), ou ``None``.
+
+    ``None`` é "não disse": quem chama usa o mês corrente. Mês sem ano
+    ("outubro") é o último que já começou: em novembro, outubro deste ano; em
+    fevereiro, outubro do ano passado.
+    """
+    normalized = normalize(text)
+    words = set(tokens(text))
+
+    if match := _LAST_DAYS_RE.search(normalized):
+        days = max(1, int(match[1]))
+        return today - timedelta(days=days - 1), today
+    if "semana passada" in normalized:
+        monday = today - timedelta(days=today.weekday() + 7)
+        return monday, monday + timedelta(days=6)
+    if "semana" in words:
+        monday = today - timedelta(days=today.weekday())
+        return monday, monday + timedelta(days=6)
+    if "mes passado" in normalized or "mes anterior" in normalized:
+        return month_bounds(*_shift_month(today, -1))
+    if "proximo mes" in normalized or "mes que vem" in normalized:
+        return month_bounds(*_shift_month(today, 1))
+    if "ontem" in words:
+        yesterday = today - timedelta(days=1)
+        return yesterday, yesterday
+    if "hoje" in words:
+        return today, today
+
+    for name, month in _MONTHS.items():
+        if name in words:
+            if year_match := _YEAR_RE.search(normalized):
+                year = int(year_match[1])
+            else:
+                year = today.year if month <= today.month else today.year - 1
+            return month_bounds(year, month)
+
+    if "ano" in words and ("passado" in words or "anterior" in words):
+        return date(today.year - 1, 1, 1), date(today.year - 1, 12, 31)
+    if "ano" in words:
+        return date(today.year, 1, 1), date(today.year, 12, 31)
+    return None
+
+
+_FOCUS_WORDS: tuple[tuple[SummaryFocusEnum, tuple[str, ...]], ...] = (
+    (SummaryFocusEnum.balance, ("saldo",)),
+    (
+        SummaryFocusEnum.upcoming,
+        ("pra pagar", "para pagar", "a pagar", "vence", "vencer", "vencendo", "boleto"),
+    ),
+    (SummaryFocusEnum.income, ("recebi", "receber", "receita", "entrou", "ganhei")),
+    (SummaryFocusEnum.spending, ("gastei", "gasto", "despesa", "gastando", "paguei")),
+)
+
+
+def without_period(text: str) -> str:
+    """O texto sem "últimos 30 dias" e anos: números que não são valor."""
+    normalized = normalize(text)
+    return _YEAR_RE.sub(" ", _LAST_DAYS_RE.sub(" ", normalized))
+
+
+def parse_summary_focus(text: str) -> SummaryFocusEnum:
+    """O que a consulta quer saber; sem sinal claro, o resumo geral."""
+    normalized = normalize(text)
+    for focus, words in _FOCUS_WORDS:
+        if any(word in normalized for word in words):
+            return focus
+    return SummaryFocusEnum.overview
