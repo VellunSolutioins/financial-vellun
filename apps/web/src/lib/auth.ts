@@ -23,6 +23,11 @@ export interface User extends Address {
   updatedAt: string;
 }
 
+/** Tela inicial do app para o perfil do usuário. */
+export function appHomePath(user: Pick<User, 'profileType'>): string {
+  return user.profileType === 'business' ? '/app/empresa/dashboard' : '/app/pessoal/dashboard';
+}
+
 export async function register(data: {
   name: string;
   email: string;

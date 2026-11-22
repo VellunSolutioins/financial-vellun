@@ -4,9 +4,10 @@ import { cn } from '@/lib/utils';
 import { Reveal } from './reveal';
 import { container } from './styles';
 
-export function FinalCta() {
+/** `v1`: azul sólido (servido em `/`); `v2`: azul com gradiente (servido em `/v2`). */
+export function FinalCta({ variant = 'v2' }: { variant?: 'v1' | 'v2' }) {
   return (
-    <section className="bg-primary">
+    <section className={variant === 'v1' ? 'bg-primary' : 'bg-glow-primary'}>
       <Reveal
         className={cn(
           container,

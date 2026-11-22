@@ -9,6 +9,8 @@ export const ZELOO_SLOGAN = 'Seu dinheiro merece cuidado.';
  * a largura acompanha a proporção.
  */
 const LOGO = { src: '/marca/zeloo-logo.svg', width: 1768, height: 477 };
+/** Versão branca do kit ("zeloo-branco-transparente"), para fundos escuros. */
+const LOGO_WHITE = { src: '/marca/zeloo-logo-branco.svg', width: 1768, height: 477 };
 const SYMBOL = { src: '/marca/zeloo-simbolo.svg', width: 512, height: 477 };
 const APP_ICON = { src: '/marca/zeloo-icone.svg', width: 512, height: 512 };
 
@@ -22,6 +24,29 @@ type LogoProps = {
 /** Símbolo e nome. Uso padrão, sempre que houver espaço. */
 export function ZelooLogo({ className, alt = 'Zeloo', priority }: LogoProps) {
   return <Image {...LOGO} alt={alt} priority={priority} className={cn('h-7 w-auto', className)} />;
+}
+
+/**
+ * Logo que acompanha o tema das páginas públicas: a versão de cor no claro e a
+ * branca no escuro. As duas vão no HTML e o CSS mostra uma, para não piscar.
+ */
+export function ZelooLogoThemed({ className, alt = 'Zeloo', priority }: LogoProps) {
+  return (
+    <>
+      <Image
+        {...LOGO}
+        alt={alt}
+        priority={priority}
+        className={cn('h-7 w-auto public-dark:hidden', className)}
+      />
+      <Image
+        {...LOGO_WHITE}
+        alt={alt}
+        priority={priority}
+        className={cn('hidden h-7 w-auto public-dark:block', className)}
+      />
+    </>
+  );
 }
 
 /** Só o "Z", para onde o logo completo não cabe (ex.: menu recolhido). */
