@@ -6,7 +6,12 @@
  * default) fica na API, e o mapa de rotas fica no web — ambos tipados por esta
  * união, então esquecer um dos lados não compila.
  */
-export type FeatureKey = 'agenda' | 'notes' | 'whatsapp_summary' | 'whatsapp_payments';
+export type FeatureKey =
+  | 'agenda'
+  | 'notes'
+  | 'whatsapp_summary'
+  | 'whatsapp_payments'
+  | 'whatsapp_edit';
 
 /** Estado de cada flag como o app recebe de `GET /features`. */
 export type FeatureFlags = Record<FeatureKey, boolean>;

@@ -81,6 +81,25 @@ def payments_off():
 
 
 @pytest.fixture(autouse=True)
+def edit_off():
+    """Corrigir e excluir desligados (``whatsapp_edit``), sem chamar a API.
+
+    Testes da Fase 3 trocam ``entry_editor._recent``. Sem ``monkeypatch``,
+    pelo mesmo motivo de ``no_feature_flags``.
+    """
+    from src.services import entry_editor as module
+
+    original = module._recent
+
+    async def _off(user_id):
+        raise module.FeatureDisabled
+
+    module._recent = _off
+    yield
+    module._recent = original
+
+
+@pytest.fixture(autouse=True)
 def isolated_state():
     """Zera todo estado global compartilhado entre testes."""
     # O `.env` do desenvolvedor pode trazer outros valores; o teste manda.

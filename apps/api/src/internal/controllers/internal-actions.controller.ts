@@ -1,4 +1,14 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
 import { SkipThrottle } from '@nestjs/throttler';
 import { RequireFeature } from '../../feature-flags/decorators/require-feature.decorator';
@@ -7,6 +17,7 @@ import { InternalApiKeyGuard } from '../guards/internal-api-key.guard';
 import { InternalActionsService } from '../internal-actions.service';
 import { SummaryQueryDto } from '../dto/summary-query.dto';
 import { OpenItemsQueryDto } from '../dto/open-items-query.dto';
+import { UpdateEntryDto } from '../dto/update-entry.dto';
 import { CreateSettlementDto } from '../../transactions/dto/create-settlement.dto';
 import { CreateCardPaymentDto } from '../../credit-cards/dto/create-card-payment.dto';
 
@@ -53,5 +64,33 @@ export class InternalActionsController {
     @Body() dto: CreateCardPaymentDto,
   ) {
     return this.actions.payInvoice(userId, cardId, invoiceId, dto);
+  }
+
+  @RequireFeature('whatsapp_edit')
+  @Get('recent-entries')
+  recentEntries(@Param('userId') userId: string) {
+    return this.actions.recentEntries(userId);
+  }
+
+  @RequireFeature('whatsapp_edit')
+  @Patch('transactions/:transactionId')
+  updateEntry(
+    @Param('userId') userId: string,
+    @Param('transactionId') transactionId: string,
+    @Body() dto: UpdateEntryDto,
+  ) {
+    return this.actions.updateEntry(userId, transactionId, dto);
+  }
+
+  @RequireFeature('whatsapp_edit')
+  @Delete('transactions/:transactionId')
+  removeEntry(@Param('userId') userId: string, @Param('transactionId') transactionId: string) {
+    return this.actions.removeEntry(userId, transactionId);
+  }
+
+  @RequireFeature('whatsapp_edit')
+  @Delete('installments/:seriesId')
+  removeInstallments(@Param('userId') userId: string, @Param('seriesId') seriesId: string) {
+    return this.actions.removeInstallments(userId, seriesId);
   }
 }

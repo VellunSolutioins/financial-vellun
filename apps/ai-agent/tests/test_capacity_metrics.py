@@ -62,6 +62,16 @@ class TestRotaAgregada:
             ),
             ("/internal/transactions/from-ai", "transactions_from_ai"),
             ("/internal/ai-events", "ai_events"),
+            ("/internal/users/2b1f8c4e/summary", "users_summary"),
+            ("/internal/users/2b1f8c4e/open-items", "users_open_items"),
+            ("/internal/users/2b1f8c4e/transactions/9a8b/settlements", "users_settlements"),
+            (
+                "/internal/users/2b1f8c4e/cards/c1/invoices/i1/payments",
+                "users_invoice_payments",
+            ),
+            ("/internal/users/2b1f8c4e/recent-entries", "users_recent_entries"),
+            ("/internal/users/2b1f8c4e/transactions/9a8b", "users_transaction"),
+            ("/internal/users/2b1f8c4e/installments/5e6f", "users_installments"),
         ],
     )
     def test_identificador_nunca_entra_no_nome(self, caminho, esperado):

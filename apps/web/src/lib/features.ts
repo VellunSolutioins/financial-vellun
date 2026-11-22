@@ -17,6 +17,7 @@ export const FEATURE_ROUTES: Record<FeatureKey, string[]> = {
   // Só liga uma ação do agente no WhatsApp: não esconde nenhuma tela do app.
   whatsapp_summary: [],
   whatsapp_payments: [],
+  whatsapp_edit: [],
 };
 
 /** Funcionalidade dona da rota, ou `null` para rotas essenciais (sempre disponíveis). */

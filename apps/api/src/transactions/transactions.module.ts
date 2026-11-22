@@ -28,6 +28,6 @@ import { ResourceScope } from '../common/resource-scope';
     SettlementsService,
     ResourceScope,
   ],
-  exports: [SettlementsService],
+  exports: [SettlementsService, TransactionsService, InstallmentsService],
 })
 export class TransactionsModule {}

@@ -8,6 +8,8 @@ class IntentType(str, Enum):
 
     create_transaction = "create_transaction"
     query_summary = "query_summary"
+    # Fase 3: corrigir ou excluir um lançamento já gravado — o último ou um
+    # dos últimos 30 dias (os nomes ficaram da época em que era só o último).
     correct_last = "correct_last"
     cancel_last = "cancel_last"
     help = "help"
@@ -69,6 +71,27 @@ class SummaryFocusEnum(str, Enum):
     upcoming = "upcoming"  # "o que tenho pra pagar", "o que vence"
 
 
+class TargetRef(BaseModel):
+    """Qual lançamento já gravado a mensagem quer corrigir ou excluir (Fase 3)."""
+
+    last: bool = Field(
+        default=False, description="true para 'o último' ou sem lançamento citado"
+    )
+    description: str | None = Field(default=None, description="nome do lançamento citado")
+    amount: float | None = Field(default=None, description="valor atual do lançamento, se citado")
+    date: str | None = Field(default=None, description="data atual do lançamento (YYYY-MM-DD)")
+
+
+class EntryChanges(BaseModel):
+    """O que muda no lançamento corrigido; nulo o que não muda (Fase 3)."""
+
+    amount: float | None = None
+    transaction_date: str | None = Field(default=None, description="nova data (YYYY-MM-DD)")
+    category_name: str | None = None
+    account_name: str | None = None
+    description: str | None = None
+
+
 class FinancialIntent(BaseModel):
     """Resultado estruturado da interpretação de uma mensagem (§9.3).
 
@@ -108,6 +131,13 @@ class FinancialIntent(BaseModel):
     )
     card_name: str | None = Field(
         default=None, description="No pay_invoice: o cartão da fatura, se citado"
+    )
+    # Corrigir e excluir (``correct_last``/``cancel_last``, Fase 3).
+    target: TargetRef | None = Field(
+        default=None, description="No correct_last/cancel_last: o lançamento a mexer"
+    )
+    changes: EntryChanges | None = Field(
+        default=None, description="No correct_last: o que muda"
     )
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     needs_confirmation: bool = False

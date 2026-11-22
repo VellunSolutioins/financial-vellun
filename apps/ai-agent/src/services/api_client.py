@@ -44,6 +44,21 @@ _ROTAS: tuple[tuple[re.Pattern[str], str], ...] = (
     ),
     (re.compile(r"^/internal/whatsapp/contacts/[^/]+$"), "whatsapp_contact"),
     (re.compile(r"^/internal/whatsapp/verify$"), "whatsapp_verify"),
+    # Ações do agente (docs/plans/018).
+    (re.compile(r"^/internal/users/[^/]+/summary$"), "users_summary"),
+    (re.compile(r"^/internal/users/[^/]+/open-items$"), "users_open_items"),
+    (
+        re.compile(r"^/internal/users/[^/]+/transactions/[^/]+/settlements$"),
+        "users_settlements",
+    ),
+    (
+        re.compile(r"^/internal/users/[^/]+/cards/[^/]+/invoices/[^/]+/payments$"),
+        "users_invoice_payments",
+    ),
+    (re.compile(r"^/internal/users/[^/]+/recent-entries$"), "users_recent_entries"),
+    (re.compile(r"^/internal/users/[^/]+/transactions/[^/]+$"), "users_transaction"),
+    (re.compile(r"^/internal/users/[^/]+/installments/[^/]+$"), "users_installments"),
+    (re.compile(r"^/internal/features$"), "features"),
     (re.compile(r"^/internal/transactions/from-ai$"), "transactions_from_ai"),
     (re.compile(r"^/internal/ai-events$"), "ai_events"),
     (re.compile(r"^/internal/ops/failed-messages$"), "ops_failed_messages"),
@@ -101,6 +116,14 @@ class ApiClient:
     async def post(self, path: str, **kwargs) -> httpx.Response:
         kwargs["headers"] = self._headers(kwargs.get("headers"))
         return await self._timed(self._ensure().post, path, **kwargs)
+
+    async def patch(self, path: str, **kwargs) -> httpx.Response:
+        kwargs["headers"] = self._headers(kwargs.get("headers"))
+        return await self._timed(self._ensure().patch, path, **kwargs)
+
+    async def delete(self, path: str, **kwargs) -> httpx.Response:
+        kwargs["headers"] = self._headers(kwargs.get("headers"))
+        return await self._timed(self._ensure().delete, path, **kwargs)
 
     async def _timed(self, metodo, path: str, **kwargs) -> httpx.Response:
         """Cronometra a chamada, inclusive quando ela levanta.

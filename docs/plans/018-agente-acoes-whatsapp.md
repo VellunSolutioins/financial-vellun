@@ -166,6 +166,15 @@ As decisões estão registradas na [ADR 0024](../adrs/0024-agente-age-sobre-lanc
 
 **Flag:** `whatsapp_edit`.
 
+**O que mudou na implementação:**
+
+- **Busca:** em vez de `transactions/search?q&last`, a rota é `GET internal/users/:userId/recent-entries`. Ela devolve todos os lançamentos dos últimos 30 dias (pela data ou pela criação), uma linha por série, e o agente filtra. O filtro do agente ignora acento e usa as mesmas regras de nome da Fase 2; o `contains` do banco diferencia acento. O "último pelo WhatsApp" sai da mesma lista (`source`, `createdAt`).
+- **Gasto pago à vista:** "errei, foi 45" logo depois de lançar esbarrava na trava "o valor não pode ficar abaixo do que já foi pago". A rota do agente passa `keepPaidInFull` ao `TransactionsService.update`. Num avulso pago por inteiro num pagamento só, na própria conta, o pagamento acompanha o valor, a conta e a data novos, no mesmo commit. O app continua com a trava.
+- **Parcela:** editar compra parcelada pelo WhatsApp é recusado antes de chegar à API ("Compra parcelada se altera no app, em Parcelamentos"). Excluir continua levando a compra inteira.
+- **Sem mudança dita** ("corrige o mercado"): o agente pergunta o que mudar e entende valor, data, categoria ou conta na resposta, pelas regras, sem LLM.
+- **"O último":** o LLM marca `last` até quando um nome é citado. Por isso nome, valor ou data ditos valem mais que `last`.
+- **Datas:** a regra de conferência tira as datas que o LLM preenche sozinho com o dia de hoje. Também separa a data que aponta o lançamento ("o mercado de ontem") da data nova ("foi dia 20").
+
 ---
 
 ## Arquivos principais

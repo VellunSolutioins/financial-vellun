@@ -155,6 +155,25 @@ async def _post(path: str, body: dict) -> dict:
     raise TransientError(f"ação respondeu {response.status_code}")
 
 
+async def unparsed_reply(
+    phone: str, contact: dict | None, state, action: dict, reply: str, retry: str
+) -> ActionOutcome:
+    """Resposta que não responde à pergunta de uma ação pendente: mensagem
+    nova (frase longa), nova tentativa ou desistência."""
+    if len(parsers.tokens(reply)) >= 3:
+        # "gastei 30 no uber" no meio da pergunta: é outra coisa.
+        await conversation_manager.clear(phone)
+        metrics.incr("action_replaced_by_new_message")
+        return ActionOutcome(new_message=True)
+    attempts = state.attempts + 1
+    if attempts > MAX_REPLY_ATTEMPTS:
+        await conversation_manager.clear(phone)
+        metrics.incr("action_abandoned")
+        return ActionOutcome(text=GAVE_UP)
+    await conversation_manager.set_action(phone, action, contact, attempts=attempts)
+    return ActionOutcome(text=f"Não entendi. {retry}")
+
+
 # ── Textos ───────────────────────────────────────────────────────────────────
 def _day(iso: str | None) -> str:
     try:
@@ -519,19 +538,7 @@ class ActionProcessor:
     async def _unparsed(
         self, phone: str, contact: dict | None, state, action: dict, reply: str, retry: str
     ) -> ActionOutcome:
-        """Resposta que não responde: mensagem nova, nova tentativa ou desistência."""
-        if len(parsers.tokens(reply)) >= 3:
-            # "gastei 30 no uber" no meio da pergunta: é outra coisa.
-            await conversation_manager.clear(phone)
-            metrics.incr("action_replaced_by_new_message")
-            return ActionOutcome(new_message=True)
-        attempts = state.attempts + 1
-        if attempts > MAX_REPLY_ATTEMPTS:
-            await conversation_manager.clear(phone)
-            metrics.incr("action_abandoned")
-            return ActionOutcome(text=GAVE_UP)
-        await conversation_manager.set_action(phone, action, contact, attempts=attempts)
-        return ActionOutcome(text=f"Não entendi. {retry}")
+        return await unparsed_reply(phone, contact, state, action, reply, retry)
 
     # ── Confirmação e execução ──────────────────────────────────────────────
     async def _ask_confirm(
