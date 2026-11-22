@@ -37,6 +37,12 @@ export const FEATURE_CATALOG = {
     description: 'O agente responde resumo, saldo e "quanto gastei?" pelo WhatsApp.',
     defaultEnabled: false,
   },
+  whatsapp_payments: {
+    label: 'Baixa e fatura pelo WhatsApp',
+    description:
+      'O agente marca contas em aberto como pagas ou recebidas e registra o pagamento da fatura.',
+    defaultEnabled: false,
+  },
 } as const satisfies Record<FeatureKey, FeatureDefinition>;
 
 export const FEATURE_KEYS = Object.keys(FEATURE_CATALOG) as FeatureKey[];

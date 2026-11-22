@@ -714,9 +714,10 @@ digitar.
 As ações além de criar lançamento ([ADR 0024](adrs/0024-agente-age-sobre-lancamentos-existentes.md))
 entram desligadas e são ligadas em `/ops/funcionalidades`:
 
-| Flag               | O que o agente passa a fazer                    |
-| ------------------ | ----------------------------------------------- |
-| `whatsapp_summary` | Resumo, saldo, "quanto gastei?", contas a pagar |
+| Flag                | O que o agente passa a fazer                                   |
+| ------------------- | -------------------------------------------------------------- |
+| `whatsapp_summary`  | Resumo, saldo, "quanto gastei?", contas a pagar                |
+| `whatsapp_payments` | Dar baixa em conta ou receita em aberto e pagar fatura         |
 
 Com a flag desligada, a rota interna responde `403 FEATURE_DISABLED` e o agente
 manda o usuário para o app. A ajuda ("ajuda", "menu") só mostra as ações ligadas.
@@ -733,6 +734,22 @@ manda o usuário para o app. A ajuda ("ajuda", "menu") só mostra as ações lig
 3. A ajuda lê as flags em `GET /internal/features`. Se a API não responder, a ajuda
    sai sem as ações novas (estado seguro) e o log do worker mostra
    `Não consegui consultar as feature flags`.
+
+**Baixa e fatura (`whatsapp_payments`).** Toda baixa ou pagamento de fatura mostra o
+que vai acontecer e só executa com "sim". O `jobId` da mensagem do "sim" é a chave de
+idempotência: um retry do job não paga duas vezes.
+
+- Com a flag desligada, "marca a luz como paga" vira lançamento novo (como antes) e
+  "paguei a fatura" responde para usar o app. `action_disabled` sobe.
+- `action_refused` sobe quando a API recusa (valor acima do que falta, lançamento já
+  pago, fatura que ainda não começou). A mensagem da API vai para o usuário.
+- `action_api_failed` sobe quando a busca do que está em aberto falha. Procure
+  `Falha ao buscar itens em aberto` ou `Falha ao buscar faturas em aberto` no log.
+- Queda da API no "sim" levanta erro transitório: o job é retentado com o mesmo
+  `jobId`, e a pergunta continua pendente.
+- `open_item_offered` conta a pergunta "É o pagamento dela?", feita antes de criar
+  um gasto que parece quitar algo em aberto (mesmo valor, nome parecido, vencimento
+  a até 7 dias). `open_item_offer_declined` conta os "não", que criam o gasto.
 
 ---
 

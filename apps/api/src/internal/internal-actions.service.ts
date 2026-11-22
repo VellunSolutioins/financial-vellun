@@ -2,10 +2,20 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { SubscriptionAccessService } from '../billing/services/subscription-access.service';
 import { SubscriptionRequiredException } from '../billing/subscription-required.exception';
-import { dateOnlyString, todaySaoPaulo } from '../common/date.util';
+import { addDaysSaoPaulo, dateOnlyString, todaySaoPaulo } from '../common/date.util';
 import { DashboardService, periodBounds } from '../dashboard/dashboard.service';
+import { CardPaymentsService } from '../credit-cards/card-payments.service';
+import { CreateCardPaymentDto } from '../credit-cards/dto/create-card-payment.dto';
+import { SettlementsService } from '../transactions/settlements.service';
+import { CreateSettlementDto } from '../transactions/dto/create-settlement.dto';
+import { OpenItemsQueryDto } from './dto/open-items-query.dto';
 import { SummaryQueryDto } from './dto/summary-query.dto';
 import { fromBusinessSummary, fromPersonalSummary, WhatsappSummary } from './whatsapp-summary';
+
+/** Até quantos dias à frente uma conta em aberto entra na busca de baixa. */
+const OPEN_ITEMS_HORIZON_DAYS = 45;
+
+const day = (date: Date) => date.toISOString().slice(0, 10);
 
 /**
  * Ações do agente de WhatsApp sobre os dados do usuário (docs/plans/018).
@@ -20,6 +30,8 @@ export class InternalActionsService {
     private prisma: PrismaService,
     private subscriptionAccess: SubscriptionAccessService,
     private dashboard: DashboardService,
+    private settlements: SettlementsService,
+    private cardPayments: CardPaymentsService,
   ) {}
 
   /** Usuário existente e com direito de uso, como em `InternalService`. */
@@ -61,5 +73,58 @@ export class InternalActionsService {
       this.dashboard.upcomingReceivables(userId),
     ]);
     return fromPersonalSummary(summary, receivables, dateOnlyString(todaySaoPaulo()));
+  }
+
+  /**
+   * O que pode receber baixa pelo WhatsApp (Fase 2): lançamentos em aberto do
+   * tipo pedido, vencidos ou a vencer em até 45 dias, e — para despesas — as
+   * faturas com saldo. Uma ocorrência por série, como em "Contas a pagar".
+   */
+  async openItems(userId: string, query: OpenItemsQueryDto) {
+    await this.userFor(userId);
+    const horizon = dateOnlyString(addDaysSaoPaulo(todaySaoPaulo(), OPEN_ITEMS_HORIZON_DAYS));
+    const { entries, invoices } = await this.dashboard.openItems(userId, query.type);
+    const fallback = query.type === 'income' ? 'Receita' : 'Conta';
+    return {
+      entries: entries
+        .filter((entry) => day(entry.transactionDate) <= horizon)
+        .map((entry) => ({
+          id: entry.id,
+          description: entry.description || entry.category?.name || fallback,
+          categoryName: entry.category?.name ?? null,
+          /** O que falta pagar ou receber. */
+          remaining: entry.remaining,
+          dueDate: day(entry.transactionDate),
+          isOverdue: entry.isOverdue,
+          accountId: entry.accountId,
+          accountName: entry.account?.name ?? null,
+          /** No fixo, a baixa aceita valor maior que o previsto (é o valor real). */
+          recurrenceType: entry.recurrenceType ?? null,
+        })),
+      // Só faturas já gravadas: o pagamento precisa do id da fatura.
+      invoices: invoices
+        .filter((invoice) => invoice.invoiceId)
+        .map((invoice) => ({
+          invoiceId: invoice.invoiceId!,
+          cardId: invoice.cardId,
+          cardName: invoice.cardName,
+          remaining: invoice.remaining,
+          dueDate: day(invoice.transactionDate),
+          isOverdue: invoice.isOverdue,
+          state: invoice.invoiceState,
+        })),
+    };
+  }
+
+  /** Paga ou recebe (total ou parcial) um lançamento em aberto. Idempotente pela chave. */
+  async settle(userId: string, transactionId: string, dto: CreateSettlementDto) {
+    await this.userFor(userId);
+    return this.settlements.settle(userId, transactionId, dto);
+  }
+
+  /** Registra o pagamento de uma fatura. Idempotente pela chave. */
+  async payInvoice(userId: string, cardId: string, invoiceId: string, dto: CreateCardPaymentDto) {
+    await this.userFor(userId);
+    return this.cardPayments.pay(userId, cardId, invoiceId, dto);
   }
 }

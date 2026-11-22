@@ -23,6 +23,7 @@ import {
   dateOnlyString,
   compareCalendarDays,
   calendarDayFromUtcDate,
+  type CalendarDay,
 } from '../common/date.util';
 import { cents } from '../common/db';
 import { CardLedgerService, toDbDate } from '../credit-cards/card-ledger.service';
@@ -261,10 +262,23 @@ export class DashboardService {
     scoped: ScopedAccountIds,
     cards: Awaited<ReturnType<DashboardService['cardsPosition']>>,
   ) {
-    const today = todaySaoPaulo();
     const transactionItems = await this.openEntries(userId, scoped, 'expense');
+    const invoiceItems = this.invoiceItems(cards, todaySaoPaulo());
 
-    const invoiceItems = (cards?.positions ?? []).flatMap(({ card, position }) =>
+    return [...transactionItems, ...invoiceItems]
+      .sort((a, b) => a.transactionDate.getTime() - b.transactionDate.getTime())
+      .slice(0, UPCOMING_BILLS_LIMIT);
+  }
+
+  /**
+   * Faturas com restante **conciliado** (depois de pagamentos e créditos de
+   * outras faturas): a aberta hoje e as fechadas. Faturas futuras ficam de fora.
+   */
+  private invoiceItems(
+    cards: Awaited<ReturnType<DashboardService['cardsPosition']>>,
+    today: CalendarDay,
+  ) {
+    return (cards?.positions ?? []).flatMap(({ card, position }) =>
       position.reconciliation.invoices
         .filter(
           (row) =>
@@ -274,7 +288,10 @@ export class DashboardService {
         .map((row) => ({
           kind: 'invoice' as const,
           id: row.invoice.span.id ?? row.invoice.span.referenceMonth,
+          /** Id da fatura gravada; nulo se o ciclo ainda não tem fatura no banco. */
+          invoiceId: row.invoice.span.id ?? null,
           cardId: card.id,
+          cardName: card.account.name,
           description: `Fatura ${card.account.name}`,
           amount: row.remainingCents / 100,
           remaining: row.remainingCents / 100,
@@ -285,10 +302,20 @@ export class DashboardService {
           category: null,
         })),
     );
+  }
 
-    return [...transactionItems, ...invoiceItems]
-      .sort((a, b) => a.transactionDate.getTime() - b.transactionDate.getTime())
-      .slice(0, UPCOMING_BILLS_LIMIT);
+  /**
+   * O que está em aberto para o agente de WhatsApp dar baixa (docs/plans/018,
+   * Fase 2): lançamentos do tipo pedido e, para despesas, as faturas com saldo.
+   * Mesmas regras de "Próximas contas a pagar", sem o limite de cinco itens.
+   */
+  async openItems(userId: string, type: 'income' | 'expense') {
+    const entries = await this.openEntries(userId, null, type);
+    const invoices =
+      type === 'expense'
+        ? this.invoiceItems(await this.cardsPosition(userId, null), todaySaoPaulo())
+        : [];
+    return { entries, invoices };
   }
 
   /**

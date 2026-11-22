@@ -44,6 +44,15 @@ INCOME_KEYWORDS = (
     "recebi", "ganhei", "recebimento", "entrou", "receita", "caiu", "vendi", "venda",
     "receber",
 )
+#: Dar baixa em algo já lançado ("marca a luz como paga", "já paguei o aluguel").
+#: Comparados sem acento. "Paguei a luz", sem estes sinais, segue como
+#: lançamento: a oferta de baixa antes de criar cobre o caso.
+SETTLE_KEYWORDS = (
+    "como pago", "como paga", "como recebid", "dar baixa", "dei baixa", "da baixa",
+    "ja paguei", "ja recebi", "ja foi pag", "quitei",
+)
+#: Com "fatura" na frase, indicam o pagamento dela.
+INVOICE_PAYMENT_WORDS = ("paguei", "pagar", "pago", "pagamento", "quitei", "quitar")
 #: Conta a pagar ("boleto de 300 vence sexta"): despesa, sem verbo de gasto.
 #: A receita é conferida antes: "vou receber 800, vence dia 10" é receita.
 BILL_KEYWORDS = ("boleto", "vence", "vencimento", "pagar")
@@ -191,6 +200,15 @@ class IntentClassifier:
                         intent.intent,
                     )
                     return self._classify_with_rules(message, context)
+                if (
+                    intent.intent == IntentType.create_transaction
+                    and self._is_invoice_payment(message.lower())
+                ):
+                    # Pagar a fatura não é gasto: lançado como despesa, contaria
+                    # a compra duas vezes (no cartão e no pagamento).
+                    logger.info("LLM tomou pagamento de fatura por lançamento; usando regras")
+                    metrics.incr("llm_rules_override_intent")
+                    return self._classify_with_rules(message, context)
                 if self._should_prefer_rule_query(message, intent):
                     logger.info("LLM pediu valor de uma pergunta; tratando como consulta")
                     metrics.incr("llm_rules_override_intent")
@@ -233,6 +251,25 @@ class IntentClassifier:
 
         if self._has_any(text, HELP_KEYWORDS):
             return FinancialIntent(intent=IntentType.help, confidence=0.9)
+        if self._is_invoice_payment(text):
+            return FinancialIntent(
+                intent=IntentType.pay_invoice,
+                amount=self._extract_amount(text),
+                transaction_date=self._said_date(text, context),
+                confidence=0.8,
+            )
+        if self._has_any(normalize(text), SETTLE_KEYWORDS):
+            income = "receb" in normalize(text)
+            tx_type = TransactionTypeEnum.income if income else TransactionTypeEnum.expense
+            return FinancialIntent(
+                intent=IntentType.settle_bill,
+                transaction_type=tx_type,
+                amount=self._extract_amount(text),
+                description=message.strip(),
+                category_name=self._detect_category(text, context, tx_type),
+                transaction_date=self._said_date(text, context),
+                confidence=0.8,
+            )
         if self._has_any(text, CANCEL_KEYWORDS):
             return FinancialIntent(intent=IntentType.cancel_last, confidence=0.85)
         if self._has_any(text, CORRECT_KEYWORDS):
@@ -272,6 +309,20 @@ class IntentClassifier:
 
         intent.confidence = self._estimate_confidence(intent)
         return self._finalize(intent)
+
+    @staticmethod
+    def _is_invoice_payment(text: str) -> bool:
+        """"Paguei a fatura do Nubank": pagamento da fatura, não um gasto."""
+        normalized = normalize(text)
+        return "fatura" in normalized and any(
+            word in normalized for word in INVOICE_PAYMENT_WORDS
+        )
+
+    @staticmethod
+    def _said_date(text: str, context: dict) -> str | None:
+        """A data dita na mensagem, ou ``None`` (quem usa decide o padrão)."""
+        said = parse_date(text, _reference_date(context))
+        return said.isoformat() if said else None
 
     def _is_query(self, text: str) -> bool:
         """Pergunta sobre os próprios números ("quanto gastei com mercado?").
@@ -395,6 +446,13 @@ class IntentClassifier:
         (parcela) e gravou o dobro. Onde a frase tem sinal inequívoco — "em
         2x", "V em Nx", "Nx de V" —, vale a regra; sem sinal, fica o LLM.
         """
+        if intent.intent in (IntentType.settle_bill, IntentType.pay_invoice):
+            # O LLM preenchia a conta mais óbvia ("Itaú") em "paguei a fatura do
+            # Nubank": o pagamento sairia dela sem perguntar.
+            self._drop_unmentioned_account(message, intent)
+            if intent.card_name and not self._mentions(message, intent.card_name):
+                self._override(intent, "card_name", None)
+            return intent
         if intent.intent != IntentType.create_transaction:
             return intent
 
@@ -445,7 +503,7 @@ class IntentClassifier:
         nome da conta mais óbvia) para "compra de capa do celular no valor de
         38,60". Isso passava por cima do cartão que o usuário marcou como
         padrão. Sem sinal no texto, os campos são anulados e quem decide é
-        ``transaction_creator._resolve_account``: o padrão do usuário.
+        ``transaction_creator.resolve_account``: o padrão do usuário.
         """
         text = normalize(message)
         words = set(tokens(message))
@@ -478,6 +536,13 @@ class IntentClassifier:
             and not CARD_HINT_RE.search(text)
         ):
             self._override(intent, "account_kind", None)
+
+    @staticmethod
+    def _mentions(message: str, name: str) -> bool:
+        """A mensagem cita o nome (alguma palavra que o distingue)."""
+        words = set(tokens(message))
+        name_words = [w for w in tokens(name) if w not in GENERIC_ACCOUNT_WORDS]
+        return any(w in words for w in name_words)
 
     @staticmethod
     def _override(intent: FinancialIntent, field: str, value: object) -> None:

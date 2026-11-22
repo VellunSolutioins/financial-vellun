@@ -12,7 +12,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AccountsService } from '../accounts/accounts.service';
 import { TransactionsService } from '../transactions/transactions.service';
 import { DashboardService } from '../dashboard/dashboard.service';
-import { addDaysSaoPaulo, dateOnlyString, todaySaoPaulo } from '../common/date.util';
+import { CreditCardsService } from '../credit-cards/credit-cards.service';
+import { addDaysSaoPaulo, dateOnlyString, parseDateOnly, todaySaoPaulo } from '../common/date.util';
 import { InternalModule } from './internal.module';
 
 const databaseUrl = process.env.SELECTED_FEATURES_TEST_DATABASE_URL;
@@ -43,6 +44,20 @@ integration('ações internas do agente (PostgreSQL)', () => {
       create: { key: 'whatsapp_summary', enabled },
       update: { enabled },
     });
+
+  const setPaymentsFlag = (enabled: boolean) =>
+    prisma.featureFlag.upsert({
+      where: { key: 'whatsapp_payments' },
+      create: { key: 'whatsapp_payments', enabled },
+      update: { enabled },
+    });
+
+  const api = () => request(app.getHttpServer());
+  const openItems = (userId: string, type: 'expense' | 'income') =>
+    api()
+      .get(`/internal/users/${userId}/open-items`)
+      .query({ type })
+      .set('x-internal-api-key', internalKey);
 
   const summary = (userId: string, query: Record<string, string> = {}) =>
     request(app.getHttpServer())
@@ -107,7 +122,9 @@ integration('ações internas do agente (PostgreSQL)', () => {
       else process.env[name] = value;
     }
     if (!prisma) return;
-    await prisma.featureFlag.deleteMany({ where: { key: 'whatsapp_summary' } });
+    await prisma.featureFlag.deleteMany({
+      where: { key: { in: ['whatsapp_summary', 'whatsapp_payments'] } },
+    });
     await prisma.user.deleteMany({ where: { id: { in: userIds } } });
     await app?.close();
     await prisma.$disconnect();
@@ -202,5 +219,150 @@ integration('ações internas do agente (PostgreSQL)', () => {
   it('usuário inexistente é 404', async () => {
     await setFlag(true);
     await summary(randomUUID()).expect(404);
+  });
+
+  // ── Fase 2: baixa e fatura ─────────────────────────────────────────────────
+  async function personalWithAccount() {
+    const userId = await createUser('individual');
+    const accounts = new AccountsService(prisma);
+    const transactions = new TransactionsService(prisma, accounts);
+    const checking = (
+      await accounts.create(userId, { name: 'Itaú', type: 'checking', initialBalance: 1000 })
+    ).id;
+    const create = (
+      type: 'income' | 'expense',
+      amount: number,
+      date: string,
+      description: string,
+    ) =>
+      transactions.create(userId, {
+        accountId: checking,
+        type,
+        amount,
+        description,
+        transactionDate: date,
+      } as any);
+    return { userId, transactions, checking, create };
+  }
+
+  it('baixa e fatura respondem FEATURE_DISABLED com a flag desligada', async () => {
+    const userId = await createUser('individual');
+    await setPaymentsFlag(false);
+
+    const response = await openItems(userId, 'expense').expect(403);
+    expect(response.body.code).toBe('FEATURE_DISABLED');
+  });
+
+  it('lista o que está em aberto do tipo pedido, até 45 dias à frente', async () => {
+    const { userId, create } = await personalWithAccount();
+    await setPaymentsFlag(true);
+    const luz = await create('expense', 120, inDays(3), 'Luz');
+    await create('expense', 50, inDays(60), 'Longe demais');
+    const salario = await create('income', 3000, inDays(5), 'Salário');
+
+    const despesas = (await openItems(userId, 'expense').expect(200)).body;
+    expect(despesas.entries).toEqual([
+      expect.objectContaining({
+        id: luz.id,
+        description: 'Luz',
+        remaining: 120,
+        dueDate: inDays(3),
+        isOverdue: false,
+        accountName: 'Itaú',
+      }),
+    ]);
+    expect(despesas.invoices).toEqual([]);
+
+    const receitas = (await openItems(userId, 'income').expect(200)).body;
+    expect(receitas.entries.map((e: any) => e.id)).toEqual([salario.id]);
+  });
+
+  it('baixa parcial e total, idempotente pela chave', async () => {
+    const { userId, create, checking } = await personalWithAccount();
+    await setPaymentsFlag(true);
+    const luz = await create('expense', 120, inDays(2), 'Luz');
+    const settle = (amount: number | undefined, idempotencyKey: string) =>
+      api()
+        .post(`/internal/users/${userId}/transactions/${luz.id}/settlements`)
+        .set('x-internal-api-key', internalKey)
+        .send({ ...(amount ? { amount } : {}), date: inDays(0), idempotencyKey });
+
+    const key = `job-${randomUUID()}`;
+    await settle(50, key).expect(201);
+    // O mesmo job reprocessado não paga de novo.
+    await settle(50, key).expect(201);
+    let open = (await openItems(userId, 'expense').expect(200)).body.entries;
+    expect(open).toEqual([expect.objectContaining({ id: luz.id, remaining: 70 })]);
+
+    // Sem valor, quita o restante.
+    await settle(undefined, `job-${randomUUID()}`).expect(201);
+    open = (await openItems(userId, 'expense').expect(200)).body.entries;
+    expect(open).toEqual([]);
+
+    const account = await prisma.account.findUniqueOrThrow({ where: { id: checking } });
+    expect(Number(account.currentBalance)).toBe(880);
+  });
+
+  it('valor acima do restante é recusado com a mensagem da API', async () => {
+    const { userId, create } = await personalWithAccount();
+    await setPaymentsFlag(true);
+    const luz = await create('expense', 120, inDays(2), 'Luz');
+
+    const response = await api()
+      .post(`/internal/users/${userId}/transactions/${luz.id}/settlements`)
+      .set('x-internal-api-key', internalKey)
+      .send({ amount: 500, date: inDays(0), idempotencyKey: `job-${randomUUID()}` })
+      .expect(400);
+    expect(response.body.message).toContain('passa do que falta');
+  });
+
+  it('não baixa lançamento de outro usuário', async () => {
+    const { create } = await personalWithAccount();
+    const other = await createUser('individual');
+    await setPaymentsFlag(true);
+    const luz = await create('expense', 120, inDays(2), 'Luz');
+
+    await api()
+      .post(`/internal/users/${other}/transactions/${luz.id}/settlements`)
+      .set('x-internal-api-key', internalKey)
+      .send({ date: inDays(0), idempotencyKey: `job-${randomUUID()}` })
+      .expect(404);
+  });
+
+  it('lista a fatura com saldo e registra o pagamento', async () => {
+    const { userId, transactions, checking } = await personalWithAccount();
+    await setPaymentsFlag(true);
+    const cards = new CreditCardsService(prisma);
+    const card = await cards.create(userId, { name: 'Nubank', closingDay: 10, dueDay: 17 });
+    await prisma.creditCard.update({
+      where: { id: card.id },
+      data: { invoiceTrackingStart: parseDateOnly('2026-01-01') },
+    });
+    await transactions.create(userId, {
+      accountId: card.accountId,
+      type: 'expense',
+      amount: 300,
+      description: 'Mercado',
+      transactionDate: inDays(0),
+    } as any);
+
+    const { invoices } = (await openItems(userId, 'expense').expect(200)).body;
+    expect(invoices).toEqual([
+      expect.objectContaining({ cardId: card.id, cardName: 'Nubank', remaining: 300 }),
+    ]);
+
+    await api()
+      .post(`/internal/users/${userId}/cards/${card.id}/invoices/${invoices[0].invoiceId}/payments`)
+      .set('x-internal-api-key', internalKey)
+      .send({
+        sourceAccountId: checking,
+        amount: 100,
+        paymentDate: inDays(0),
+        idempotencyKey: `job-${randomUUID()}`,
+      })
+      .expect(201);
+
+    const after = (await openItems(userId, 'expense').expect(200)).body.invoices;
+    expect(after).toEqual([expect.objectContaining({ remaining: 200 })]);
   });
 });

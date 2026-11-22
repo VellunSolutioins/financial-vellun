@@ -22,6 +22,7 @@ from ..schemas.financial_intent import (
     RecurrenceTypeEnum,
 )
 from . import reply_parsers as parsers
+from .action_processor import action_processor
 from .audit_service import audit_service
 from .clock import local_date, today_local
 from .confirmation_rules import (
@@ -94,6 +95,12 @@ _HELP_SUMMARY = (
     "• \"qual meu saldo?\"\n"
     "• \"o que tenho pra pagar?\"\n\n"
 )
+_HELP_PAYMENTS = (
+    "*Contas em aberto e fatura*\n"
+    "• \"paguei a conta de luz\"\n"
+    "• \"recebi do cliente João\"\n"
+    "• \"paguei a fatura do Nubank\"\n\n"
+)
 _HELP_MEDIA = "Também entendo *áudio* 🎙️ e *foto de comprovante* 📸.\n\n"
 
 
@@ -110,6 +117,8 @@ def build_help_message(features: dict[str, bool] | None = None) -> str:
         sections.append(_HELP_SUMMARY)
     else:
         in_app.append("ver resumos")
+    if features.get("whatsapp_payments"):
+        sections.append(_HELP_PAYMENTS)
     in_app.append("transferir entre suas contas")
     sections.append(_HELP_MEDIA)
     listed = ", ".join(in_app[:-1]) + " ou " + in_app[-1]
@@ -165,6 +174,8 @@ UNSUPPORTED_MOVEMENT_MESSAGE = (
     "despesa, então não registro pelo WhatsApp. No app, use Lançamentos › Transferir. "
     "Juros e tarifas você pode mandar aqui como gasto."
 )
+#: Mensagem nova no meio de uma baixa ou fatura pendente.
+DISCARDED_ACTION_NOTICE = "Deixei de lado o que estava esperando sua resposta.\n"
 NO_PENDING_MESSAGE = (
     "Não há lançamento aguardando confirmação. Para registrar, mande algo como "
     "'gastei 50 no mercado'."
@@ -353,6 +364,7 @@ class MessageProcessor:
 
         original_message: str | None = None
         confirmed_amount: float | None = None
+        check_open_items = True
         if pre_extracted is not None:
             # Comprovante: a visão já extraiu o intent no consumer de entrada.
             intent = FinancialIntent(**pre_extracted)
@@ -369,7 +381,24 @@ class MessageProcessor:
                 state = ConversationState()
 
             context = dict(await self._build_context(user_id, contact, phone))
-            if state.awaiting_confirmation and state.pending_intent is not None:
+            if state.awaiting_confirmation and state.pending_action is not None:
+                # Baixa ou fatura esperando a escolha ou o "sim" (Fase 2).
+                outcome = await action_processor.handle_reply(
+                    phone, contact, state, message, idempotency_key
+                )
+                if outcome.resume_intent is not None:
+                    # "Não" à oferta de baixa: cria o lançamento que ia criar.
+                    intent = outcome.resume_intent
+                    original_message = outcome.original_message
+                    reference = outcome.reference_date or reference
+                    check_open_items = False
+                elif outcome.new_message:
+                    response_prefix = DISCARDED_ACTION_NOTICE + response_prefix
+                    context["today"] = reference.isoformat()
+                    intent = await intent_classifier.classify(message, context)
+                else:
+                    return await self._respond(phone, response_prefix + outcome.text)
+            elif state.awaiting_confirmation and state.pending_intent is not None:
                 # "Ontem" numa resposta é relativo ao dia da mensagem original.
                 pending_reference = _parse_iso_date(state.reference_date) or reference
                 context["today"] = pending_reference.isoformat()
@@ -436,6 +465,7 @@ class MessageProcessor:
             original_message=original_message,
             reference_date=reference,
             confirmed_amount=confirmed_amount,
+            check_open_items=check_open_items,
         )
 
     async def _ask_again(
@@ -489,6 +519,7 @@ class MessageProcessor:
         original_message: str | None = None,
         reference_date: date | None = None,
         confirmed_amount: float | None = None,
+        check_open_items: bool = True,
     ) -> str:
         """Trata um ``FinancialIntent`` já extraído (texto, áudio ou imagem).
 
@@ -515,6 +546,23 @@ class MessageProcessor:
         if intent.intent == IntentType.unsupported_movement:
             metrics.incr("intent_unsupported_movement")
             return await self._respond(phone, response_prefix + UNSUPPORTED_MOVEMENT_MESSAGE)
+        if intent.intent == IntentType.pay_invoice:
+            metrics.incr("intent_pay_invoice")
+            outcome = await action_processor.start_invoice(
+                phone, contact, user_id, intent, reference, raw_message
+            )
+            return await self._respond(phone, response_prefix + outcome.text)
+        if intent.intent == IntentType.settle_bill:
+            metrics.incr("intent_settle_bill")
+            outcome = await action_processor.start_settle(
+                phone, contact, user_id, intent, reference, raw_message
+            )
+            if outcome.resume_intent is None:
+                return await self._respond(phone, response_prefix + outcome.text)
+            # Nada parecido em aberto (ou flag desligada): lançamento novo.
+            intent = outcome.resume_intent
+            response_prefix += outcome.text
+            check_open_items = False
         if intent.intent in (IntentType.cancel_last, IntentType.correct_last):
             return await self._respond(
                 phone,
@@ -566,6 +614,16 @@ class MessageProcessor:
                 idempotency_key=idempotency_key,
             )
             return await self._respond(phone, response_prefix + question.text)
+
+        if check_open_items:
+            # Gasto ou receita que provavelmente quita algo já em aberto
+            # ("paguei 120 de luz" com a Luz de R$ 120 lançada): pergunta
+            # antes, em vez de duplicar.
+            offer = await action_processor.offer_settlement(
+                phone, contact, user_id, intent, raw_message, original, reference
+            )
+            if offer is not None:
+                return await self._respond(phone, response_prefix + offer)
 
         # Pronto para criar: registra a extração e cria o lançamento.
         extraction_id = await audit_service.log_extraction(

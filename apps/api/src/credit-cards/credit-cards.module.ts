@@ -12,6 +12,7 @@ import { CardPaymentsService } from './card-payments.service';
   imports: [BillingModule, AccountsModule],
   controllers: [CreditCardsController],
   providers: [CreditCardsService, CardLedgerService, CardPaymentsService],
-  exports: [CreditCardsService, CardLedgerService],
+  // `CardPaymentsService`: o agente de WhatsApp registra pagamento de fatura.
+  exports: [CreditCardsService, CardLedgerService, CardPaymentsService],
 })
 export class CreditCardsModule {}
