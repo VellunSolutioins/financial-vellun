@@ -601,7 +601,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "time() - rabbitmq_detailed_queue_head_message_timestamp{env=\"$env\", queue=~\"whatsapp\\..*\"}",
+          "expr": "time() - rabbitmq_detailed_queue_head_message_timestamp{env=\"$env\", queue=~\"whatsapp\\\\..*\"}",
           "legendFormat": "{{queue}}"
         }
       ],

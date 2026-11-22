@@ -165,3 +165,55 @@ describe('buildMonthlySeries', () => {
     expect(serie).toEqual([{ month: '2026-09', income: 0, expense: 0 }]);
   });
 });
+
+/**
+ * O filtro de "em aberto" (`settlementWhere`) traz o próprio `type` (receita ou
+ * despesa). Espalhado no `where` depois do `type` da consulta, ele o
+ * sobrescrevia: receita em aberto aparecia em "Contas a pagar" (dashboard
+ * pessoal e WhatsApp), e as prévias "A receber" e "A pagar" do empresarial
+ * misturavam os dois tipos. O teste de integração prova no Postgres; este
+ * prova o `where` sem banco.
+ */
+describe('listas de em aberto respeitam o tipo', () => {
+  function setup() {
+    const findMany = jest.fn().mockResolvedValue([]);
+    const prisma = {
+      transaction: {
+        findMany,
+        groupBy: jest.fn().mockResolvedValue([]),
+        fields: { amount: 'amount' },
+      },
+      account: { findMany: jest.fn().mockResolvedValue([]) },
+      transactionSettlement: { findMany: jest.fn().mockResolvedValue([]) },
+      category: { findMany: jest.fn().mockResolvedValue([]) },
+    } as any;
+    const scope = { resolve: jest.fn().mockResolvedValue(null) } as any;
+    return { service: new DashboardService(prisma, scope), findMany };
+  }
+
+  it('contas a pagar só busca despesas', async () => {
+    const { service, findMany } = setup();
+
+    await (service as any).upcomingBills('u1', null, null);
+
+    const { where } = findMany.mock.calls[0][0];
+    expect(where.type).toBe('expense');
+    expect(where.AND).toEqual([expect.objectContaining({ settledAmount: { lt: 'amount' } })]);
+  });
+
+  it('as prévias do empresarial buscam só o próprio tipo', async () => {
+    const { service, findMany } = setup();
+
+    await service.getBusinessSummary('u1');
+
+    const previews = findMany.mock.calls
+      .map(([args]) => args)
+      .filter((args) => args.take !== undefined);
+    expect(previews.map((args) => args.where.type)).toEqual(['income', 'expense']);
+    for (const args of previews) {
+      expect(args.where.AND).toEqual([
+        expect.objectContaining({ settledAmount: { lt: 'amount' } }),
+      ]);
+    }
+  });
+});

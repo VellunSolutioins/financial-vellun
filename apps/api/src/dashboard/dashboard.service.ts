@@ -197,6 +197,54 @@ export class DashboardService {
   }
 
   /**
+   * Lançamentos de conta comum **em aberto** de um tipo, do vencimento mais
+   * antigo para o mais novo, com **uma ocorrência por série** (a mais antiga em
+   * aberto). Base de "Próximas contas a pagar" e das receitas previstas.
+   */
+  private async openEntries(userId: string, scoped: ScopedAccountIds, type: 'income' | 'expense') {
+    const today = todaySaoPaulo();
+    const transactions = await this.prisma.transaction.findMany({
+      where: {
+        userId,
+        ...scopeWhere(scoped),
+        type,
+        // Em `AND`, e não espalhado: o filtro de "em aberto" traz o próprio
+        // `type` (receita ou despesa) e, espalhado depois, sobrescrevia este —
+        // receita em aberto aparecia em "Contas a pagar".
+        AND: [settlementWhere('open', this.prisma.transaction.fields.amount)],
+      },
+      include: { category: true, account: true },
+      orderBy: [{ transactionDate: 'asc' }, { createdAt: 'asc' }],
+      take: UPCOMING_BILLS_SCAN,
+    });
+
+    const seenSeries = new Set<string>();
+    return transactions
+      .filter((t) => {
+        if (!t.seriesId) return true;
+        if (seenSeries.has(t.seriesId)) return false;
+        seenSeries.add(t.seriesId);
+        return true;
+      })
+      .map((t) => ({
+        ...t,
+        kind: 'transaction' as const,
+        /** O que falta pagar ou receber. */
+        remaining: (cents(t.amount) - cents(t.settledAmount)) / 100,
+        isOverdue: compareCalendarDays(calendarDayFromUtcDate(t.transactionDate), today) < 0,
+      }));
+  }
+
+  /**
+   * Próximas receitas previstas: o que ainda vai entrar, a atrasada primeiro.
+   * Mesma regra das contas a pagar (uma ocorrência por série), sem cartão.
+   */
+  async upcomingReceivables(userId: string) {
+    const items = await this.openEntries(userId, null, 'income');
+    return items.slice(0, UPCOMING_BILLS_LIMIT);
+  }
+
+  /**
    * "Próximas contas a pagar": o que sai do bolso em seguida, vencido primeiro.
    *
    * - Despesas de conta comum **em aberto** (não pagas, ou pagas em parte), com
@@ -214,33 +262,7 @@ export class DashboardService {
     cards: Awaited<ReturnType<DashboardService['cardsPosition']>>,
   ) {
     const today = todaySaoPaulo();
-    const transactions = await this.prisma.transaction.findMany({
-      where: {
-        userId,
-        ...scopeWhere(scoped),
-        type: 'expense',
-        ...settlementWhere('open', this.prisma.transaction.fields.amount),
-      },
-      include: { category: true, account: true },
-      orderBy: [{ transactionDate: 'asc' }, { createdAt: 'asc' }],
-      take: UPCOMING_BILLS_SCAN,
-    });
-
-    const seenSeries = new Set<string>();
-    const transactionItems = transactions
-      .filter((t) => {
-        if (!t.seriesId) return true;
-        if (seenSeries.has(t.seriesId)) return false;
-        seenSeries.add(t.seriesId);
-        return true;
-      })
-      .map((t) => ({
-        ...t,
-        kind: 'transaction' as const,
-        /** O que falta pagar. */
-        remaining: (cents(t.amount) - cents(t.settledAmount)) / 100,
-        isOverdue: compareCalendarDays(calendarDayFromUtcDate(t.transactionDate), today) < 0,
-      }));
+    const transactionItems = await this.openEntries(userId, scoped, 'expense');
 
     const invoiceItems = (cards?.positions ?? []).flatMap(({ card, position }) =>
       position.reconciliation.invoices
@@ -643,13 +665,14 @@ export class DashboardService {
         _sum: { amount: true },
       }),
       this.prisma.transaction.findMany({
-        where: { userId, ...inScope, type: 'income', ...pending },
+        // `pending` em `AND`: espalhado, o `type` dele sobrescrevia este.
+        where: { userId, ...inScope, type: 'income', AND: [pending] },
         include: { category: true, account: true },
         orderBy: { transactionDate: 'asc' },
         take: PENDING_PREVIEW_LIMIT,
       }),
       this.prisma.transaction.findMany({
-        where: { userId, ...inScope, type: 'expense', ...pending },
+        where: { userId, ...inScope, type: 'expense', AND: [pending] },
         include: { category: true, account: true },
         orderBy: { transactionDate: 'asc' },
         take: PENDING_PREVIEW_LIMIT,

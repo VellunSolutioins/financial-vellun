@@ -3,6 +3,7 @@ import { roundCents } from '../transactions/net-expense';
 
 type PersonalSummary = Awaited<ReturnType<DashboardService['getSummary']>>;
 type BusinessSummary = Awaited<ReturnType<DashboardService['getBusinessSummary']>>;
+type Receivables = Awaited<ReturnType<DashboardService['upcomingReceivables']>>;
 
 /** Quantas contas a pagar o agente lista, as vencidas primeiro. */
 const MAX_UPCOMING = 5;
@@ -15,6 +16,17 @@ export interface WhatsappSummaryItem {
   dueDate: string;
   isOverdue: boolean;
   kind: 'bill' | 'invoice';
+}
+
+/** Receita prevista: o que ainda vai entrar. */
+export interface WhatsappIncomeItem {
+  description: string;
+  /** O que falta receber. */
+  remaining: number;
+  /** Data prevista (YYYY-MM-DD). */
+  dueDate: string;
+  /** A data passou e o dinheiro não entrou. */
+  isOverdue: boolean;
 }
 
 /**
@@ -52,14 +64,40 @@ export interface WhatsappSummary {
    * com faturas. PJ: tudo o que está em aberto (`until` nulo).
    */
   commitments: { until: string | null; toPay: number; overdue: number | null; toReceive: number };
+  /** Contas a pagar em aberto (só despesas e faturas), vencidas primeiro. */
   upcoming: WhatsappSummaryItem[];
+  /** Receitas previstas em aberto, atrasadas primeiro. */
+  upcomingIncome: WhatsappIncomeItem[];
   /** Dívida nos cartões (só PF). */
   cardsDebt: number | null;
 }
 
 const day = (date: Date) => date.toISOString().slice(0, 10);
 
-export function fromPersonalSummary(s: PersonalSummary): WhatsappSummary {
+function incomeItem(
+  item: {
+    description: string | null;
+    category?: { name: string } | null;
+    amount: unknown;
+    settledAmount: unknown;
+    transactionDate: Date;
+  },
+  today: string,
+): WhatsappIncomeItem {
+  const dueDate = day(item.transactionDate);
+  return {
+    description: item.description || item.category?.name || 'Receita',
+    remaining: roundCents(Number(item.amount) - Number(item.settledAmount)),
+    dueDate,
+    isOverdue: dueDate < today,
+  };
+}
+
+export function fromPersonalSummary(
+  s: PersonalSummary,
+  receivables: Receivables,
+  today: string,
+): WhatsappSummary {
   const c = s.commitments;
   return {
     profileType: 'individual',
@@ -95,6 +133,7 @@ export function fromPersonalSummary(s: PersonalSummary): WhatsappSummary {
       isOverdue: item.isOverdue,
       kind: item.kind === 'invoice' ? 'invoice' : 'bill',
     })),
+    upcomingIncome: receivables.slice(0, MAX_UPCOMING).map((item) => incomeItem(item, today)),
     cardsDebt: s.cards?.totalDebt ?? null,
   };
 }
@@ -135,6 +174,9 @@ export function fromBusinessSummary(
       toReceive: s.accountsReceivable.total,
     },
     upcoming,
+    upcomingIncome: s.accountsReceivable.items
+      .slice(0, MAX_UPCOMING)
+      .map((item) => incomeItem(item, today)),
     cardsDebt: null,
   };
 }

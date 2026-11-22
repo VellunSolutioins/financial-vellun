@@ -218,7 +218,30 @@ def _income(summary: dict, when: str) -> str:
         lines = [f"💰 *Recebido {when}:* {format_brl(received)}"]
         if to_receive > 0:
             lines.append(f"Ainda a receber {when}: {format_brl(to_receive)}")
+    lines += _income_section(summary)
     return "\n".join(lines)
+
+
+def _income_line(index: int, item: dict) -> str:
+    when = _day(item.get("dueDate", ""))
+    status = f"⚠️ atrasada, era para {when}" if item.get("isOverdue") else f"previsto para {when}"
+    description = item.get("description") or "Receita"
+    return f"{index}. {description} — {format_brl(item['remaining'])} — {status}"
+
+
+def _income_section(summary: dict) -> list[str]:
+    """Receitas previstas em aberto, as atrasadas primeiro.
+
+    Ficam à parte das contas a pagar: receita não é conta, e antes um salário
+    fixo aparecia como "conta a pagar" com vencimento.
+    """
+    items = summary.get("upcomingIncome") or []
+    if not items:
+        return []
+    ordered = sorted(items, key=lambda i: (not i.get("isOverdue"), i.get("dueDate", "")))
+    lines = ["", "Receitas previstas:"]
+    lines += [_income_line(n, item) for n, item in enumerate(ordered[:OVERVIEW_BILLS], start=1)]
+    return lines
 
 
 def _result_line(summary: dict) -> str:
@@ -295,6 +318,7 @@ def _overview(summary: dict, when: str) -> str:
         lines.append("")
         lines.append("Próximas contas:")
         lines += [_bill_line(n, item) for n, item in enumerate(ordered[:OVERVIEW_BILLS], start=1)]
+    lines += _income_section(summary)
     return "\n".join(lines)
 
 

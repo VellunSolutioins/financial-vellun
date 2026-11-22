@@ -43,8 +43,35 @@ const personal = {
 } as any;
 
 describe('fromPersonalSummary', () => {
+  it('lista as receitas previstas à parte das contas a pagar', () => {
+    const receivables = [
+      {
+        description: 'pagamento Kazap',
+        category: { name: 'Salário' },
+        amount: '6825',
+        settledAmount: '0',
+        transactionDate: new Date('2026-12-01T12:00:00Z'),
+      },
+      {
+        description: '',
+        category: { name: 'Freela' },
+        amount: '500',
+        settledAmount: '200',
+        transactionDate: new Date('2026-11-15T12:00:00Z'),
+      },
+    ] as any;
+
+    const summary = fromPersonalSummary(personal, receivables, '2026-11-21');
+
+    expect(summary.upcomingIncome).toEqual([
+      { description: 'pagamento Kazap', remaining: 6825, dueDate: '2026-12-01', isOverdue: false },
+      { description: 'Freela', remaining: 300, dueDate: '2026-11-15', isOverdue: true },
+    ]);
+    expect(summary.upcoming.map((item) => item.description)).not.toContain('pagamento Kazap');
+  });
+
   it('usa os mesmos números do dashboard pessoal', () => {
-    const summary = fromPersonalSummary(personal);
+    const summary = fromPersonalSummary(personal, [], '2026-11-21');
 
     expect(summary).toMatchObject({
       profileType: 'individual',
@@ -60,7 +87,7 @@ describe('fromPersonalSummary', () => {
   });
 
   it('soma contas, previsões e faturas no que há a pagar até o fim do mês', () => {
-    const { commitments } = fromPersonalSummary(personal);
+    const { commitments } = fromPersonalSummary(personal, [], '2026-11-21');
 
     expect(commitments).toEqual({
       until: '2026-11-30',
@@ -71,7 +98,7 @@ describe('fromPersonalSummary', () => {
   });
 
   it('deixa de fora categorias sem gasto e dá nome à conta sem descrição', () => {
-    const summary = fromPersonalSummary(personal);
+    const summary = fromPersonalSummary(personal, [], '2026-11-21');
 
     expect(summary.byCategory).toEqual([
       { name: 'Mercado', total: 500 },
@@ -98,7 +125,19 @@ describe('fromBusinessSummary', () => {
     totalExpense: 5000.4,
     netResult: 2999.6,
     topExpenseCategories: [{ categoryName: 'Fornecedores', total: 3000 }],
-    accountsReceivable: { total: 1200, count: 2, items: [] },
+    accountsReceivable: {
+      total: 1200,
+      count: 1,
+      items: [
+        {
+          description: 'Cliente',
+          amount: '1200',
+          settledAmount: '0',
+          transactionDate: new Date('2026-11-25T00:00:00Z'),
+          category: null,
+        },
+      ],
+    },
     accountsPayable: {
       total: 700,
       count: 2,
@@ -137,6 +176,9 @@ describe('fromBusinessSummary', () => {
       toReceive: 1200,
       result: 2999.6,
       cardsDebt: null,
+      upcomingIncome: [
+        { description: 'Cliente', remaining: 1200, dueDate: '2026-11-25', isOverdue: false },
+      ],
       byCategoryComplete: false,
       commitments: { until: null, toPay: 700, overdue: null, toReceive: 1200 },
     });
