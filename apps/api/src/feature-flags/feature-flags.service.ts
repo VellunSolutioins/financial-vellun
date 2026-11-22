@@ -2,7 +2,13 @@ import type { FeatureFlags, FeatureKey } from '@financial-vellun/shared';
 import { Injectable } from '@nestjs/common';
 
 import { PrismaService } from '../prisma/prisma.service';
-import { FEATURE_CATALOG, FEATURE_KEYS, isFeatureKey } from './feature-flags.catalog';
+import {
+  FEATURE_CATALOG,
+  FEATURE_KEYS,
+  PUBLIC_FEATURE_KEYS,
+  type PublicFeatureKey,
+  isFeatureKey,
+} from './feature-flags.catalog';
 
 /**
  * Leitura do estado das feature flags globais.
@@ -27,6 +33,24 @@ export class FeatureFlagsService {
     ) as FeatureFlags;
     for (const row of rows) {
       if (isFeatureKey(row.key)) flags[row.key] = row.enabled;
+    }
+    return flags;
+  }
+
+  /** Só as flags de `PUBLIC_FEATURE_KEYS`, para as páginas públicas (sem sessão). */
+  async getPublic(): Promise<Record<PublicFeatureKey, boolean>> {
+    const rows = await this.prisma.featureFlag.findMany({
+      where: { key: { in: [...PUBLIC_FEATURE_KEYS] } },
+      select: { key: true, enabled: true },
+    });
+
+    const flags = Object.fromEntries(
+      PUBLIC_FEATURE_KEYS.map((key) => [key, FEATURE_CATALOG[key].defaultEnabled]),
+    ) as Record<PublicFeatureKey, boolean>;
+    for (const row of rows) {
+      if ((PUBLIC_FEATURE_KEYS as readonly string[]).includes(row.key)) {
+        flags[row.key as PublicFeatureKey] = row.enabled;
+      }
     }
     return flags;
   }

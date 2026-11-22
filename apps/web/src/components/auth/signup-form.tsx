@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/toast';
 import { focusRing, textLink } from '@/components/marketing/styles';
 import { useAuth } from '@/contexts/auth-context';
+import { useRedirectIfAuthenticated } from '@/hooks/useRedirectIfAuthenticated';
 import { register as registerUser, login } from '@/lib/auth';
 import { mapSignupErrors } from './api-errors';
 import { FormAlert } from './form-alert';
@@ -30,6 +31,7 @@ const LOGIN_AFTER_SIGNUP_ERROR =
  * são exigidos ao assinar, não para entrar no app.
  */
 export function SignupForm() {
+  useRedirectIfAuthenticated();
   const router = useRouter();
   const { setUser } = useAuth();
   const toast = useToast();

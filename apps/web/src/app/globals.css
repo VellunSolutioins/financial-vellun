@@ -93,3 +93,127 @@
     animation-delay: var(--reveal-delay, var(--reveal-stagger, 0ms));
   }
 }
+
+/*
+ * Âncoras das páginas públicas (`data-public-page`): param abaixo do cabeçalho
+ * fixo (64 px + 1 px de borda, com folga) e rolam suave, a menos que a pessoa
+ * prefira menos movimento. O app não é afetado.
+ */
+html:has([data-public-page]) {
+  scroll-padding-top: 4.5rem;
+}
+
+/*
+ * Sem `:has()` (Firefox ESR 115, Safari < 15.4) a regra acima não vale: a
+ * margem vai em cada alvo de âncora. Só nesse caso, para não somar as duas.
+ */
+@supports not selector(:has(*)) {
+  [data-public-page] [id] {
+    scroll-margin-top: 4.5rem;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html:has([data-public-page]) {
+    scroll-behavior: smooth;
+  }
+}
+
+/*
+ * Tema escuro das páginas públicas (landing, legais, login/cadastro, 404).
+ * `data-theme-locked` mantém uma página sempre clara (a landing v1 em `/`).
+ * O script em `app/layout.tsx` põe `data-theme="dark"` no <html> antes da
+ * primeira pintura; as cores só mudam em páginas com `[data-public-page]`,
+ * então o app continua no tema claro. Paleta derivada da marca (azul-marinho
+ * #0F172A e azul #2563EB), com contraste AA conferido para texto sobre fundo,
+ * superfície e card. O azul fica mais claro (#60A5FA) e os botões ganham texto
+ * escuro: branco sobre azul claro não passa no AA.
+ *
+ * Vale no wrapper e no <html>: toasts e diálogos abrem fora do wrapper (root
+ * layout). `:is()` tolera seletor desconhecido, então sem `:has()` só o wrapper
+ * escurece, e tem o peso do seletor mais forte, o que vence o `:root` claro.
+ */
+:is(
+  html[data-theme='dark'] [data-public-page]:not([data-theme-locked]),
+  html[data-theme='dark']:has([data-public-page]:not([data-theme-locked]))
+) {
+  color-scheme: dark;
+  --background: 222.9 48.8% 8.4%; /* #0B1120 */
+  --foreground: 214.3 31.8% 91.4%; /* #E2E8F0 */
+  --card: 220.6 44.7% 14.9%; /* #152037 */
+  --card-foreground: 214.3 31.8% 91.4%;
+  --popover: 220.6 44.7% 14.9%;
+  --popover-foreground: 214.3 31.8% 91.4%;
+  --primary: 213.1 93.9% 67.8%; /* #60A5FA */
+  --primary-foreground: 222.9 48.8% 8.4%;
+  --primary-hover: 211.7 96.4% 78.4%; /* #93C5FD */
+  --secondary: 220 39.1% 18%; /* #1C2840 */
+  --secondary-foreground: 214.3 31.8% 91.4%;
+  --muted: 220 39.1% 18%;
+  --muted-foreground: 216 23.5% 70.8%;
+  --accent: 220 39.1% 18%;
+  --accent-foreground: 214.3 31.8% 91.4%;
+  --destructive: 0 90.6% 70.8%; /* #F87171 */
+  --destructive-foreground: 222.9 48.8% 8.4%;
+  --border: 219.5 34.5% 21.6%; /* #24314A */
+  --input: 219.5 33.8% 25.5%; /* #2B3A57 */
+  --ring: 213.1 93.9% 67.8%;
+  --surface: 221.4 46% 12.4%; /* #111A2E */
+  --ink: 214.3 31.8% 91.4%; /* #E2E8F0 */
+  --ink-muted: 216 23.5% 70.8%; /* #A3B1C6 */
+  --success: 141.9 69.2% 58%; /* #4ADE80 */
+  --danger: 0 90.6% 70.8%;
+  --shadow-soft: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 12px rgb(0 0 0 / 0.25);
+  --shadow-card: 0 2px 4px rgb(0 0 0 / 0.3), 0 16px 40px rgb(0 0 0 / 0.35);
+}
+
+/* Fundo do <html> no tema escuro: sem isto, o "elástico" da rolagem mostra branco. */
+html[data-theme='dark']:has([data-public-page]:not([data-theme-locked])) {
+  background-color: #0b1120;
+  color-scheme: dark;
+}
+
+/* Troca de tema sem transição piscando em cada elemento. */
+html[data-theme-switching] * {
+  transition: none !important;
+}
+
+/*
+ * Fundos das páginas públicas com gradientes radiais suaves, para tirar a
+ * impressão de cor "chapada". Tudo sai das variáveis da paleta (azul da marca
+ * sobre fundo/superfície), então vale igual nos temas claro e escuro. São só
+ * brilhos de baixa opacidade: o texto continua sobre a cor de base.
+ */
+.bg-glow-hero {
+  background:
+    radial-gradient(55% 60% at 78% 48%, hsl(var(--primary) / 0.16), transparent 70%),
+    radial-gradient(40% 45% at 8% 0%, hsl(var(--primary) / 0.07), transparent 70%),
+    radial-gradient(50% 40% at 40% 110%, hsl(var(--surface)), transparent 70%),
+    hsl(var(--background));
+}
+
+.bg-glow-surface {
+  background:
+    radial-gradient(60% 55% at 0% 0%, hsl(var(--primary) / 0.08), transparent 70%),
+    radial-gradient(55% 60% at 100% 100%, hsl(var(--primary) / 0.06), transparent 70%),
+    hsl(var(--surface));
+}
+
+.bg-glow-page {
+  background:
+    radial-gradient(60% 45% at 85% 0%, hsl(var(--primary) / 0.08), transparent 70%),
+    radial-gradient(45% 40% at 0% 100%, hsl(var(--primary) / 0.05), transparent 70%),
+    hsl(var(--background));
+}
+
+/*
+ * Faixa azul do convite final. O canto de baixo à esquerda (onde fica o texto)
+ * escurece um pouco, o que só aumenta o contraste; o brilho claro fica no
+ * canto oposto, longe das letras.
+ */
+.bg-glow-primary {
+  background:
+    radial-gradient(60% 120% at 100% 0%, hsl(0 0% 100% / 0.14), transparent 65%),
+    radial-gradient(70% 130% at 0% 100%, hsl(var(--ink) / 0.18), transparent 70%),
+    hsl(var(--primary));
+}

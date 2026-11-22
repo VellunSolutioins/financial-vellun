@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ZELOO_SLOGAN, ZelooLogo } from '@/components/brand/zeloo-logo';
+import { ZELOO_SLOGAN, ZelooLogoThemed } from '@/components/brand/zeloo-logo';
 import { cn } from '@/lib/utils';
 import { focusRing } from './styles';
 
@@ -7,14 +7,17 @@ import { focusRing } from './styles';
 export function Brand({
   className,
   withSlogan = false,
+  href = '/',
 }: {
   className?: string;
+  /** Home de destino (`/v2` na landing nova). */
+  href?: string;
   /** Slogan em uma linha pequena abaixo do logo. */
   withSlogan?: boolean;
 }) {
   return (
     <Link
-      href="/"
+      href={href}
       aria-label="Zeloo — página inicial"
       className={cn(
         'inline-flex min-h-11 shrink-0 flex-col items-start justify-center rounded-lg',
@@ -22,7 +25,7 @@ export function Brand({
         className,
       )}
     >
-      <ZelooLogo alt="" priority className="h-7 sm:h-8" />
+      <ZelooLogoThemed alt="" priority className="h-7 sm:h-8" />
       {/* Abaixo de 360px não cabe ao lado de "Criar conta" e do menu. */}
       {withSlogan && (
         <span className="mt-1 hidden whitespace-nowrap text-[11px] leading-none text-ink-muted min-[360px]:block sm:text-xs">

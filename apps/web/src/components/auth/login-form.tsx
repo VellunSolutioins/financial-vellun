@@ -11,7 +11,8 @@ import { PasswordInput } from '@/components/ui/password-input';
 import { useToast } from '@/components/ui/toast';
 import { textLink } from '@/components/marketing/styles';
 import { useAuth } from '@/contexts/auth-context';
-import { login } from '@/lib/auth';
+import { useRedirectIfAuthenticated } from '@/hooks/useRedirectIfAuthenticated';
+import { appHomePath, login } from '@/lib/auth';
 import { apiErrorMessages } from './api-errors';
 import { FormAlert } from './form-alert';
 import { FormField, fieldControlClass } from './form-field';
@@ -23,6 +24,7 @@ const schema = z.object({
 type FormData = z.infer<typeof schema>;
 
 export function LoginForm() {
+  useRedirectIfAuthenticated();
   const router = useRouter();
   const { setUser } = useAuth();
   const toast = useToast();
@@ -48,9 +50,7 @@ export function LoginForm() {
       setUser(user);
       setRedirecting(true);
       toast.success('Login realizado com sucesso!');
-      router.push(
-        user.profileType === 'individual' ? '/app/pessoal/dashboard' : '/app/empresa/dashboard',
-      );
+      router.push(appHomePath(user));
     } catch (e) {
       setFormErrors(apiErrorMessages(e));
     }

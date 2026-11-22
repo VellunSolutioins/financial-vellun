@@ -13,6 +13,17 @@ export const demoChat = {
   time: '09:41',
 };
 
+/**
+ * Ativação do WhatsApp: a mensagem que o app já deixa pronta
+ * (`WhatsappLinkService`, apps/api) e o começo das boas-vindas do agente
+ * (`build_welcome_message`, apps/ai-agent). Código fictício.
+ */
+export const demoVerification = {
+  userMessage: 'Olá! Quero ativar meu WhatsApp no Zeloo. Código: 482915',
+  botReply: 'Olá, Ana! 👋 Seu WhatsApp foi verificado e está ligado à sua conta do Zeloo.',
+  time: '09:38',
+};
+
 export const demoEntry = {
   description: 'Mercado',
   category: 'Mercado',

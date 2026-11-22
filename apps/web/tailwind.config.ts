@@ -1,4 +1,5 @@
 import type { Config } from 'tailwindcss';
+import plugin from 'tailwindcss/plugin';
 
 const config: Config = {
   darkMode: ['class'],
@@ -57,9 +58,26 @@ const config: Config = {
         soft: 'var(--shadow-soft)',
         card: 'var(--shadow-card)',
       },
+      fontFamily: {
+        // Rótulos e números "de extrato" das páginas públicas (ver `app/layout.tsx`).
+        mono: ['var(--font-mono)', 'ui-monospace', 'SFMono-Regular', 'monospace'],
+      },
     },
   },
-  plugins: [],
+  plugins: [
+    plugin(({ addVariant }) => {
+      // `pin:` — desktop com altura para prender a seção "Como funciona" na tela.
+      // Variante, e não `screens`: um screen `raw` faz o Tailwind 3 parar de gerar
+      // as variantes arbitrárias `min-[...]:`/`max-[...]:` do projeto inteiro.
+      addVariant('pin', '@media (min-width: 1024px) and (min-height: 760px)');
+      // `public-dark:` — tema escuro das páginas públicas. O tema vale só dentro de
+      // `[data-public-page]`, para não alcançar o app (ver `globals.css`).
+      addVariant(
+        'public-dark',
+        'html[data-theme="dark"] [data-public-page]:not([data-theme-locked]) &',
+      );
+    }),
+  ],
 };
 
 export default config;

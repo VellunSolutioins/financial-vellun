@@ -10,7 +10,14 @@ import {
   formatDemoPercent,
 } from './demo-data';
 
-function ChatPanel() {
+interface ChatMessages {
+  userMessage: string;
+  botReply: string;
+  time: string;
+}
+
+/** Conversa de duas mensagens (você → Zeloo), no visual do WhatsApp. */
+export function ChatPanel({ chat = demoChat }: { chat?: ChatMessages }) {
   return (
     <div className="overflow-hidden rounded-3xl border bg-card shadow-card">
       <div className="flex items-center gap-3 border-b px-4 py-3">
@@ -21,22 +28,22 @@ function ChatPanel() {
         </div>
       </div>
       <div className="space-y-3 bg-surface p-4">
-        <div className="reveal ml-auto w-fit max-w-[85%] rounded-2xl rounded-br-[6px] bg-emerald-100 px-3.5 py-2.5 [--reveal-delay:150ms]">
+        <div className="reveal ml-auto w-fit max-w-[85%] rounded-2xl rounded-br-[6px] bg-emerald-100 px-3.5 py-2.5 [--reveal-delay:150ms] public-dark:bg-emerald-900/60">
           <p className="text-[15px] leading-snug text-ink">
             <span className="sr-only">Você: </span>
-            {demoChat.userMessage}
+            {chat.userMessage}
           </p>
           <p className="mt-1 flex items-center justify-end gap-1 text-xs text-ink-muted">
-            {demoChat.time}
+            {chat.time}
             <CheckCheck aria-hidden className="h-3.5 w-3.5 text-primary" />
           </p>
         </div>
         <div className="reveal mr-auto w-fit max-w-[85%] rounded-2xl rounded-bl-[6px] border bg-card px-3.5 py-2.5 [--reveal-delay:900ms]">
           <p className="text-[15px] leading-snug text-ink">
             <span className="sr-only">Zeloo: </span>
-            {demoChat.botReply}
+            {chat.botReply}
           </p>
-          <p className="mt-1 text-right text-xs text-ink-muted">{demoChat.time}</p>
+          <p className="mt-1 text-right text-xs text-ink-muted">{chat.time}</p>
         </div>
       </div>
     </div>
@@ -92,19 +99,29 @@ function EntryPanel() {
  * locais (`demo-data.ts`): não chama API nem envia mensagem. A sequência começa
  * quando a demo entra na tela (no mobile ela fica abaixo dos botões).
  */
-export function ProductDemo({ className }: { className?: string }) {
+export function ProductDemo({
+  className,
+  compact = false,
+}: {
+  className?: string;
+  /** Sem a legenda e com a seta menor, para caber em áreas de altura fixa. */
+  compact?: boolean;
+}) {
   return (
     <Reveal group className={cn('mx-auto w-full max-w-md', className)}>
       <figure>
         <ChatPanel />
         <div
           aria-hidden
-          className="reveal flex justify-center py-2 text-primary [--reveal-delay:1700ms]"
+          className={cn(
+            'reveal flex justify-center text-primary [--reveal-delay:1700ms]',
+            compact ? 'py-1' : 'py-2',
+          )}
         >
-          <ArrowDown className="h-5 w-5" />
+          <ArrowDown className={compact ? 'h-4 w-4' : 'h-5 w-5'} />
         </div>
         <EntryPanel />
-        <figcaption className="mt-3 text-center text-sm text-ink-muted">
+        <figcaption className={cn('mt-3 text-center text-sm text-ink-muted', compact && 'sr-only')}>
           Demonstração com dados fictícios
         </figcaption>
       </figure>
