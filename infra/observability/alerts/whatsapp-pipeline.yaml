@@ -249,6 +249,50 @@ groups:
           dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
           runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#backlog-crescendo'
 
+      - alert: ChaveDoProvedorDeIARecusada
+        # A OpenAI recusou a chave (401/403): inválida, revogada ou sem acesso.
+        # O agente segue registrando pelo fallback de regras, então nada quebra
+        # de forma visível — foi assim que uma chave inválida passou despercebida
+        # em produção. Não se resolve sozinha, por isso dispara na primeira.
+        expr: sum(increase(vellun_agent_llm_auth_failed_total[10m])) > 0
+        labels:
+          severity: critical
+          service: ai-agent-worker
+        annotations:
+          summary: 'OpenAI recusando a chave do agente'
+          description: >-
+            O provedor de IA recusou a OPENAI_API_KEY nos últimos 10 minutos. O
+            agente está interpretando mensagens só pelas regras, sem ler
+            comprovantes nem transcrever áudios.
+          dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
+          runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#llm-caindo-no-fallback'
+
+      - alert: LlmCaindoNoFallback
+        # Proporção de mensagens interpretadas sem o LLM (timeout, erro do
+        # provedor, limite de uso). As regras dão conta do básico, mas perguntam
+        # mais e entendem menos. Proporção, não contagem, como na taxa de erro.
+        expr: |
+          (
+            sum(rate(vellun_agent_llm_fallback_total[15m]))
+              /
+            (
+              sum(rate(vellun_agent_llm_fallback_total[15m]))
+                +
+              sum(rate(vellun_agent_llm_success_total[15m]))
+            ) > 0
+          ) > 0.2
+        for: 15m
+        labels:
+          severity: warning
+          service: ai-agent-worker
+        annotations:
+          summary: 'Mais de 20% das mensagens sem o LLM'
+          description: >-
+            {{ $value | humanizePercentage }} das mensagens dos últimos 15 minutos
+            foram interpretadas só pelas regras, sem o LLM.
+          dashboard: 'DASHBOARD_BASE/d/vellun-whatsapp/pipeline-whatsapp'
+          runbook: 'RUNBOOK_BASE/005-whatsapp-messaging-runbook.md#llm-caindo-no-fallback'
+
   # ── Entrega ao usuário ───────────────────────────────────────────────────
   - name: whatsapp-entrega
     interval: 30s

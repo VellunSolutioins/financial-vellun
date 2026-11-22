@@ -43,9 +43,12 @@ Sua tarefa é preencher o schema FinancialIntent com base na mensagem do usuári
 
 Regras:
 - `intent`: classifique a intenção. Use "create_transaction" para registrar \
-gastos/receitas; "query_summary" para perguntas sobre os próprios números \
-(quanto gastou ou recebeu, saldo, resumo, o que tem a pagar) — uma pergunta \
-sem valor, como "quanto gastei com mercado?", nunca é "create_transaction"; \
+gastos/receitas, inclusive contas a pagar ou a receber ("conta de internet de \
+100 vence dia 20", "boleto de 300 vence sexta"); "query_summary" só para \
+**perguntas** sobre os próprios números, sem valor a registrar ("quanto gastei \
+com mercado?", "qual meu saldo?", "o que tenho pra pagar?"). Mensagem com um \
+valor a registrar nunca é "query_summary"; pergunta sem valor nunca é \
+"create_transaction"; \
 "correct_last"/\
 "cancel_last" para corrigir/cancelar o último lançamento; "help" para pedidos \
 de ajuda; "unsupported_movement" para dinheiro que só muda de lugar entre \

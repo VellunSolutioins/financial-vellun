@@ -21,6 +21,7 @@ from ..schemas.financial_intent import (
 from .clock import today_local
 from .llm.base import LlmProvider
 from .llm.factory import create_llm_provider
+from .llm.failures import report_failure
 from .metrics import metrics
 from .reply_parsers import (
     detect_recurrence,
@@ -41,7 +42,11 @@ EXPENSE_KEYWORDS = (
 )
 INCOME_KEYWORDS = (
     "recebi", "ganhei", "recebimento", "entrou", "receita", "caiu", "vendi", "venda",
+    "receber",
 )
+#: Conta a pagar ("boleto de 300 vence sexta"): despesa, sem verbo de gasto.
+#: A receita é conferida antes: "vou receber 800, vence dia 10" é receita.
+BILL_KEYWORDS = ("boleto", "vence", "vencimento", "pagar")
 QUERY_KEYWORDS = ("resumo", "saldo", "quanto", "balanço", "balanco", "relatório", "relatorio")
 # Perguntas sobre contas em aberto ("o que tenho pra pagar?"). Só valem como
 # consulta numa pergunta (ver QUESTION_RE): "conta de luz a pagar vence dia
@@ -191,9 +196,9 @@ class IntentClassifier:
                     metrics.incr("llm_rules_override_intent")
                     return self._summary_query(message, context)
                 return self._finalize(self._reconcile_with_rules(message, intent))
-            except Exception:  # noqa: BLE001 — falha do LLM aciona o fallback
+            except Exception as exc:  # noqa: BLE001 — falha do LLM aciona o fallback
                 metrics.incr("llm_fallback")
-                logger.warning("LLM falhou; usando fallback de regras", exc_info=True)
+                report_failure(logger, "LLM falhou; usando fallback de regras", exc)
 
         return self._classify_with_rules(message, context)
 
@@ -217,9 +222,9 @@ class IntentClassifier:
             )
             metrics.incr("vision_success")
             return self._finalize(intent)
-        except Exception:  # noqa: BLE001 — sem fallback de regras para imagem
+        except Exception as exc:  # noqa: BLE001 — sem fallback de regras para imagem
             metrics.incr("vision_fail")
-            logger.warning("Falha na extração por visão", exc_info=True)
+            report_failure(logger, "Falha na extração por visão", exc)
             return None
 
     # ── Regras ────────────────────────────────────────────────────────────
@@ -316,7 +321,7 @@ class IntentClassifier:
     def _detect_type(self, text: str) -> TransactionTypeEnum | None:
         if self._has_any(text, INCOME_KEYWORDS):
             return TransactionTypeEnum.income
-        if self._has_any(text, EXPENSE_KEYWORDS):
+        if self._has_any(text, EXPENSE_KEYWORDS + BILL_KEYWORDS):
             return TransactionTypeEnum.expense
         return None
 
@@ -484,6 +489,11 @@ class IntentClassifier:
 
     def _should_prefer_rule_transaction(self, message: str, intent: FinancialIntent) -> bool:
         text = message.lower().strip()
+        if intent.intent == IntentType.query_summary:
+            # Consulta não tem valor a registrar. Em produção o LLM tomou "conta
+            # de internet de 100 vence dia 20" por "o que tenho pra pagar?" e a
+            # conta não foi registrada. Com valor na frase, decidem as regras.
+            return parse_amount(without_period(text)) is not None
         if intent.intent not in (IntentType.cancel_last, IntentType.correct_last):
             return False
         if self._has_any(text, CANCEL_KEYWORDS + CORRECT_KEYWORDS):

@@ -572,3 +572,46 @@ async def test_pergunta_no_meio_de_uma_pendencia_nao_a_conclui(mundo, monkeypatc
 
     assert "categoria" in resposta.lower()
     assert mundo.enviados == []
+
+
+# ── Resposta à pergunta do valor que já é um lançamento ─────────────────────
+async def test_resposta_completa_ao_valor_grava_a_descricao_e_a_categoria_dela(mundo, monkeypatch):
+    # Produção, com o LLM fora: "Quando gastei esse mês?" virou gasto sem valor,
+    # e "compra de 50 no mercado" foi gravada com a descrição da pergunta e sem
+    # a categoria Mercado (o agente ainda perguntou a categoria).
+    monkeypatch.setattr(mp, "intent_classifier", IntentClassifier(provider=None))
+
+    pergunta = await mundo.enviar("Quando gastei esse mês?")
+    assert pergunta == "Não identifiquei o valor. Qual foi o valor do lançamento?"
+
+    resposta = await mundo.enviar("compra de 50 no mercado")
+
+    assert "Despesa de R$ 50,00 em Mercado" in resposta
+    assert mundo.payload["description"] == "compra de 50 no mercado"
+    assert mundo.payload["rawInput"] == "compra de 50 no mercado"
+    assert mundo.payload["categoryId"] == "cat-mercado"
+    assert (await pendente()).awaiting_confirmation is False
+
+
+async def test_resposta_com_verbo_e_valor_sem_assunto_mantem_o_do_pendente(mundo):
+    # "gastei 50" responde ao "gastei no mercado": o assunto é o da mensagem original.
+    mundo.llm["gastei no mercado"] = despesa(amount=None, description="Compras no mercado")
+    mundo.llm["gastei 50"] = despesa(amount=50, category_name=None, description="Gasto")
+
+    assert (await mundo.enviar("gastei no mercado")).startswith("Não identifiquei o valor")
+    resposta = await mundo.enviar("gastei 50")
+
+    assert "Despesa de R$ 50,00 em Mercado" in resposta
+    assert mundo.payload["description"] == "Compras no mercado"
+    assert mundo.payload["rawInput"] == "gastei no mercado"
+
+
+async def test_resposta_completa_que_o_llm_nao_entende_vale_so_o_valor(mundo):
+    mundo.llm["gastei no mercado"] = despesa(amount=None, description="Compras no mercado")
+    # Sem entrada no dicionário: o "LLM" devolve unknown sem valor.
+
+    await mundo.enviar("gastei no mercado")
+    resposta = await mundo.enviar("paguei 50 nisso")
+
+    assert "Despesa de R$ 50,00 em Mercado" in resposta
+    assert mundo.payload["description"] == "Compras no mercado"

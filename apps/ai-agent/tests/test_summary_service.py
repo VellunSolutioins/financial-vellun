@@ -279,3 +279,17 @@ async def test_flag_desligada_manda_para_o_app(monkeypatch):
 async def test_falha_da_api_vira_mensagem_e_nao_excecao(monkeypatch, falha):
     monkeypatch.setattr(module, "api_client", _Api(falha))
     assert await summary_service.answer("u1", consulta(), HOJE) == SUMMARY_ERROR_MESSAGE
+
+
+def test_mes_corrente_ate_hoje_vira_o_mes_inteiro():
+    # O LLM real devolve "esse mês" como do dia 1 até hoje; a resposta diria
+    # "de 01/11 a 21/11" em vez de "em novembro".
+    assert resolve_period(consulta(period_start="2026-11-01", period_end="2026-11-21"), HOJE) == (
+        date(2026, 11, 1),
+        date(2026, 11, 30),
+    )
+    # Um recorte que termina antes de hoje é pedido de verdade e fica.
+    assert resolve_period(consulta(period_start="2026-11-01", period_end="2026-11-15"), HOJE) == (
+        date(2026, 11, 1),
+        date(2026, 11, 15),
+    )

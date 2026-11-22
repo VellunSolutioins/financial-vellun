@@ -675,6 +675,40 @@ mais de 60 vezes deixam de ser adiados e caminham para a DLQ, por desenho
 
 ---
 
+## LLM caindo no fallback
+
+Quando a chamada à OpenAI falha, o agente interpreta a mensagem só pelas regras
+(palavras-chave e regex) e **continua registrando**. Por isso uma falha do LLM
+não aparece como erro para o usuário: ele só nota que o agente pergunta mais e
+entende menos. Comprovante e áudio não têm fallback e respondem pedindo para
+digitar.
+
+| Alerta                        | Contadores                       | Significa                                             |
+| ----------------------------- | -------------------------------- | ----------------------------------------------------- |
+| `ChaveDoProvedorDeIARecusada` | `llm_auth_failed`                | A OpenAI recusou a chave (401/403)                    |
+| `LlmCaindoNoFallback`         | `llm_fallback` e `llm_success`   | Mais de 20% das mensagens sem o LLM por 15 minutos    |
+
+**Chave recusada.** Não se resolve sozinha.
+
+1. No log do worker, procure `o provedor de IA recusou a credencial`. A linha
+   traz o tipo do erro (`AuthenticationError` para chave inválida ou revogada,
+   `PermissionDeniedError` para chave sem acesso ao modelo).
+2. Gere uma chave nova no painel da OpenAI e troque `OPENAI_API_KEY` em **todo
+   serviço do agente que processa mensagens**: `financial-vellun-ai-agent` e,
+   se existir, `financial-vellun-ai-agent-worker`. O Railway reinicia o serviço.
+3. Mande uma mensagem de teste e confira que `llm_success` voltou a subir.
+
+**Fallback alto sem chave recusada.** Instabilidade, lentidão ou limite de uso.
+
+1. No log do worker, procure `LLM falhou; usando fallback de regras (<tipo>)`.
+   - `APITimeoutError`: a OpenAI está lenta. Veja a status page dela e o
+     `llm_latency_seconds`; o limite é `OPENAI_TIMEOUT_SECONDS`.
+   - `RateLimitError`: limite de uso ou de crédito da conta na OpenAI.
+   - `APIConnectionError` ou `InternalServerError`: instabilidade da OpenAI.
+2. Em geral passa sozinho. Se durar, confira o crédito e os limites da conta.
+
+---
+
 ## Ações do agente atrás de feature flag
 
 As ações além de criar lançamento ([ADR 0024](adrs/0024-agente-age-sobre-lancamentos-existentes.md))

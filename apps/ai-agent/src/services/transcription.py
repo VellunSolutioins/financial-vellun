@@ -12,6 +12,7 @@ import logging
 import mimetypes
 
 from ..config import settings
+from .llm.failures import report_failure
 from .metrics import metrics
 
 logger = logging.getLogger(__name__)
@@ -54,9 +55,9 @@ class TranscriptionService:
                 model=settings.openai_transcription_model,
                 file=buffer,
             )
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             metrics.incr("transcription_fail")
-            logger.warning("Falha ao transcrever áudio", exc_info=True)
+            report_failure(logger, "Falha ao transcrever áudio", exc)
             return None
 
         text = (getattr(result, "text", "") or "").strip()
