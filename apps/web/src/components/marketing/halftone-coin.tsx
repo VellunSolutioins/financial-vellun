@@ -2,6 +2,16 @@
 import { useEffect, useRef } from 'react';
 import { cn } from '@/lib/utils';
 import { subscribeTheme } from '@/lib/public-theme';
+import {
+  COIN_RADIUS,
+  RIM_START,
+  coinPose,
+  coinSpin,
+  drawCoinMask,
+  idleLight,
+  toWorld,
+  traceCoin,
+} from './coin-mask';
 
 /**
  * Moeda cunhada com o logo do Zeloo, desenhada em meia-tinta: uma grade de
@@ -10,7 +20,8 @@ import { subscribeTheme } from '@/lib/public-theme';
  * pisca ao redor.
  *
  * Tudo em Canvas 2D, sem biblioteca: a cena é calculada por ponto (domo da
- * face, relevo do logo, perolado, aro serrilhado e espessura). Só o desenho do
+ * face, relevo do logo, perolado, aro serrilhado e espessura), com a moeda
+ * como um cilindro em perspectiva (`coin-mask.ts`). Só o desenho do
  * relevo vem de uma máscara, feita na hora com o SVG do logo.
  * Pausa fora da tela e com a aba oculta; com movimento reduzido, fica parada.
  */
@@ -18,12 +29,6 @@ import { subscribeTheme } from '@/lib/public-theme';
 /** Lado da célula da grade, em px CSS. Fina o bastante para o nome "zeloo" se ler. */
 const CELL_DESKTOP = 5;
 const CELL_MOBILE = 4;
-/** Raio da moeda em relação ao menor lado do canvas. */
-const COIN_RADIUS = 0.38;
-/** Onde começa o aro (em raios). */
-const RIM_START = 0.88;
-/** Espessura da borda (vista quando a moeda gira), em raios. */
-const COIN_THICKNESS = 0.16;
 
 interface Palette {
   ink: string;
@@ -48,44 +53,12 @@ function readPalette(el: Element): Palette {
   };
 }
 
-/**
- * Relevo da face, numa grade `size × size` que cobre o círculo unitário: o logo
- * ("Z" + "zeloo") no centro, um filete fino e um anel de contas (perolado),
- * como numa moeda. Vale só o alfa: 1 é relevo, 0 é campo.
- */
+/** Máscara do relevo amostrada numa grade `size × size` (só o alfa, 0..1). */
 async function loadCoinMask(size: number): Promise<Float32Array> {
-  const img = new Image();
-  img.src = '/marca/zeloo-logo.svg';
-  await img.decode();
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
+  const canvas = await drawCoinMask(size);
   const mask = new Float32Array(size * size);
+  const ctx = canvas.getContext('2d');
   if (!ctx) return mask;
-  const c = size / 2;
-
-  // Logo: 66% do diâmetro, proporção original 1768 × 477.
-  const w = size * 0.66;
-  const h = (w * 477) / 1768;
-  ctx.drawImage(img, c - w / 2, c - h / 2, w, h);
-
-  ctx.fillStyle = '#000';
-  ctx.strokeStyle = '#000';
-  // Filete interno.
-  ctx.lineWidth = size * 0.012;
-  ctx.beginPath();
-  ctx.arc(c, c, c * 0.72, 0, Math.PI * 2);
-  ctx.stroke();
-  // Perolado: contas iguais em volta.
-  const beads = 48;
-  for (let i = 0; i < beads; i++) {
-    const a = (i / beads) * Math.PI * 2;
-    ctx.beginPath();
-    ctx.arc(c + Math.cos(a) * c * 0.8, c + Math.sin(a) * c * 0.8, size * 0.012, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
   const data = ctx.getImageData(0, 0, size, size).data;
   for (let i = 0; i < mask.length; i++) mask[i] = data[i * 4 + 3] / 255;
   return mask;
@@ -146,8 +119,9 @@ export function HalftoneCoin({ className }: { className?: string }) {
 
       // Sem ponteiro sobre a cena, a luz orbita devagar.
       if (!target.active) {
-        target.x = Math.cos(t * 0.35) * 0.75;
-        target.y = -0.45 + Math.sin(t * 0.35) * 0.35;
+        const idle = idleLight(t);
+        target.x = idle.x;
+        target.y = idle.y;
       }
       const k = reduced ? 1 : 0.06;
       light.x += (target.x - light.x) * k;
@@ -159,10 +133,13 @@ export function HalftoneCoin({ className }: { className?: string }) {
       const R = Math.min(width, height) * COIN_RADIUS;
       const cx = width / 2;
       const cy = height / 2;
-      // Giro de vaivém em torno do eixo vertical.
-      const phi = reduced ? 0.35 : 0.5 * Math.sin(t * 0.32) + 0.15;
-      const squash = Math.cos(phi);
-      const edge = Math.sin(phi) * COIN_THICKNESS * R;
+      // Giro de vaivém em 3D: a face (com o logo) e a borda giram juntas.
+      const pose = coinPose(coinSpin(t, reduced));
+      const lightAt = (n: [number, number, number]) => {
+        const [wx, wy, wz] = toWorld(n, pose);
+        const nl = Math.hypot(wx, wy, wz) || 1;
+        return Math.max(0, (wx * L.x + wy * L.y + wz * L.z) / nl);
+      };
 
       const cols = Math.ceil(width / cell);
       const rows = Math.ceil(height / cell);
@@ -175,18 +152,18 @@ export function HalftoneCoin({ className }: { className?: string }) {
         const y = j * cell + cell / 2;
         for (let i = 0; i < cols; i++) {
           const x = i * cell + cell / 2;
-          // Coordenadas na face da moeda (círculo unitário).
-          const u = (x - cx) / (R * squash || 1);
-          const v = (y - cy) / R;
-          const r2 = u * u + v * v;
+          // O que este ponto da tela vê da moeda: face (com u, v), borda ou nada.
+          const hit = traceCoin((x - cx) / R, (y - cy) / R, pose);
           let shade = 0;
 
-          if (r2 <= 1) {
+          if (hit?.kind === 'face') {
+            const { u, v } = hit;
+            const r2 = u * u + v * v;
+            const r = Math.sqrt(r2);
             // Face levemente abaulada.
-            const nz = Math.sqrt(1 - r2 * 0.55);
+            const nz = Math.sqrt(Math.max(0, 1 - r2 * 0.55));
             let nx = u * 0.45;
             let ny = v * 0.45;
-            const r = Math.sqrt(r2);
             if (r > RIM_START) {
               // Aro em relevo com serrilha.
               const a = Math.atan2(v, u);
@@ -200,8 +177,8 @@ export function HalftoneCoin({ className }: { className?: string }) {
               nx -= gx * 1.8;
               ny -= gy * 1.8;
             }
-            const nl = Math.hypot(nx, ny, nz);
-            const diffuse = Math.max(0, (nx * L.x + ny * L.y + nz * L.z) / nl);
+            // A normal é da face: girando a moeda, a luz sobre o logo muda junto.
+            const diffuse = lightAt([nx, ny, nz]);
             // Ponto mais iluminado: onde fica o marcador de luz.
             // Só no campo liso: em cima do logo ele esconderia as letras.
             if (diffuse > markerBest && r < 0.7 && sampleMask(u, v) < 0.05) {
@@ -217,13 +194,17 @@ export function HalftoneCoin({ className }: { className?: string }) {
             if (r > RIM_START) lit = 0.2 + diffuse * 0.7;
             lit = Math.max(0, Math.min(1, lit));
             shade = palette.inkIsLight ? 0.1 + lit * 0.9 : 0.12 + (1 - lit) * 0.88;
-          } else if (edge > 0) {
-            // Espessura visível do lado para onde a moeda gira.
-            const ue = (x - cx - edge) / (R * squash || 1);
-            if (ue * ue + v * v <= 1 && x > cx) {
-              const ridge = 0.5 + Math.sin(v * 40) * 0.08;
-              shade = palette.inkIsLight ? 0.25 + ridge * 0.2 : 0.78 + ridge * 0.1;
-            }
+          } else if (hit?.kind === 'side') {
+            // Borda: cilindro com serrilha, iluminado pela mesma luz.
+            const a = hit.angle;
+            const ridge = Math.sin(a * 80) * 0.25;
+            const diffuse = lightAt([
+              Math.cos(a) - Math.sin(a) * ridge,
+              Math.sin(a) + Math.cos(a) * ridge,
+              0,
+            ]);
+            const lit = Math.max(0, Math.min(1, 0.1 + diffuse * 0.6));
+            shade = palette.inkIsLight ? 0.1 + lit * 0.9 : 0.12 + (1 - lit) * 0.88;
           }
 
           if (shade > 0) {

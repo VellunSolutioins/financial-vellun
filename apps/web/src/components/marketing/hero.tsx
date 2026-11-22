@@ -2,18 +2,20 @@ import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { HalftoneCoin } from './halftone-coin';
+import { HeroCoin, type CoinVariant } from './hero-coin';
+import { ParticleCoin } from './particle-coin';
 import { LiveClock } from './live-clock';
 import { container } from './styles';
 
 /**
- * Promessa + moeda em meia-tinta. Mobile: status, título, texto, botões e a
- * moeda (menor), nessa ordem. A partir do `lg`, a moeda vai para a direita e o
- * campo de pixels sangra até a borda.
+ * Promessa + moeda. Mobile: status, título, texto, botões e a moeda (menor),
+ * nessa ordem. A partir do `lg`, a moeda vai para a direita. Na versão de
+ * partículas, o canvas cobre a seção inteira, atrás do texto.
  */
-export function Hero() {
+export function Hero({ coin = 'particulas' }: { coin?: CoinVariant }) {
   return (
     <section className="bg-glow-hero relative overflow-hidden">
+      {coin === 'particulas' && <ParticleCoin />}
       <div
         className={cn(
           container,
@@ -51,15 +53,7 @@ export function Hero() {
             </Button>
           </div>
         </div>
-        <figure className="relative -mx-4 sm:mx-0">
-          <div className="aspect-square w-full sm:aspect-[5/4] lg:aspect-square">
-            <HalftoneCoin />
-          </div>
-          <figcaption className="mt-2 flex justify-between px-4 font-mono text-xs lowercase text-ink-muted sm:px-0">
-            <span>fig. 01 · seu dinheiro</span>
-            <span>com cuidado</span>
-          </figcaption>
-        </figure>
+        <HeroCoin variant={coin} />
       </div>
     </section>
   );
