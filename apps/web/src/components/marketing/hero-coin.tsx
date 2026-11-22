@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useLayoutEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { HalftoneCoin } from './halftone-coin';
 import { COIN_FALLBACK_EVENT } from './particle-coin';
@@ -30,7 +30,10 @@ export function HeroCoin({ variant }: { variant: CoinVariant }) {
   const [current, setCurrent] = useState(variant);
   // Sem WebGL, sólida e partículas não existem: mostra a pixel no lugar.
   const fallback = useCallback(() => setCurrent('pixel'), []);
-  useEffect(() => {
+  // Layout effect, e não `useEffect`: o `ParticleCoin` vem antes no hero e avisa
+  // a falta de WebGL no próprio efeito. Na navegação pelo cliente os dois montam
+  // no mesmo commit, e um `useEffect` aqui só ouviria depois do aviso.
+  useLayoutEffect(() => {
     window.addEventListener(COIN_FALLBACK_EVENT, fallback);
     return () => window.removeEventListener(COIN_FALLBACK_EVENT, fallback);
   }, [fallback]);

@@ -53,6 +53,15 @@ export const FEATURE_CATALOG = {
 
 export const FEATURE_KEYS = Object.keys(FEATURE_CATALOG) as FeatureKey[];
 
+/**
+ * Flags que as páginas públicas podem ler sem sessão (`GET /features/public`).
+ * Só entra aqui o que a home realmente usa: o resto do catálogo inclui recursos
+ * ainda não lançados, que não devem ficar visíveis para quem não está logado.
+ */
+export const PUBLIC_FEATURE_KEYS = ['whatsapp_edit'] as const satisfies readonly FeatureKey[];
+
+export type PublicFeatureKey = (typeof PUBLIC_FEATURE_KEYS)[number];
+
 export function isFeatureKey(value: string): value is FeatureKey {
   return Object.prototype.hasOwnProperty.call(FEATURE_CATALOG, value);
 }

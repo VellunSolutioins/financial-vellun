@@ -82,7 +82,8 @@ export function MobileMenu({ links, themeToggle = false }: MobileMenuProps) {
           // do clique, e o clique cai no que estava embaixo (ex.: um botão).
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => setOpen(false)}
-          className="absolute inset-x-0 top-full h-[100dvh] bg-ink/30"
+          // No escuro `ink` é claro: o fundo clarearia a página em vez de escurecer.
+          className="absolute inset-x-0 top-full h-[100dvh] bg-ink/30 public-dark:bg-black/50"
         />
       )}
       <nav

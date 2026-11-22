@@ -1,6 +1,7 @@
 import type { FeatureFlags } from '@financial-vellun/shared';
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Header, UseGuards } from '@nestjs/common';
 import { ApiCookieAuth, ApiOkResponse, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { FeatureFlagsService } from './feature-flags.service';
@@ -27,13 +28,21 @@ export class FeatureFlagsController {
   }
 
   /**
-   * O mesmo mapa, sem sessão: a home pública ajusta textos ao que está ligado
-   * (ex.: o FAQ cita a correção pelo WhatsApp só com `whatsapp_edit`). As flags
-   * são globais e não dizem nada sobre nenhum usuário.
+   * Parte do mapa, sem sessão: a home pública ajusta textos ao que está ligado
+   * (ex.: o FAQ cita a correção pelo WhatsApp só com `whatsapp_edit`). Devolve
+   * só `PUBLIC_FEATURE_KEYS`, para não expor recursos ainda não lançados.
+   *
+   * Quem consome é o servidor do Next, que já guarda a resposta por 5 min; o
+   * limite apertado e o `Cache-Control` seguram quem chama a API direto.
    */
   @Get('public')
-  @ApiOkResponse({ description: 'Mesmo mapa de `GET /features`, acessível sem login.' })
-  getPublic(): Promise<FeatureFlags> {
-    return this.flags.getAll();
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @Header('Cache-Control', 'public, max-age=60')
+  @ApiOkResponse({
+    description:
+      'Flags usadas pelas páginas públicas, sem login. Ex.: `{ "whatsapp_edit": true }`.',
+  })
+  getPublic(): Promise<Partial<FeatureFlags>> {
+    return this.flags.getPublic();
   }
 }

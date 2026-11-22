@@ -41,6 +41,20 @@ describe('FeatureFlagsService', () => {
     await expect(service.isEnabled('agenda')).resolves.toBe(true);
   });
 
+  it('o mapa público traz só as flags liberadas para as páginas sem login', async () => {
+    // Recursos não lançados (agenda, notas, resumo...) não podem aparecer para anônimos.
+    const service = setup([
+      { key: 'whatsapp_edit', enabled: true },
+      { key: 'notes', enabled: false },
+    ]);
+    await expect(service.getPublic()).resolves.toEqual({ whatsapp_edit: true });
+  });
+
+  it('o mapa público usa o default do catálogo sem linha no banco', async () => {
+    const service = setup([]);
+    await expect(service.getPublic()).resolves.toEqual({ whatsapp_edit: false });
+  });
+
   it('ignora linha de flag que saiu do catálogo', async () => {
     // Remover uma flag do código não pode vazar uma chave desconhecida para o app.
     const service = setup([{ key: 'legada', enabled: false }]);
