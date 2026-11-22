@@ -48,6 +48,8 @@ from .confirmation_rules import (
 )
 from .contact_service import contact_service
 from .conversation_manager import ConversationState, conversation_manager
+from .entry_editor import KINDS as ENTRY_KINDS
+from .entry_editor import entry_editor
 from .feature_flags import feature_flags
 from .intent_classifier import intent_classifier
 from .messenger import messenger
@@ -101,6 +103,11 @@ _HELP_PAYMENTS = (
     "• \"recebi do cliente João\"\n"
     "• \"paguei a fatura do Nubank\"\n\n"
 )
+_HELP_EDIT = (
+    "*Corrigir e excluir*\n"
+    "• \"apaga o último\"\n"
+    "• \"corrige o mercado de ontem, foi 45\"\n\n"
+)
 _HELP_MEDIA = "Também entendo *áudio* 🎙️ e *foto de comprovante* 📸.\n\n"
 
 
@@ -112,13 +119,17 @@ def build_help_message(features: dict[str, bool] | None = None) -> str:
     """
     features = features or {}
     sections = [_HELP_REGISTER]
-    in_app = ["corrigir ou excluir um lançamento"]
+    in_app = []
+    if not features.get("whatsapp_edit"):
+        in_app.append("corrigir ou excluir um lançamento")
     if features.get("whatsapp_summary"):
         sections.append(_HELP_SUMMARY)
     else:
         in_app.append("ver resumos")
     if features.get("whatsapp_payments"):
         sections.append(_HELP_PAYMENTS)
+    if features.get("whatsapp_edit"):
+        sections.append(_HELP_EDIT)
     in_app.append("transferir entre suas contas")
     sections.append(_HELP_MEDIA)
     listed = ", ".join(in_app[:-1]) + " ou " + in_app[-1]
@@ -382,8 +393,14 @@ class MessageProcessor:
 
             context = dict(await self._build_context(user_id, contact, phone))
             if state.awaiting_confirmation and state.pending_action is not None:
-                # Baixa ou fatura esperando a escolha ou o "sim" (Fase 2).
-                outcome = await action_processor.handle_reply(
+                # Baixa, fatura, correção ou exclusão esperando a escolha ou o
+                # "sim" (Fases 2 e 3).
+                handler = (
+                    entry_editor
+                    if state.pending_action.get("kind") in ENTRY_KINDS
+                    else action_processor
+                )
+                outcome = await handler.handle_reply(
                     phone, contact, state, message, idempotency_key
                 )
                 if outcome.resume_intent is not None:
@@ -564,11 +581,10 @@ class MessageProcessor:
             response_prefix += outcome.text
             check_open_items = False
         if intent.intent in (IntentType.cancel_last, IntentType.correct_last):
-            return await self._respond(
-                phone,
-                response_prefix
-                + "Para corrigir ou cancelar um lançamento, use o app por enquanto.",
+            outcome = await entry_editor.start(
+                phone, contact, user_id, intent, reference, raw_message
             )
+            return await self._respond(phone, response_prefix + outcome.text)
 
         without_transaction = (IntentType.unknown, IntentType.confirmation_reply)
         if not force_confirm and intent.intent in without_transaction:

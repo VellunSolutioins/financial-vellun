@@ -43,6 +43,12 @@ export const FEATURE_CATALOG = {
       'O agente marca contas em aberto como pagas ou recebidas e registra o pagamento da fatura.',
     defaultEnabled: false,
   },
+  whatsapp_edit: {
+    label: 'Corrigir e excluir pelo WhatsApp',
+    description:
+      'O agente corrige ou exclui lançamentos dos últimos 30 dias, sempre com confirmação.',
+    defaultEnabled: false,
+  },
 } as const satisfies Record<FeatureKey, FeatureDefinition>;
 
 export const FEATURE_KEYS = Object.keys(FEATURE_CATALOG) as FeatureKey[];

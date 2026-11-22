@@ -12,10 +12,12 @@ from datetime import date
 
 from ..schemas.financial_intent import (
     AccountKindEnum,
+    EntryChanges,
     FinancialIntent,
     IntentType,
     RecurrenceTypeEnum,
     SummaryFocusEnum,
+    TargetRef,
     TransactionTypeEnum,
 )
 from .clock import today_local
@@ -68,8 +70,22 @@ QUESTION_RE = re.compile(
     r"|me (mostra|manda|passa|diz))\b"
 )
 HELP_KEYWORDS = ("ajuda", "help", "socorro", "como funciona", "o que voce faz", "o que você faz")
-CANCEL_KEYWORDS = ("cancela", "cancelar", "apaga", "apagar", "desfaz", "desfazer", "remove")
-CORRECT_KEYWORDS = ("corrige", "corrigir", "errei", "na verdade", "muda", "mudar", "ajusta")
+CANCEL_KEYWORDS = (
+    "cancela", "cancelar", "apaga", "apagar", "desfaz", "desfazer", "remove",
+    "exclui", "excluir", "exclua", "deleta", "deletar",
+)
+CORRECT_KEYWORDS = (
+    "corrige", "corrigir", "corrija", "errei", "na verdade", "muda", "mudar", "ajusta",
+    "altera", "alterar",
+)
+#: Numa correção, a data dita é a nova ("foi dia 20", "era ontem", "a data
+#: é 10/11"), e não a que aponta o lançamento ("o mercado de ontem").
+DATE_CHANGE_RE = re.compile(
+    r"\b(?:era|foi|e|eh|seria)\s+(?:no\s+|em\s+)?(?:dia\b|ontem|hoje|anteontem|\d{1,2}/\d{1,2})"
+    r"|\bdata\b"
+)
+#: "O último" / "a última" num pedido de correção ou exclusão.
+LAST_RE = re.compile(r"\bultim[oa]s?\b")
 # Dinheiro que só muda de lugar entre contas do usuário: não é receita nem
 # despesa (docs/adrs/0018). O agente não registra; orienta a usar o app.
 MOVEMENT_KEYWORDS = (
@@ -271,9 +287,31 @@ class IntentClassifier:
                 confidence=0.8,
             )
         if self._has_any(text, CANCEL_KEYWORDS):
-            return FinancialIntent(intent=IntentType.cancel_last, confidence=0.85)
+            # "Apaga o mercado de 50 de ontem": valor e data apontam o lançamento.
+            return FinancialIntent(
+                intent=IntentType.cancel_last,
+                target=TargetRef(
+                    last=bool(LAST_RE.search(normalize(text))),
+                    description=message.strip(),
+                    amount=self._extract_amount(text),
+                    date=self._said_date(text, context),
+                ),
+                confidence=0.85,
+            )
         if self._has_any(text, CORRECT_KEYWORDS):
-            return FinancialIntent(intent=IntentType.correct_last, confidence=0.8)
+            # "Corrige o último, foi 45": valor e data são o que muda.
+            return FinancialIntent(
+                intent=IntentType.correct_last,
+                target=TargetRef(
+                    last=bool(LAST_RE.search(normalize(text))),
+                    description=message.strip(),
+                ),
+                changes=EntryChanges(
+                    amount=self._extract_amount(text),
+                    transaction_date=self._said_date(text, context),
+                ),
+                confidence=0.8,
+            )
         if self._is_query(text):
             return self._summary_query(message, context)
         if self._has_any(text, MOVEMENT_KEYWORDS) and not self._has_any(
@@ -453,6 +491,9 @@ class IntentClassifier:
             if intent.card_name and not self._mentions(message, intent.card_name):
                 self._override(intent, "card_name", None)
             return intent
+        if intent.intent in (IntentType.correct_last, IntentType.cancel_last):
+            self._reconcile_edit(message, intent)
+            return intent
         if intent.intent != IntentType.create_transaction:
             return intent
 
@@ -537,6 +578,44 @@ class IntentClassifier:
         ):
             self._override(intent, "account_kind", None)
 
+    def _reconcile_edit(self, message: str, intent: FinancialIntent) -> None:
+        """Corrigir/excluir (Fase 3): o que a mensagem não diz não vale.
+
+        Com o LLM real: data de hoje preenchida sem data na frase ("errei, foi
+        45" mudaria a data), a mesma data no alvo e na mudança, e conta nova
+        não citada.
+        """
+        text = normalize(message)
+        target = intent.target
+        changes = intent.changes if intent.intent == IntentType.correct_last else None
+        if intent.intent == IntentType.cancel_last and intent.changes is not None:
+            intent.changes = None
+        if parse_date(text, today_local()) is None:
+            if target is not None and target.date:
+                self._override(target, "date", None)
+            if changes is not None and changes.transaction_date:
+                self._override(changes, "transaction_date", None)
+        elif target is not None and changes is not None:
+            # "Foi dia 20", "era ontem": a data estava errada (mudança). "O
+            # mercado de ontem": a data aponta o lançamento (alvo).
+            fixes_date = bool(DATE_CHANGE_RE.search(text))
+            if target.date and changes.transaction_date:
+                if fixes_date:
+                    self._override(target, "date", None)
+                else:
+                    self._override(changes, "transaction_date", None)
+            elif target.date and fixes_date:
+                changes.transaction_date = target.date
+                self._override(target, "date", None)
+            elif changes.transaction_date and not fixes_date:
+                target.date = changes.transaction_date
+                self._override(changes, "transaction_date", None)
+        if changes is not None:
+            # Conta nova que a mensagem não cita: o LLM completou por conta.
+            name = changes.account_name
+            if name and not self._mentions(message, name):
+                self._override(changes, "account_name", None)
+
     @staticmethod
     def _mentions(message: str, name: str) -> bool:
         """A mensagem cita o nome (alguma palavra que o distingue)."""
@@ -545,7 +624,9 @@ class IntentClassifier:
         return any(w in words for w in name_words)
 
     @staticmethod
-    def _override(intent: FinancialIntent, field: str, value: object) -> None:
+    def _override(
+        intent: FinancialIntent | EntryChanges | TargetRef, field: str, value: object
+    ) -> None:
         logger.info(
             "Regras sobrescreveram %s do LLM: %r -> %r", field, getattr(intent, field), value
         )

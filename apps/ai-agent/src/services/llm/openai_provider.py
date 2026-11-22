@@ -57,9 +57,12 @@ dito; um gasto novo com valor ("paguei 120 de luz") continua \
 "create_transaction"; "pay_invoice" para o pagamento da fatura do cartão de \
 crédito ("paguei a fatura do Nubank", "paguei 500 da fatura") — nunca é \
 "create_transaction" nem gasto no cartão; \
-"correct_last"/\
-"cancel_last" para corrigir/cancelar o último lançamento; "help" para pedidos \
-de ajuda; "unsupported_movement" para dinheiro que só muda de lugar entre \
+"correct_last" \
+para corrigir um lançamento já registrado ("errei, foi 45", "corrige o mercado \
+de ontem, era 45", "muda a categoria do uber para Transporte") e "cancel_last" \
+para excluir um ("apaga o último", "exclui o mercado de ontem", "cancela o \
+lançamento de 50"); "help" para pedidos de ajuda; "unsupported_movement" \
+para dinheiro que só muda de lugar entre \
 contas do próprio usuário — transferência entre as contas dele, empréstimo \
 recebido ou pagamento do principal de um empréstimo/financiamento, aporte ou \
 resgate de investimento (isso não é receita nem despesa); "unknown" quando \
@@ -129,6 +132,21 @@ inteiro (do ano atual, ou do anterior se outubro ainda não chegou); "essa \
 semana", de segunda a domingo; "hoje", só hoje. Sem período na pergunta, \
 deixe os dois nulos. Numa consulta sobre uma categoria ("quanto gastei com \
 mercado?"), preencha `category_name` com a categoria de despesa do usuário.
+- `target`: só no "correct_last" e no "cancel_last", qual lançamento já \
+registrado a mensagem aponta: `last` true só para "o último" ou quando \
+nenhum lançamento é citado ("errei, foi 45"), false quando um nome é citado; \
+`description` com o nome citado ("mercado", "uber"); `amount` e `date` (ISO) \
+só se a mensagem disser o valor ou a data **atuais** do lançamento ("o \
+mercado de 50 de ontem") — sem data na mensagem, `date` fica nulo (não use a \
+data atual). Nas outras intenções, nulo.
+- `changes`: só no "correct_last", o que muda, com o valor **novo**: `amount` \
+("foi 45", "era 45"), `transaction_date` (ISO, "era ontem", "foi dia 10"), \
+`category_name` (categoria do usuário, nome exato), `account_name` (conta ou \
+cartão citado, nome exato; nulo se não citado) e `description` (nome novo, só \
+se pedido). O que não muda fica nulo: sem data nova na mensagem, \
+`transaction_date` fica nulo. Em "corrige o mercado de ontem, foi 45", \
+"ontem" é do `target` e 45 é do `changes`; em "o mercado foi dia 20" ou \
+"errei, era ontem", a data é do `changes`. Nas outras intenções, nulo.
 - `confidence`: 0.0 a 1.0, sua confiança na extração.
 - `needs_confirmation`: true quando faltar valor, tipo, ou houver ambiguidade.
 - `confirmation_question`: pergunta a fazer ao usuário quando \

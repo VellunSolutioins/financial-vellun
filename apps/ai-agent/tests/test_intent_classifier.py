@@ -397,3 +397,85 @@ def test_baixa_e_fatura_descartam_conta_e_cartao_nao_citados():
         )
     )
     assert (citado.card_name, citado.account_name) == ("Nubank", "Itaú")
+
+
+# ── Fase 3: corrigir e excluir ───────────────────────────────────────────────
+def test_excluir_pelas_regras_aponta_o_lancamento():
+    ultimo = classify("apaga o último", CONTEXTO_CONSULTA)
+    assert ultimo.intent == IntentType.cancel_last
+    assert ultimo.target.last is True
+
+    citado = classify("exclui o mercado de 50 de ontem", CONTEXTO_CONSULTA)
+    assert citado.intent == IntentType.cancel_last
+    assert citado.target.last is False
+    # "Ontem" é relativo ao dia da mensagem (21/11 no contexto).
+    assert (citado.target.amount, citado.target.date) == (50, "2026-11-20")
+
+
+def test_corrigir_pelas_regras_o_valor_e_o_que_muda():
+    result = classify("errei, foi 45", CONTEXTO_CONSULTA)
+    assert result.intent == IntentType.correct_last
+    assert result.changes.amount == 45
+    assert result.target.amount is None
+
+
+def test_correcao_descarta_conta_nova_nao_citada():
+    from src.schemas.financial_intent import EntryChanges, FinancialIntent, TargetRef
+
+    llm = _LlmFixo(
+        FinancialIntent(
+            intent=IntentType.correct_last,
+            target=TargetRef(last=True),
+            changes=EntryChanges(amount=45, account_name="Itaú"),
+        )
+    )
+    result = asyncio.run(
+        IntentClassifier(provider=llm).classify("corrige o último, foi 45", CONTEXTO_CONSULTA)
+    )
+    assert result.changes.account_name is None
+    assert result.changes.amount == 45
+
+
+def _corrigir_pelo_llm(mensagem, target, changes):
+    from src.schemas.financial_intent import EntryChanges, FinancialIntent, TargetRef
+
+    llm = _LlmFixo(
+        FinancialIntent(
+            intent=IntentType.correct_last,
+            target=TargetRef(**target),
+            changes=EntryChanges(**changes),
+        )
+    )
+    return asyncio.run(IntentClassifier(provider=llm).classify(mensagem, CONTEXTO_CONSULTA))
+
+
+def test_correcao_sem_data_na_frase_nao_muda_a_data():
+    # O LLM real preenchia a data de hoje: "errei, foi 45" mudaria a data.
+    result = _corrigir_pelo_llm(
+        "errei, foi 45",
+        {"last": True, "date": "2026-11-21"},
+        {"amount": 45, "transaction_date": "2026-11-21"},
+    )
+    assert result.target.date is None
+    assert result.changes.transaction_date is None
+    assert result.changes.amount == 45
+
+
+def test_data_que_aponta_o_lancamento_vai_para_o_alvo():
+    result = _corrigir_pelo_llm(
+        "corrige o mercado de ontem, era 45",
+        {"description": "mercado"},
+        {"amount": 45, "transaction_date": "2026-11-20"},
+    )
+    assert result.target.date == "2026-11-20"
+    assert result.changes.transaction_date is None
+
+
+def test_foi_dia_20_e_a_data_nova():
+    result = _corrigir_pelo_llm(
+        "na verdade o mercado foi dia 20",
+        {"description": "mercado", "date": "2026-11-20"},
+        {},
+    )
+    assert result.target.date is None
+    assert result.changes.transaction_date == "2026-11-20"

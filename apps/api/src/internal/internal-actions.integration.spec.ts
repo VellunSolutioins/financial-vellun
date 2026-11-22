@@ -123,7 +123,7 @@ integration('ações internas do agente (PostgreSQL)', () => {
     }
     if (!prisma) return;
     await prisma.featureFlag.deleteMany({
-      where: { key: { in: ['whatsapp_summary', 'whatsapp_payments'] } },
+      where: { key: { in: ['whatsapp_summary', 'whatsapp_payments', 'whatsapp_edit'] } },
     });
     await prisma.user.deleteMany({ where: { id: { in: userIds } } });
     await app?.close();
@@ -364,5 +364,178 @@ integration('ações internas do agente (PostgreSQL)', () => {
 
     const after = (await openItems(userId, 'expense').expect(200)).body.invoices;
     expect(after).toEqual([expect.objectContaining({ remaining: 200 })]);
+  });
+
+  // ── Fase 3: corrigir e excluir ─────────────────────────────────────────────
+  const setEditFlag = (enabled: boolean) =>
+    prisma.featureFlag.upsert({
+      where: { key: 'whatsapp_edit' },
+      create: { key: 'whatsapp_edit', enabled },
+      update: { enabled },
+    });
+  const recent = (userId: string) =>
+    api().get(`/internal/users/${userId}/recent-entries`).set('x-internal-api-key', internalKey);
+  const patch = (userId: string, id: string, body: Record<string, unknown>) =>
+    api()
+      .patch(`/internal/users/${userId}/transactions/${id}`)
+      .set('x-internal-api-key', internalKey)
+      .send(body);
+  const remove = (userId: string, path: string) =>
+    api().delete(`/internal/users/${userId}/${path}`).set('x-internal-api-key', internalKey);
+  const balanceOf = async (accountId: string) =>
+    Number((await prisma.account.findUniqueOrThrow({ where: { id: accountId } })).currentBalance);
+
+  it('corrigir e excluir respondem FEATURE_DISABLED com a flag desligada', async () => {
+    const { userId, create } = await personalWithAccount();
+    await setEditFlag(false);
+    const mercado = await create('expense', 50, inDays(0), 'Mercado');
+
+    expect((await recent(userId).expect(403)).body.code).toBe('FEATURE_DISABLED');
+    await patch(userId, mercado.id, { amount: 45 }).expect(403);
+    await remove(userId, `transactions/${mercado.id}`).expect(403);
+  });
+
+  it('lista os últimos 30 dias, uma linha por série', async () => {
+    const { userId, transactions, checking, create } = await personalWithAccount();
+    await setEditFlag(true);
+    const mercado = await create('expense', 50, inDays(-2), 'Mercado');
+    const antigo = await create('expense', 70, inDays(-40), 'Antigo');
+    // Registrado há 40 dias: nem a data nem a criação entram na janela.
+    await prisma.transaction.update({
+      where: { id: antigo.id },
+      data: { createdAt: new Date(Date.now() - 40 * 86_400_000) },
+    });
+    const tenis = await transactions.create(userId, {
+      accountId: checking,
+      type: 'expense',
+      amount: 300,
+      description: 'Tênis',
+      transactionDate: inDays(0),
+      recurrenceType: 'parcelado',
+      installments: 3,
+    } as any);
+    await transactions.create(userId, {
+      accountId: checking,
+      type: 'expense',
+      amount: 100,
+      description: 'Academia',
+      transactionDate: inDays(-5),
+      recurrenceType: 'fixo',
+      recurrenceFrequency: 'monthly',
+      recurrenceMonths: 6,
+    } as any);
+    const other = await personalWithAccount();
+    await other.create('expense', 999, inDays(0), 'De outro');
+
+    const { entries } = (await recent(userId).expect(200)).body;
+    const names = entries.map((e: any) => e.description).sort();
+    expect(names).toEqual(['Academia', 'Mercado', 'Tênis']);
+    expect(entries.find((e: any) => e.id === mercado.id)).toMatchObject({
+      type: 'expense',
+      amount: 50,
+      date: inDays(-2),
+      accountName: 'Itaú',
+      onCard: false,
+      settledAmount: 50,
+      recurrenceType: 'avulso',
+    });
+    expect(entries.find((e: any) => e.description === 'Tênis')).toMatchObject({
+      id: tenis.id,
+      seriesId: tenis.seriesId,
+      installmentNumber: 1,
+      installmentTotal: 3,
+      amount: 100,
+    });
+    // Do fixo, a ocorrência que já passou, não as futuras.
+    expect(entries.find((e: any) => e.description === 'Academia')).toMatchObject({
+      date: inDays(-5),
+      recurrenceType: 'fixo',
+    });
+  });
+
+  it('corrige valor e conta de um gasto pago à vista, que continua pago', async () => {
+    const { userId, create, checking } = await personalWithAccount();
+    await setEditFlag(true);
+    const accounts = new AccountsService(prisma);
+    const savings = (
+      await accounts.create(userId, { name: 'Nubank', type: 'checking', initialBalance: 500 })
+    ).id;
+    const mercado = await create('expense', 50, inDays(-1), 'Mercado');
+    expect(await balanceOf(checking)).toBe(950);
+    // No app (sem a opção do agente), o pagamento continua travando a correção.
+    await expect(
+      new TransactionsService(prisma, accounts).update(userId, mercado.id, { amount: 45 }),
+    ).rejects.toThrow('abaixo do que já foi pago');
+
+    const fixed = (await patch(userId, mercado.id, { amount: 45 }).expect(200)).body;
+    expect(fixed).toMatchObject({ amount: 45, settledAmount: 45 });
+    expect(await balanceOf(checking)).toBe(955);
+
+    const moved = (
+      await patch(userId, mercado.id, { accountId: savings, transactionDate: inDays(-3) }).expect(
+        200,
+      )
+    ).body;
+    expect(moved).toMatchObject({ accountName: 'Nubank', date: inDays(-3), settledAmount: 45 });
+    expect(await balanceOf(checking)).toBe(1000);
+    expect(await balanceOf(savings)).toBe(455);
+    const [payment] = await prisma.transactionSettlement.findMany({
+      where: { transactionId: mercado.id, status: 'active' },
+    });
+    expect(payment).toMatchObject({ accountId: savings });
+    expect(payment.settledOn.toISOString().slice(0, 10)).toBe(inDays(-3));
+  });
+
+  it('não corrige compra parcelada nem lançamento de outro usuário', async () => {
+    const { userId, transactions, checking, create } = await personalWithAccount();
+    await setEditFlag(true);
+    const tenis = await transactions.create(userId, {
+      accountId: checking,
+      type: 'expense',
+      amount: 300,
+      description: 'Tênis',
+      transactionDate: inDays(0),
+      recurrenceType: 'parcelado',
+      installments: 3,
+    } as any);
+    const mercado = await create('expense', 50, inDays(0), 'Mercado');
+    const other = await createUser('individual');
+
+    const response = await patch(userId, tenis.id, { amount: 90 }).expect(409);
+    expect(response.body.message).toContain('Parcelamentos');
+    await patch(other, mercado.id, { amount: 45 }).expect(404);
+    await remove(other, `transactions/${mercado.id}`).expect(404);
+    await patch(userId, mercado.id, { amount: -1 }).expect(400);
+  });
+
+  it('exclui o lançamento (o dinheiro volta) e a segunda vez é 404', async () => {
+    const { userId, create, checking } = await personalWithAccount();
+    await setEditFlag(true);
+    const mercado = await create('expense', 50, inDays(0), 'Mercado');
+    expect(await balanceOf(checking)).toBe(950);
+
+    await remove(userId, `transactions/${mercado.id}`).expect(200);
+    expect(await balanceOf(checking)).toBe(1000);
+    await remove(userId, `transactions/${mercado.id}`).expect(404);
+  });
+
+  it('exclui a compra parcelada inteira pela rota da compra', async () => {
+    const { userId, transactions, checking } = await personalWithAccount();
+    await setEditFlag(true);
+    const tenis = await transactions.create(userId, {
+      accountId: checking,
+      type: 'expense',
+      amount: 300,
+      description: 'Tênis',
+      transactionDate: inDays(0),
+      recurrenceType: 'parcelado',
+      installments: 3,
+    } as any);
+
+    // A parcela sozinha não sai.
+    await remove(userId, `transactions/${tenis.id}`).expect(409);
+    const response = await remove(userId, `installments/${tenis.seriesId}`).expect(200);
+    expect(response.body).toEqual({ deleted: 3 });
+    expect(await prisma.transaction.count({ where: { seriesId: tenis.seriesId } })).toBe(0);
   });
 });

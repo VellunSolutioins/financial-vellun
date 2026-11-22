@@ -23,6 +23,7 @@ describe('FeatureFlagsService', () => {
       notes: true,
       whatsapp_summary: false,
       whatsapp_payments: false,
+      whatsapp_edit: false,
     });
     await expect(service.isEnabled('notes')).resolves.toBe(true);
   });
@@ -34,6 +35,7 @@ describe('FeatureFlagsService', () => {
       notes: false,
       whatsapp_summary: false,
       whatsapp_payments: false,
+      whatsapp_edit: false,
     });
     await expect(service.isEnabled('notes')).resolves.toBe(false);
     await expect(service.isEnabled('agenda')).resolves.toBe(true);
@@ -47,6 +49,7 @@ describe('FeatureFlagsService', () => {
       notes: true,
       whatsapp_summary: false,
       whatsapp_payments: false,
+      whatsapp_edit: false,
     });
   });
 });

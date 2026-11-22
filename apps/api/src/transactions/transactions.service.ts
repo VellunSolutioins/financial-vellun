@@ -404,12 +404,24 @@ export class TransactionsService {
     return this.findOne(userId, firstId);
   }
 
-  async update(userId: string, id: string, dto: UpdateTransactionDto) {
+  /**
+   * `keepPaidInFull` (só o agente de WhatsApp usa): lançamento avulso pago à
+   * vista, por inteiro e num pagamento só, continua pago depois da correção —
+   * o pagamento acompanha o valor, a conta e a data novos. Sem a opção, o
+   * pagamento trava a correção (reverta antes), como no app.
+   */
+  async update(
+    userId: string,
+    id: string,
+    dto: UpdateTransactionDto,
+    options: { keepPaidInFull?: boolean } = {},
+  ) {
     const existing = await this.findOne(userId, id);
     if (dto.type !== undefined && dto.type !== existing.type) {
       assertInstallmentIsExpense(dto.type, existing.recurrenceType ?? undefined);
     }
-    await this.assertValueChangeAllowed(existing, dto);
+    const payment = options.keepPaidInFull ? await this.paymentToFollow(existing, dto) : null;
+    await this.assertValueChangeAllowed(existing, dto, payment !== null);
 
     // A conta só é revalidada quando muda: editar a descrição de um lançamento
     // de cartão arquivado continua permitido.
@@ -451,8 +463,25 @@ export class TransactionsService {
           // lançamento é refeita pela sincronização da fatura.
           ...(transactionDate && existing.budgetDate && { budgetDate: transactionDate }),
           ...(eventDate && { eventDate }),
+          ...(payment && { settledAmount: dto.amount ?? existing.amount }),
         },
       });
+      if (payment) {
+        // Pago à vista no mesmo dia continua no dia novo (se não for futuro).
+        const sameDay =
+          payment.settledOn.toISOString().slice(0, 10) ===
+          existing.transactionDate.toISOString().slice(0, 10);
+        await tx.transactionSettlement.update({
+          where: { id: payment.id },
+          data: {
+            amount: dto.amount ?? existing.amount,
+            accountId: dto.accountId ?? existing.accountId,
+            ...(transactionDate &&
+              sameDay &&
+              !isFutureDay(transactionDate) && { settledOn: transactionDate }),
+          },
+        });
+      }
 
       await this.accountsService.recalculateBalance(existing.accountId, tx);
       if (accountChanged) await this.accountsService.recalculateBalance(dto.accountId!, tx);
@@ -715,7 +744,37 @@ export class TransactionsService {
    * cancelada; lançamento com pagamento registrado não troca de conta nem de
    * tipo, não é cancelado e não fica abaixo do que já foi pago.
    */
-  private async assertValueChangeAllowed(existing: Entry, dto: UpdateTransactionDto) {
+  /**
+   * O pagamento que acompanha a correção (`keepPaidInFull`): avulso, pago por
+   * inteiro num pagamento só, da própria conta, e a conta nova (se mudar) é
+   * comum — no cartão quem paga é a fatura. Fora disso, `null`: vale a trava.
+   */
+  private async paymentToFollow(existing: Entry, dto: UpdateTransactionDto) {
+    if (existing.recurrenceType !== 'avulso' || dto.type !== undefined || dto.status) return null;
+    const paid = cents(existing.settledAmount);
+    if (paid === 0 || paid !== cents(existing.amount)) return null;
+    const active = await this.prisma.transactionSettlement.findMany({
+      where: { transactionId: existing.id, status: 'active' },
+      select: { id: true, accountId: true, kind: true, settledOn: true },
+    });
+    const [payment] = active;
+    if (active.length !== 1 || payment.kind !== 'payment') return null;
+    if (payment.accountId !== existing.accountId) return null;
+    if (dto.accountId !== undefined && dto.accountId !== existing.accountId) {
+      const target = await this.prisma.account.findUnique({
+        where: { id: dto.accountId },
+        select: { type: true },
+      });
+      if (!target || target.type === 'credit_card') return null;
+    }
+    return payment;
+  }
+
+  private async assertValueChangeAllowed(
+    existing: Entry,
+    dto: UpdateTransactionDto,
+    paymentFollows = false,
+  ) {
     const changesValue =
       (dto.amount !== undefined && Number(dto.amount) !== Number(existing.amount)) ||
       (dto.transactionDate !== undefined &&
@@ -751,7 +810,7 @@ export class TransactionsService {
 
     if (dto.status === 'cancelled') assertNotParcel(existing, 'cancelada');
     const settledCents = cents(existing.settledAmount);
-    if (settledCents > 0) {
+    if (settledCents > 0 && !paymentFollows) {
       if (dto.status === 'cancelled') assertNoActiveSettlement(existing, 'cancelado');
       if (
         (dto.accountId !== undefined && dto.accountId !== existing.accountId) ||

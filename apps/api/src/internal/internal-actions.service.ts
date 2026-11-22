@@ -1,19 +1,47 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SubscriptionAccessService } from '../billing/services/subscription-access.service';
 import { SubscriptionRequiredException } from '../billing/subscription-required.exception';
-import { addDaysSaoPaulo, dateOnlyString, todaySaoPaulo } from '../common/date.util';
+import {
+  addDaysSaoPaulo,
+  dateOnlyString,
+  startOfDayUtc,
+  endOfDayUtc,
+  todaySaoPaulo,
+} from '../common/date.util';
 import { DashboardService, periodBounds } from '../dashboard/dashboard.service';
 import { CardPaymentsService } from '../credit-cards/card-payments.service';
 import { CreateCardPaymentDto } from '../credit-cards/dto/create-card-payment.dto';
+import { InstallmentsService } from '../transactions/installments.service';
 import { SettlementsService } from '../transactions/settlements.service';
+import { TransactionsService } from '../transactions/transactions.service';
 import { CreateSettlementDto } from '../transactions/dto/create-settlement.dto';
 import { OpenItemsQueryDto } from './dto/open-items-query.dto';
+import { UpdateEntryDto } from './dto/update-entry.dto';
 import { SummaryQueryDto } from './dto/summary-query.dto';
 import { fromBusinessSummary, fromPersonalSummary, WhatsappSummary } from './whatsapp-summary';
 
 /** Até quantos dias à frente uma conta em aberto entra na busca de baixa. */
 const OPEN_ITEMS_HORIZON_DAYS = 45;
+/** Quantos dias para trás o agente procura o lançamento a corrigir ou excluir. */
+const RECENT_DAYS = 30;
+/** Teto da busca: o agente filtra por nome, valor e data. */
+const RECENT_LIMIT = 300;
+/** Correção e exclusão pelo WhatsApp só valem para receita e despesa. */
+const EDITABLE_TYPES = ['income', 'expense'] as const;
+const APP_ONLY = 'Esse tipo de lançamento só pode ser alterado no app.';
+
+const recentInclude = {
+  category: { select: { name: true } },
+  account: { select: { name: true, type: true } },
+} satisfies Prisma.TransactionInclude;
+type RecentRow = Prisma.TransactionGetPayload<{ include: typeof recentInclude }>;
 
 const day = (date: Date) => date.toISOString().slice(0, 10);
 
@@ -32,6 +60,8 @@ export class InternalActionsService {
     private dashboard: DashboardService,
     private settlements: SettlementsService,
     private cardPayments: CardPaymentsService,
+    private transactions: TransactionsService,
+    private installments: InstallmentsService,
   ) {}
 
   /** Usuário existente e com direito de uso, como em `InternalService`. */
@@ -127,4 +157,139 @@ export class InternalActionsService {
     await this.userFor(userId);
     return this.cardPayments.pay(userId, cardId, invoiceId, dto);
   }
+
+  /**
+   * Lançamentos que o agente pode corrigir ou excluir (Fase 3): receitas e
+   * despesas confirmadas com data nos últimos 30 dias, ou registradas nesse
+   * período (a parcela 2 de uma compra de ontem vence no mês que vem). Uma
+   * linha por série: a ocorrência mais recente até hoje, ou a primeira
+   * futura. Mais recentes (pela criação) primeiro.
+   */
+  async recentEntries(userId: string) {
+    await this.userFor(userId);
+    const today = dateOnlyString(todaySaoPaulo());
+    const since = dateOnlyString(addDaysSaoPaulo(todaySaoPaulo(), -RECENT_DAYS));
+    const rows = await this.prisma.transaction.findMany({
+      where: {
+        userId,
+        status: 'confirmed',
+        type: { in: [...EDITABLE_TYPES] },
+        OR: [
+          { transactionDate: { gte: startOfDayUtc(since), lte: endOfDayUtc(today) } },
+          { createdAt: { gte: startOfDayUtc(since) } },
+        ],
+      },
+      include: recentInclude,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: RECENT_LIMIT,
+    });
+    return { entries: onePerSeries(rows, today).map(recentView) };
+  }
+
+  /**
+   * Corrige valor, data, categoria, conta ou descrição. Lançamento pago à
+   * vista continua pago (o pagamento acompanha a correção). Compra parcelada
+   * se altera no app, em Parcelamentos.
+   */
+  async updateEntry(userId: string, transactionId: string, dto: UpdateEntryDto) {
+    await this.userFor(userId);
+    const entry = await this.ownedEntry(userId, transactionId);
+    if (entry.recurrenceType === 'parcelado') {
+      throw new ConflictException('Compra parcelada se altera no app, em Parcelamentos.');
+    }
+    await this.transactions.update(userId, transactionId, dto, { keepPaidInFull: true });
+    const updated = await this.prisma.transaction.findUniqueOrThrow({
+      where: { id: transactionId },
+      include: recentInclude,
+    });
+    return recentView(updated);
+  }
+
+  /** Exclui o lançamento (definitivo, como no app). Parcela: use a rota da compra. */
+  async removeEntry(userId: string, transactionId: string) {
+    await this.userFor(userId);
+    await this.ownedEntry(userId, transactionId);
+    return this.transactions.remove(userId, transactionId, true);
+  }
+
+  /** Exclui a compra parcelada inteira — todas as parcelas. */
+  async removeInstallments(userId: string, seriesId: string) {
+    await this.userFor(userId);
+    return this.installments.remove(userId, seriesId);
+  }
+
+  /**
+   * O lançamento do usuário que o agente pode mexer. De outro usuário é 404,
+   * não 403: o agente não distingue "não existe" de "não é seu".
+   */
+  private async ownedEntry(userId: string, transactionId: string) {
+    const entry = await this.prisma.transaction.findFirst({
+      where: { id: transactionId, userId },
+      select: { id: true, type: true, status: true, recurrenceType: true },
+    });
+    if (!entry) throw new NotFoundException('Lançamento não encontrado');
+    if (
+      !(EDITABLE_TYPES as readonly string[]).includes(entry.type) ||
+      entry.status !== 'confirmed'
+    ) {
+      throw new ConflictException(APP_ONLY);
+    }
+    return entry;
+  }
+}
+
+/**
+ * Uma linha por série (fixo ou parcelado): a ocorrência mais recente até
+ * hoje, senão a primeira futura. A ordem da lista é preservada.
+ */
+export function onePerSeries<T extends { seriesId: string | null; transactionDate: Date }>(
+  rows: T[],
+  today: string,
+): T[] {
+  const chosen = new Map<string, T>();
+  for (const row of rows) {
+    if (!row.seriesId) continue;
+    const current = chosen.get(row.seriesId);
+    if (!current || betterOccurrence(row, current, today)) chosen.set(row.seriesId, row);
+  }
+  return rows.filter((row) => !row.seriesId || chosen.get(row.seriesId) === row);
+}
+
+function betterOccurrence(
+  candidate: { transactionDate: Date },
+  current: { transactionDate: Date },
+  today: string,
+) {
+  const a = day(candidate.transactionDate);
+  const b = day(current.transactionDate);
+  const aPast = a <= today;
+  const bPast = b <= today;
+  if (aPast !== bPast) return aPast;
+  return aPast ? a > b : a < b;
+}
+
+function recentView(row: RecentRow) {
+  const fallback = row.type === 'income' ? 'Receita' : 'Gasto';
+  return {
+    id: row.id,
+    type: row.type,
+    description: row.description || row.category?.name || fallback,
+    amount: Number(row.amount),
+    date: day(row.transactionDate),
+    categoryId: row.categoryId,
+    categoryName: row.category?.name ?? null,
+    accountId: row.accountId,
+    accountName: row.account.name,
+    /** No cartão, a compra é paga pela fatura: não tem pagamento próprio. */
+    onCard: row.account.type === 'credit_card',
+    /** Quanto já foi pago ou recebido. */
+    settledAmount: Number(row.settledAmount),
+    source: row.source,
+    createdAt: row.createdAt.toISOString(),
+    recurrenceType: row.recurrenceType,
+    /** Na compra parcelada, o id da compra (rota de exclusão). */
+    seriesId: row.seriesId,
+    installmentNumber: row.installmentNumber,
+    installmentTotal: row.installmentTotal,
+  };
 }

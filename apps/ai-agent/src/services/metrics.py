@@ -108,6 +108,13 @@ KNOWN_COUNTERS = (
     "action_replaced_by_new_message",
     "open_item_offered",
     "open_item_offer_declined",
+    # Corrigir e excluir (Fase 3). `action_target_gone`: o lançamento já não
+    # existia no "sim" (excluído no app, ou retry de uma exclusão feita).
+    "intent_edit_entry",
+    "intent_delete_entry",
+    "entry_edited",
+    "entry_deleted",
+    "action_target_gone",
     "help_requested",
     "message_too_long",
     "subscription_blocked",

@@ -718,6 +718,7 @@ entram desligadas e são ligadas em `/ops/funcionalidades`:
 | ------------------- | -------------------------------------------------------------- |
 | `whatsapp_summary`  | Resumo, saldo, "quanto gastei?", contas a pagar                |
 | `whatsapp_payments` | Dar baixa em conta ou receita em aberto e pagar fatura         |
+| `whatsapp_edit`     | Corrigir ou excluir um lançamento dos últimos 30 dias          |
 
 Com a flag desligada, a rota interna responde `403 FEATURE_DISABLED` e o agente
 manda o usuário para o app. A ajuda ("ajuda", "menu") só mostra as ações ligadas.
@@ -750,6 +751,26 @@ idempotência: um retry do job não paga duas vezes.
 - `open_item_offered` conta a pergunta "É o pagamento dela?", feita antes de criar
   um gasto que parece quitar algo em aberto (mesmo valor, nome parecido, vencimento
   a até 7 dias). `open_item_offer_declined` conta os "não", que criam o gasto.
+
+**Corrigir e excluir (`whatsapp_edit`).** O agente procura o lançamento em
+`GET /internal/users/<id>/recent-entries`: receitas e despesas com data nos últimos
+30 dias ou registradas nesse período, uma linha por série. "O último" é o último
+registrado **pelo WhatsApp** (`source = whatsapp`). Com nome, valor ou data ditos, o
+que foi dito vale mais que "o último". Toda correção mostra o antes e o depois, e
+toda exclusão mostra o que sai. As duas só executam com "sim".
+
+- Compra parcelada: a exclusão leva a compra inteira (`DELETE installments/<id>`); a
+  correção fica no app, em Parcelamentos. Lançamento fixo: só a ocorrência muda ou sai.
+- Gasto pago à vista (pagamento único e integral, na própria conta) continua pago
+  depois da correção: o pagamento acompanha o valor, a conta e a data novos. No app,
+  o mesmo pagamento trava a correção (reverta antes). A diferença é proposital: pelo
+  WhatsApp, "errei, foi 45" logo depois de lançar é o caso mais comum.
+- `action_refused` sobe quando a API recusa (fatura fechada, estorno, conta nova que
+  é cartão num gasto já pago). A mensagem da API vai para o usuário.
+- `action_target_gone` sobe quando o lançamento já não existia no "sim": foi excluído
+  no app, ou é o retry de uma exclusão que já aconteceu. O usuário recebe "já tinha
+  sido excluído".
+- `entry_edited` e `entry_deleted` contam o que foi feito.
 
 ---
 

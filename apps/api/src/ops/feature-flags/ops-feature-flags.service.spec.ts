@@ -44,6 +44,7 @@ describe('OpsFeatureFlagsService', () => {
       'notes',
       'whatsapp_summary',
       'whatsapp_payments',
+      'whatsapp_edit',
     ]);
     expect(list[0]).toMatchObject({
       key: 'agenda',

@@ -25,18 +25,36 @@ STOPWORDS = frozenset(
         "esse", "essa", "este", "esta", "mes", "aquela", "aquele", "ta", "eu",
     }
 )
+#: Na busca do lançamento a corrigir ou excluir (Fase 3), também não
+#: identificam o lançamento: os verbos do pedido e as palavras da correção.
+EDIT_STOPWORDS = frozenset(
+    {
+        "apaga", "apagar", "apague", "exclui", "excluir", "exclua", "deleta", "deletar",
+        "remove", "remover", "cancela", "cancelar", "desfaz", "desfazer", "tira", "tirar",
+        "corrige", "corrigir", "corrija", "errei", "erro", "errado", "era", "muda",
+        "mudar", "mude", "troca", "trocar", "altera", "alterar", "ajusta", "ajustar",
+        "ultimo", "ultima", "lancamento", "lancei", "registrei", "coloquei", "gasto",
+        "receita", "verdade", "nao", "categoria", "data", "dia", "pro", "agora", "sim",
+        "aquele", "aquela", "isso", "favor", "por",
+    }
+)
 #: Diferença de valor que ainda conta como "o mesmo valor".
 AMOUNT_TOLERANCE = 0.01
 #: Na oferta de baixa ao criar um lançamento, o vencimento a até tantos dias.
 STRONG_MATCH_DAYS = 7
 
 
-def subject_tokens(*texts: str | None) -> list[str]:
-    """As palavras que identificam a conta, sem as genéricas nem números."""
+def subject_tokens(*texts: str | None, extra: frozenset[str] = frozenset()) -> list[str]:
+    """As palavras que identificam a conta, sem as genéricas nem números.
+
+    ``extra``: mais palavras a ignorar (``EDIT_STOPWORDS`` na Fase 3).
+    """
     seen: list[str] = []
     for text in texts:
         for word in tokens(text or ""):
-            if word.isdigit() or len(word) < 3 or word in STOPWORDS or word in seen:
+            if word.isdigit() or len(word) < 3 or word in seen:
+                continue
+            if word in STOPWORDS or word in extra:
                 continue
             seen.append(word)
     return seen
@@ -63,8 +81,8 @@ def _name_score(item: dict, words: list[str], category: str | None) -> int:
     return score
 
 
-def _same_amount(item: dict, amount: float | None) -> bool:
-    return amount is not None and abs((item.get("remaining") or 0) - amount) < AMOUNT_TOLERANCE
+def _same_amount(item: dict, amount: float | None, key: str = "remaining") -> bool:
+    return amount is not None and abs((item.get(key) or 0) - amount) < AMOUNT_TOLERANCE
 
 
 def _order_key(ranked: Ranked) -> tuple:
@@ -136,6 +154,56 @@ def strong_match(
         if close or (item.get("isOverdue") and on >= due):
             found.append(item)
     return found[0] if len(found) == 1 else None
+
+
+def rank_recent(
+    entries: list[dict],
+    *,
+    words: list[str],
+    amount: float | None = None,
+    on: str | None = None,
+) -> list[dict]:
+    """Lançamentos recentes que combinam com o pedido ("apaga o mercado de
+    ontem"), do mais provável ao menos; no empate, o registrado por último.
+
+    Como em :func:`rank_open_items`: com nome dito, quem não bate no nome sai
+    (o valor ou a data iguais sozinhos não bastam); um que se destaca vem
+    sozinho. Sem nada dito, ``[]`` — quem chama decide ("o último").
+    """
+    if not words and amount is None and not on:
+        return []
+    ranked = []
+    for entry in entries:
+        score = _name_score(entry, words, None)
+        if words and score == 0:
+            continue
+        if amount is not None:
+            if not _same_amount(entry, amount, "amount"):
+                if not words:
+                    continue  # "apaga o de 50": só os de 50
+            else:
+                score += 2
+        if on:
+            if entry.get("date") != on:
+                if not words and amount is None:
+                    continue  # "apaga o de ontem": só os de ontem
+            else:
+                score += 2
+        if score > 0:
+            ranked.append(Ranked(entry, score))
+    # Estável: no empate fica a ordem da API (o registrado por último antes).
+    ranked.sort(key=lambda r: -r.score)
+    if not ranked:
+        return []
+    if len(ranked) > 1 and ranked[0].score >= ranked[1].score + 2:
+        return [ranked[0].item]
+    return [r.item for r in ranked]
+
+
+def last_from_whatsapp(entries: list[dict]) -> dict | None:
+    """O último lançamento registrado pelo WhatsApp ("apaga o último")."""
+    mine = [e for e in entries if e.get("source") == "whatsapp"]
+    return max(mine, key=lambda e: e.get("createdAt") or "", default=None)
 
 
 def label_matches(reply: str, labels: list[str]) -> list[int]:
