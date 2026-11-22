@@ -68,6 +68,11 @@ def resolve_period(intent: FinancialIntent, today: date) -> tuple[date, date] | 
         end = parsers.month_bounds(start.year, start.month)[1]
     if start > end:
         start, end = end, start
+    # "Esse mês": o LLM costuma mandar do dia 1 até hoje. O dashboard conta o
+    # mês inteiro (o que vence até o fim dele entra no "a receber").
+    first, last = parsers.month_bounds(start.year, start.month)
+    if start == first and (end.year, end.month) == (start.year, start.month) and end >= today:
+        end = last
     return start, end
 
 

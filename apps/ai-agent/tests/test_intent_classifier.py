@@ -227,3 +227,58 @@ def test_llm_sem_sinal_de_pergunta_continua_valendo():
         IntentClassifier(provider=Llm()).classify("paguei o saldo do cartão", CONTEXTO_CONSULTA)
     )
     assert result.intent == IntentType.create_transaction
+
+
+class _LlmFixo:
+    """LLM que devolve sempre o mesmo intent (o que ele errou em produção)."""
+
+    def __init__(self, intent):
+        self.intent = intent
+
+    async def extract_intent(self, message, context):
+        return self.intent.model_copy(deep=True)
+
+
+def test_llm_que_toma_conta_com_valor_por_consulta_nao_impede_o_registro():
+    # Produção: "conta de internet de 100 vence dia 20" virou "o que tenho pra
+    # pagar?" e a conta não foi registrada.
+    from src.schemas.financial_intent import FinancialIntent
+
+    llm = _LlmFixo(
+        FinancialIntent(intent=IntentType.query_summary, summary_focus=SummaryFocusEnum.upcoming)
+    )
+    classificador = IntentClassifier(provider=llm)
+    for frase, valor in (
+        ("conta de internet de 100 vence dia 20", 100),
+        ("boleto de 300 vence sexta", 300),
+        ("conta a pagar de 90 da academia", 90),
+    ):
+        result = asyncio.run(classificador.classify(frase, CONTEXTO_CONSULTA))
+        assert result.intent == IntentType.create_transaction, frase
+        assert result.amount == valor
+        assert result.transaction_type == TransactionTypeEnum.expense
+
+
+def test_consulta_do_llm_sem_valor_continua_consulta():
+    from src.schemas.financial_intent import FinancialIntent
+
+    llm = _LlmFixo(
+        FinancialIntent(
+            intent=IntentType.query_summary,
+            summary_focus=SummaryFocusEnum.spending,
+            period_start="2025-10-01",
+            period_end="2025-10-31",
+        )
+    )
+    result = asyncio.run(
+        IntentClassifier(provider=llm).classify(
+            "quanto gastei nos últimos 30 dias de outubro de 2025?", CONTEXTO_CONSULTA
+        )
+    )
+    assert result.intent == IntentType.query_summary
+    assert result.period_start == "2025-10-01"
+
+
+def test_a_receber_com_valor_e_receita():
+    result = classify("vou receber 800 do cliente, vence dia 10", CONTEXTO_CONSULTA)
+    assert result.transaction_type == TransactionTypeEnum.income
