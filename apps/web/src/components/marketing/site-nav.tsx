@@ -65,7 +65,8 @@ export function HeaderActions({
 
   return (
     <div className="flex items-center gap-1 md:gap-2">
-      {themeToggle && <ThemeToggle />}
+      {/* No celular, o tema fica dentro do menu: aqui não cabe em 320 px. */}
+      {themeToggle && <ThemeToggle className="hidden md:inline-flex" />}
       {appHref ? (
         <Button asChild className="h-11 rounded-xl px-3 hover:bg-primary-hover sm:px-5">
           <Link href={appHref}>Ir para o app</Link>
@@ -80,7 +81,7 @@ export function HeaderActions({
           </Button>
         </>
       )}
-      <MobileMenu links={menuLinks} />
+      <MobileMenu links={menuLinks} themeToggle={themeToggle} />
     </div>
   );
 }

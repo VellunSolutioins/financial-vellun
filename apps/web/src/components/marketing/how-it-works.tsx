@@ -58,9 +58,12 @@ const STEPS: Step[] = [
 
 /**
  * A partir daqui a seção fica presa na tela e a rolagem troca de etapa. Igual
- * à tela `pin` do `tailwind.config.ts`: desktop com altura para a janela inteira.
+ * à variante `pin:` do `tailwind.config.ts`: desktop com altura para a janela.
  */
 const PINNED_QUERY = '(min-width: 1024px) and (min-height: 760px)';
+
+/** Onde o painel fixa (`pin:top-16`): logo abaixo do cabeçalho de 64 px. */
+const STICKY_TOP = 64;
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -77,12 +80,15 @@ export function HowItWorks() {
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const baseId = useId();
 
-  /** Faixa de rolagem em que a seção fica presa (desktop). */
+  /**
+   * Faixa de rolagem em que a seção fica presa (desktop): começa quando o topo
+   * dela chega a STICKY_TOP e termina quando o fim dela sai por baixo do painel.
+   */
   const pinnedRange = useCallback(() => {
     const el = sectionRef.current;
     if (!el) return null;
-    const top = el.getBoundingClientRect().top + window.scrollY;
-    return { top, range: Math.max(1, el.offsetHeight - window.innerHeight) };
+    const top = el.getBoundingClientRect().top + window.scrollY - STICKY_TOP;
+    return { top, range: Math.max(1, el.offsetHeight - (window.innerHeight - STICKY_TOP)) };
   }, []);
 
   useEffect(() => {

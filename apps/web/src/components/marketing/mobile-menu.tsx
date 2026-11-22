@@ -1,12 +1,19 @@
 'use client';
 import { useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Menu, X } from 'lucide-react';
+import { Menu, Moon, Sun, X } from 'lucide-react';
+import { applyTheme } from '@/lib/public-theme';
 import { cn } from '@/lib/utils';
 import { focusRing } from './styles';
+import { usePublicTheme } from './theme-toggle';
 
 interface MobileMenuProps {
   links: { href: string; label: string; current?: boolean }[];
+  /**
+   * Opção de tema dentro do menu. No celular o botão de tema sai do cabeçalho
+   * (em 320 px ele não cabe ao lado do logo, do botão principal e do menu).
+   */
+  themeToggle?: boolean;
 }
 
 /** Rolagem (em px) que fecha o menu: o painel não fica solto sobre o conteúdo. */
@@ -18,7 +25,8 @@ const CLOSE_ON_SCROLL_PX = 24;
  * primeiro link; Escape fecha e devolve o foco ao botão; tocar fora, sair do
  * menu por Tab ou rolar a página também fecha.
  */
-export function MobileMenu({ links }: MobileMenuProps) {
+export function MobileMenu({ links, themeToggle = false }: MobileMenuProps) {
+  const dark = usePublicTheme() === 'dark';
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLElement>(null);
@@ -70,6 +78,9 @@ export function MobileMenu({ links }: MobileMenuProps) {
       {open && (
         <div
           aria-hidden
+          // Sem isto, o toque tira o foco do menu, o `onBlur` remove o fundo antes
+          // do clique, e o clique cai no que estava embaixo (ex.: um botão).
+          onMouseDown={(e) => e.preventDefault()}
           onClick={() => setOpen(false)}
           className="absolute inset-x-0 top-full h-[100dvh] bg-ink/30"
         />
@@ -98,6 +109,25 @@ export function MobileMenu({ links }: MobileMenuProps) {
               </Link>
             </li>
           ))}
+          {themeToggle && (
+            <li className="mt-1 border-t pt-1">
+              <button
+                type="button"
+                onClick={() => applyTheme(dark ? 'light' : 'dark')}
+                className={cn(
+                  'flex min-h-12 w-full items-center gap-3 rounded-lg px-2 text-base font-medium text-ink hover:bg-surface',
+                  focusRing,
+                )}
+              >
+                {dark ? (
+                  <Sun aria-hidden className="h-5 w-5" />
+                ) : (
+                  <Moon aria-hidden className="h-5 w-5" />
+                )}
+                {dark ? 'Usar tema claro' : 'Usar tema escuro'}
+              </button>
+            </li>
+          )}
         </ul>
       </nav>
     </div>

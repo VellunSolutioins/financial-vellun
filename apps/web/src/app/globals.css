@@ -103,6 +103,16 @@ html:has([data-public-page]) {
   scroll-padding-top: 4.5rem;
 }
 
+/*
+ * Sem `:has()` (Firefox ESR 115, Safari < 15.4) a regra acima não vale: a
+ * margem vai em cada alvo de âncora. Só nesse caso, para não somar as duas.
+ */
+@supports not selector(:has(*)) {
+  [data-public-page] [id] {
+    scroll-margin-top: 4.5rem;
+  }
+}
+
 @media (prefers-reduced-motion: no-preference) {
   html:has([data-public-page]) {
     scroll-behavior: smooth;
@@ -113,13 +123,20 @@ html:has([data-public-page]) {
  * Tema escuro das páginas públicas (landing, legais, login/cadastro, 404).
  * `data-theme-locked` mantém uma página sempre clara (a landing v1 em `/`).
  * O script em `app/layout.tsx` põe `data-theme="dark"` no <html> antes da
- * primeira pintura; as cores só mudam dentro de `[data-public-page]`, então o
- * app continua no tema claro. Paleta derivada da marca (azul-marinho #0F172A e
- * azul #2563EB), com contraste AA conferido para texto sobre fundo, superfície
- * e card. O azul fica mais claro (#60A5FA) e os botões ganham texto escuro:
- * branco sobre azul claro não passa no AA.
+ * primeira pintura; as cores só mudam em páginas com `[data-public-page]`,
+ * então o app continua no tema claro. Paleta derivada da marca (azul-marinho
+ * #0F172A e azul #2563EB), com contraste AA conferido para texto sobre fundo,
+ * superfície e card. O azul fica mais claro (#60A5FA) e os botões ganham texto
+ * escuro: branco sobre azul claro não passa no AA.
+ *
+ * Vale no wrapper e no <html>: toasts e diálogos abrem fora do wrapper (root
+ * layout). `:is()` tolera seletor desconhecido, então sem `:has()` só o wrapper
+ * escurece, e tem o peso do seletor mais forte, o que vence o `:root` claro.
  */
-html[data-theme='dark'] [data-public-page]:not([data-theme-locked]) {
+:is(
+  html[data-theme='dark'] [data-public-page]:not([data-theme-locked]),
+  html[data-theme='dark']:has([data-public-page]:not([data-theme-locked]))
+) {
   color-scheme: dark;
   --background: 222.9 48.8% 8.4%; /* #0B1120 */
   --foreground: 214.3 31.8% 91.4%; /* #E2E8F0 */

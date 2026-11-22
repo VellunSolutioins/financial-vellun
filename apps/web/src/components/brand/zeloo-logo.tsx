@@ -29,6 +29,8 @@ export function ZelooLogo({ className, alt = 'Zeloo', priority }: LogoProps) {
 /**
  * Logo que acompanha o tema das páginas públicas: a versão de cor no claro e a
  * branca no escuro. As duas vão no HTML e o CSS mostra uma, para não piscar.
+ * Só a de cor (tema mais comum) recebe `priority`: senão o Next pré-carregaria
+ * com prioridade alta também a oculta. A branca carrega quando aparece.
  */
 export function ZelooLogoThemed({ className, alt = 'Zeloo', priority }: LogoProps) {
   return (
@@ -42,7 +44,6 @@ export function ZelooLogoThemed({ className, alt = 'Zeloo', priority }: LogoProp
       <Image
         {...LOGO_WHITE}
         alt={alt}
-        priority={priority}
         className={cn('hidden h-7 w-auto public-dark:block', className)}
       />
     </>

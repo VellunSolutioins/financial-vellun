@@ -7,8 +7,12 @@ export type PublicTheme = 'light' | 'dark';
 
 export const THEME_STORAGE_KEY = 'zeloo-theme';
 
-/** Roda no <head>, antes do React: evita a página abrir clara e escurecer. */
-export const THEME_INIT_SCRIPT = `(function(){try{var t=localStorage.getItem('${THEME_STORAGE_KEY}');if(t!=='light'&&t!=='dark'){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}document.documentElement.dataset.theme=t}catch(e){}})();`;
+/**
+ * Roda no <head>, antes do React: evita a página abrir clara e escurecer.
+ * Sem escolha salva, também acompanha o tema do sistema se ele mudar com a
+ * página aberta (e avisa os componentes pelo mesmo evento do botão).
+ */
+export const THEME_INIT_SCRIPT = `(function(){try{var k='${THEME_STORAGE_KEY}',d=document.documentElement,m=window.matchMedia('(prefers-color-scheme: dark)'),t=localStorage.getItem(k);if(t!=='light'&&t!=='dark'){t=m.matches?'dark':'light'}d.dataset.theme=t;m.addEventListener('change',function(e){try{var s=localStorage.getItem(k);if(s==='light'||s==='dark')return}catch(_){}d.dataset.theme=e.matches?'dark':'light';window.dispatchEvent(new Event('zeloo-theme-change'))})}catch(e){}})();`;
 
 export function readTheme(): PublicTheme {
   return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
@@ -19,13 +23,17 @@ export function applyTheme(theme: PublicTheme) {
   // Sem transições durante a troca: senão cada borda e fundo anima no seu tempo.
   root.setAttribute('data-theme-switching', '');
   root.dataset.theme = theme;
+  // Força o cálculo de estilo agora, com as transições ainda desligadas. Um
+  // callback de requestAnimationFrame roda antes do cálculo do quadro, então
+  // sem isto o navegador nunca chegaria a ver o atributo presente.
+  void window.getComputedStyle(document.body).opacity;
   try {
     localStorage.setItem(THEME_STORAGE_KEY, theme);
   } catch {
     // Modo privado ou armazenamento cheio: vale só nesta visita.
   }
   window.dispatchEvent(new Event('zeloo-theme-change'));
-  requestAnimationFrame(() => root.removeAttribute('data-theme-switching'));
+  setTimeout(() => root.removeAttribute('data-theme-switching'), 1);
 }
 
 export function subscribeTheme(onChange: () => void) {
