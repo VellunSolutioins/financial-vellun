@@ -24,7 +24,7 @@ export function SiteNav({ home = '/' }: { home?: HomePath }) {
             href={link.href}
             aria-current={current ? 'location' : undefined}
             className={cn(
-              'relative inline-flex min-h-11 items-center rounded-lg px-3 text-sm font-medium text-ink-muted hover:text-ink',
+              'relative inline-flex min-h-11 items-center whitespace-nowrap rounded-lg px-3 text-sm font-medium text-ink-muted hover:text-ink',
               // Traço sob o link ativo; sem transição, para não piscar ao rolar rápido.
               "after:absolute after:inset-x-3 after:bottom-1.5 after:h-0.5 after:rounded-full after:content-['']",
               current && 'text-ink after:bg-primary',

@@ -6,6 +6,7 @@ import { HalftoneCoin } from './halftone-coin';
 import { COIN_FALLBACK_EVENT } from './particle-coin';
 import { SolidCoin } from './solid-coin';
 import { focusRing } from './styles';
+import { useCoinEnabled } from './use-coin-enabled';
 
 export type CoinVariant = 'particulas' | 'solida' | 'pixel';
 
@@ -25,6 +26,7 @@ export const COIN_VARIANTS: { id: CoinVariant; label: string; href: string }[] =
  * basta deixar só a escolhida e tirar os links.
  */
 export function HeroCoin({ variant }: { variant: CoinVariant }) {
+  const enabled = useCoinEnabled();
   const [current, setCurrent] = useState(variant);
   // Sem WebGL, sólida e partículas não existem: mostra a pixel no lugar.
   const fallback = useCallback(() => setCurrent('pixel'), []);
@@ -34,12 +36,13 @@ export function HeroCoin({ variant }: { variant: CoinVariant }) {
   }, [fallback]);
 
   return (
-    <figure className="relative -mx-4 sm:mx-0">
-      <div data-coin-anchor className="aspect-square w-full sm:aspect-[5/4] lg:aspect-square">
-        {current === 'pixel' && <HalftoneCoin />}
-        {current === 'solida' && <SolidCoin onUnsupported={fallback} />}
+    // No celular a figura inteira sai (o CSS esconde antes de o JS medir a tela).
+    <figure className="relative hidden md:block">
+      <div data-coin-anchor className="aspect-[5/4] w-full lg:aspect-square">
+        {enabled && current === 'pixel' && <HalftoneCoin />}
+        {enabled && current === 'solida' && <SolidCoin onUnsupported={fallback} />}
       </div>
-      <figcaption className="relative z-10 mt-2 flex items-center justify-between gap-3 px-4 font-mono text-xs lowercase text-ink-muted sm:px-0">
+      <figcaption className="relative z-10 mt-2 flex items-center justify-between gap-3 font-mono text-xs lowercase text-ink-muted">
         <span>fig. 01 · seu dinheiro</span>
         <nav aria-label="Versões da moeda" className="flex items-center gap-1">
           {COIN_VARIANTS.map((option, i) => (

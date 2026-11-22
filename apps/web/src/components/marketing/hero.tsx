@@ -3,19 +3,20 @@ import { ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { HeroCoin, type CoinVariant } from './hero-coin';
-import { ParticleCoin } from './particle-coin';
+import { ParticleCoinGate } from './particle-coin-gate';
 import { LiveClock } from './live-clock';
 import { container } from './styles';
 
 /**
- * Promessa + moeda. Mobile: status, título, texto, botões e a moeda (menor),
- * nessa ordem. A partir do `lg`, a moeda vai para a direita. Na versão de
- * partículas, o canvas cobre a seção inteira, atrás do texto.
+ * Promessa + moeda. Mobile: status, título, texto e botões, sem a moeda (a
+ * animação só existe a partir do tablet). No tablet, a moeda vem abaixo do
+ * texto; a partir do `lg`, vai para a direita. Na versão de partículas, o
+ * canvas cobre a seção inteira, atrás do texto.
  */
 export function Hero({ coin = 'particulas' }: { coin?: CoinVariant }) {
   return (
     <section className="bg-glow-hero relative overflow-hidden">
-      {coin === 'particulas' && <ParticleCoin />}
+      {coin === 'particulas' && <ParticleCoinGate />}
       <div
         className={cn(
           container,
