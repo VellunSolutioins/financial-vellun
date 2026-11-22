@@ -80,6 +80,8 @@ KNOWN_COUNTERS = (
     # um lançamento novo (o pendente é descartado) ou esgotou as tentativas.
     "pending_reply_unparsed",
     "pending_replaced_by_new_message",
+    # A resposta à pergunta do valor já era um lançamento inteiro.
+    "pending_amount_answered_with_full_message",
     "pending_abandoned",
     # Mensagem sem intenção reconhecida nem valor ("oi")
     "intent_not_understood",
@@ -127,6 +129,9 @@ KNOWN_COUNTERS = (
     # LLM e efeitos
     "llm_success",
     "llm_fallback",
+    # Credencial recusada pelo provedor (401/403): não se resolve sozinha.
+    # Contada também em `llm_fallback`, `vision_fail` ou `transcription_fail`.
+    "llm_auth_failed",
     # Memo por job de categorias e contas: mede quantas chamadas à API
     # principal deixaram de acontecer. Zero aqui, com jobs criando
     # lançamentos, significa que o escopo do memo não está sendo aberto.

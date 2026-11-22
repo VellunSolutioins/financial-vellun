@@ -282,3 +282,55 @@ def test_consulta_do_llm_sem_valor_continua_consulta():
 def test_a_receber_com_valor_e_receita():
     result = classify("vou receber 800 do cliente, vence dia 10", CONTEXTO_CONSULTA)
     assert result.transaction_type == TransactionTypeEnum.income
+
+
+# ── Falha do provedor ────────────────────────────────────────────────────────
+class _ErroHttp(Exception):
+    def __init__(self, status_code):
+        super().__init__(f"HTTP {status_code}")
+        self.status_code = status_code
+
+
+class _LlmQueFalha:
+    def __init__(self, erro):
+        self.erro = erro
+
+    async def extract_intent(self, message, context):
+        raise self.erro
+
+
+def test_chave_recusada_vira_erro_com_contador_proprio(caplog):
+    from src.services.metrics import metrics
+
+    antes = metrics.snapshot()["counters"].get("llm_auth_failed", 0)
+    with caplog.at_level("WARNING"):
+        result = asyncio.run(
+            IntentClassifier(provider=_LlmQueFalha(_ErroHttp(401))).classify(
+                "gastei 50 no mercado", CONTEXTO_CONSULTA
+            )
+        )
+
+    # O fallback continua registrando...
+    assert result.intent == IntentType.create_transaction
+    # ...mas a chave inválida não passa mais despercebida.
+    assert metrics.snapshot()["counters"]["llm_auth_failed"] == antes + 1
+    registro = next(r for r in caplog.records if "credencial" in r.getMessage())
+    assert registro.levelname == "ERROR"
+    assert "_ErroHttp" in registro.getMessage()
+
+
+def test_instabilidade_do_llm_fica_como_aviso_com_o_tipo_do_erro(caplog):
+    from src.services.metrics import metrics
+
+    antes = metrics.snapshot()["counters"].get("llm_auth_failed", 0)
+    with caplog.at_level("WARNING"):
+        asyncio.run(
+            IntentClassifier(provider=_LlmQueFalha(TimeoutError())).classify(
+                "gastei 50 no mercado", CONTEXTO_CONSULTA
+            )
+        )
+
+    assert metrics.snapshot()["counters"].get("llm_auth_failed", 0) == antes
+    registro = next(r for r in caplog.records if "LLM falhou" in r.getMessage())
+    assert registro.levelname == "WARNING"
+    assert "TimeoutError" in registro.getMessage()

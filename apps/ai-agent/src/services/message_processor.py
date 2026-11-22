@@ -182,6 +182,9 @@ MERGED = "merged"
 CANCELLED = "cancelled"
 UNPARSED = "unparsed"
 NEW_MESSAGE = "new_message"
+#: A resposta à pergunta do valor já é um lançamento inteiro ("compra de 50 no
+#: mercado"): ela vale como lançamento, completada pelo que o pendente sabia.
+FULL_REPLY = "full_reply"
 
 
 @dataclass
@@ -379,7 +382,22 @@ class MessageProcessor:
                 if result.outcome == UNPARSED:
                     return await self._ask_again(phone, state, result, response_prefix)
 
-                if result.outcome == NEW_MESSAGE:
+                if result.outcome == FULL_REPLY:
+                    metrics.incr("pending_amount_answered_with_full_message")
+                    await conversation_manager.clear(phone)
+                    context["today"] = pending_reference.isoformat()
+                    fresh = await intent_classifier.classify(message, context)
+                    completed = self._complete_from_pending(fresh, state.pending_intent)
+                    reference = pending_reference
+                    if completed is None:
+                        # A resposta não foi entendida como lançamento: vale só o
+                        # valor, como numa resposta curta.
+                        intent = result.intent
+                        original_message = state.original_message
+                    else:
+                        intent, subject_in_reply = completed
+                        original_message = None if subject_in_reply else state.original_message
+                elif result.outcome == NEW_MESSAGE:
                     # Um lançamento novo no meio da pergunta: antes ele virava a
                     # resposta e sobrescrevia o valor do pendente.
                     metrics.incr("pending_replaced_by_new_message")
@@ -630,6 +648,13 @@ class MessageProcessor:
         ):
             return MergeResult(pending, NEW_MESSAGE)
 
+        if field == FIELD_AMOUNT and self._is_full_transaction(reply):
+            # Leva junto o pendente já com o valor, para o caso de a resposta
+            # não ser entendida como lançamento.
+            applied, _ = self._apply_field(pending, field, reply, context)
+            if applied:
+                return MergeResult(self._merged(pending).intent, FULL_REPLY)
+
         if field == FIELD_CONFIRM:
             if parsers.is_negative(reply):
                 return MergeResult(pending, CANCELLED)
@@ -825,6 +850,46 @@ class MessageProcessor:
         if parsed_date is not None:
             pending.transaction_date = parsed_date.isoformat()
         return self._merged(pending)
+
+    @staticmethod
+    def _is_full_transaction(reply: str) -> bool:
+        """A resposta tem valor **e** verbo de gasto/receita: é um lançamento.
+
+        Em produção, "Quando gastei esse mês?" virou gasto sem valor; a resposta
+        "compra de 50 no mercado" só contribuiu com o 50, e o lançamento foi
+        gravado com a descrição da pergunta e sem a categoria "mercado".
+        """
+        return parsers.parse_amount(reply) is not None and parsers.parse_type(reply) is not None
+
+    @staticmethod
+    def _complete_from_pending(
+        fresh: FinancialIntent, pending: FinancialIntent | None
+    ) -> tuple[FinancialIntent, bool] | None:
+        """O lançamento da resposta, completado pelo que o pendente já sabia.
+
+        Devolve ``(intent, assunto_na_resposta)``, ou ``None`` se a resposta não
+        foi entendida como lançamento com valor. Se a resposta traz o assunto
+        (tem categoria), a descrição é a dela; senão ("gastei 50" para "gastei
+        no mercado"), a descrição e a categoria são as do pendente.
+        """
+        launch = fresh.intent in (IntentType.create_transaction, IntentType.unknown)
+        if not launch or not fresh.amount or fresh.amount <= 0:
+            return None
+        intent = fresh.model_copy(deep=True)
+        intent.intent = IntentType.create_transaction
+        if pending is None:
+            return intent, True
+
+        subject_in_reply = intent.category_name is not None
+        if not subject_in_reply:
+            intent.category_name = pending.category_name
+            intent.description = pending.description or intent.description
+        if intent.transaction_type is None:
+            intent.transaction_type = pending.transaction_type
+        if intent.account_name is None and intent.account_kind is None:
+            intent.account_name = pending.account_name
+            intent.account_kind = pending.account_kind
+        return intent, subject_in_reply
 
     @staticmethod
     def _looks_like_new_transaction(reply: str, pending: FinancialIntent) -> bool:

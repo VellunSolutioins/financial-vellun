@@ -21,6 +21,7 @@ from ..schemas.financial_intent import (
 from .clock import today_local
 from .llm.base import LlmProvider
 from .llm.factory import create_llm_provider
+from .llm.failures import report_failure
 from .metrics import metrics
 from .reply_parsers import (
     detect_recurrence,
@@ -195,9 +196,9 @@ class IntentClassifier:
                     metrics.incr("llm_rules_override_intent")
                     return self._summary_query(message, context)
                 return self._finalize(self._reconcile_with_rules(message, intent))
-            except Exception:  # noqa: BLE001 — falha do LLM aciona o fallback
+            except Exception as exc:  # noqa: BLE001 — falha do LLM aciona o fallback
                 metrics.incr("llm_fallback")
-                logger.warning("LLM falhou; usando fallback de regras", exc_info=True)
+                report_failure(logger, "LLM falhou; usando fallback de regras", exc)
 
         return self._classify_with_rules(message, context)
 
@@ -221,9 +222,9 @@ class IntentClassifier:
             )
             metrics.incr("vision_success")
             return self._finalize(intent)
-        except Exception:  # noqa: BLE001 — sem fallback de regras para imagem
+        except Exception as exc:  # noqa: BLE001 — sem fallback de regras para imagem
             metrics.incr("vision_fail")
-            logger.warning("Falha na extração por visão", exc_info=True)
+            report_failure(logger, "Falha na extração por visão", exc)
             return None
 
     # ── Regras ────────────────────────────────────────────────────────────
