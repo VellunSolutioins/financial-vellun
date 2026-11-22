@@ -71,7 +71,7 @@ def intent(**overrides) -> FinancialIntent:
 
 
 async def resolver(**overrides):
-    return await TransactionCreator()._resolve_account("u1", intent(**overrides))
+    return await TransactionCreator().resolve_account("u1", intent(**overrides))
 
 
 def pergunta(resultado) -> Question:

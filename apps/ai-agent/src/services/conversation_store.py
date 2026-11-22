@@ -65,6 +65,10 @@ class ConversationState:
     # voltava a cair na mesma pergunta. Chave opcional: um estado v3 gravado
     # antes dela é lido sem ela, e no pior caso a pergunta se repete uma vez.
     confirmed_amount: float | None = None
+    # Ação pendente sobre algo que já existe (dar baixa, pagar fatura), em vez
+    # de um lançamento novo: ver ``action_processor``. Chave opcional, como a
+    # anterior: estado gravado antes dela é lido sem ela.
+    pending_action: dict | None = None
 
     def belongs_to(self, contact: dict) -> bool:
         """``True`` se o vínculo atual do número é o mesmo da pergunta pendente."""
@@ -93,6 +97,7 @@ class ConversationState:
                 "referenceDate": self.reference_date,
                 "attempts": self.attempts,
                 "confirmedAmount": self.confirmed_amount,
+                "pendingAction": self.pending_action,
             },
             ensure_ascii=False,
         )
@@ -124,6 +129,7 @@ class ConversationState:
         link_version = data.get("linkVersion")
         attempts = data.get("attempts")
         confirmed = data.get("confirmedAmount")
+        action = data.get("pendingAction")
         return ConversationState(
             pending_intent=intent,
             awaiting_confirmation=bool(data.get("awaitingConfirmation")),
@@ -140,6 +146,7 @@ class ConversationState:
                 if isinstance(confirmed, (int, float)) and not isinstance(confirmed, bool)
                 else None
             ),
+            pending_action=action if isinstance(action, dict) else None,
         )
 
     def is_expired(self, ttl_seconds: int) -> bool:

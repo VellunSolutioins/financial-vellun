@@ -334,3 +334,66 @@ def test_instabilidade_do_llm_fica_como_aviso_com_o_tipo_do_erro(caplog):
     registro = next(r for r in caplog.records if "LLM falhou" in r.getMessage())
     assert registro.levelname == "WARNING"
     assert "TimeoutError" in registro.getMessage()
+
+
+# ── Baixa e fatura (Fase 2) ──────────────────────────────────────────────────
+def test_pagar_fatura_nao_e_gasto():
+    result = classify("paguei a fatura do nubank", CONTEXTO_CONSULTA)
+    assert result.intent == IntentType.pay_invoice
+    assert classify("paguei 500 da fatura", CONTEXTO_CONSULTA).amount == 500
+
+
+def test_dar_baixa_pelas_regras():
+    result = classify("marca a luz como paga", CONTEXTO_CONSULTA)
+    assert result.intent == IntentType.settle_bill
+    assert result.transaction_type == TransactionTypeEnum.expense
+
+    recebido = classify("já recebi do cliente joão", CONTEXTO_CONSULTA)
+    assert recebido.intent == IntentType.settle_bill
+    assert recebido.transaction_type == TransactionTypeEnum.income
+
+
+def test_gasto_comum_continua_lancamento():
+    assert classify("paguei 120 de luz", CONTEXTO_CONSULTA).intent == (
+        IntentType.create_transaction
+    )
+
+
+def test_llm_que_lanca_pagamento_de_fatura_como_gasto_e_corrigido():
+    from src.schemas.financial_intent import FinancialIntent
+
+    llm = _LlmFixo(
+        FinancialIntent(
+            intent=IntentType.create_transaction,
+            transaction_type=TransactionTypeEnum.expense,
+            amount=450,
+        )
+    )
+    result = asyncio.run(
+        IntentClassifier(provider=llm).classify("paguei 450 da fatura do nubank", CONTEXTO_CONSULTA)
+    )
+    assert result.intent == IntentType.pay_invoice
+    assert result.amount == 450
+
+
+def test_baixa_e_fatura_descartam_conta_e_cartao_nao_citados():
+    from src.schemas.financial_intent import FinancialIntent
+
+    llm = _LlmFixo(
+        FinancialIntent(
+            intent=IntentType.pay_invoice, card_name="Nubank", account_name="Itaú"
+        )
+    )
+    result = asyncio.run(
+        IntentClassifier(provider=llm).classify("paguei a fatura do cartão", CONTEXTO_CONSULTA)
+    )
+    # A conta de onde sai o dinheiro e o cartão precisam ter sido ditos.
+    assert result.account_name is None
+    assert result.card_name is None
+
+    citado = asyncio.run(
+        IntentClassifier(provider=llm).classify(
+            "paguei a fatura do nubank pelo itaú", CONTEXTO_CONSULTA
+        )
+    )
+    assert (citado.card_name, citado.account_name) == ("Nubank", "Itaú")

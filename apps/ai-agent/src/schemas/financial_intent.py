@@ -16,6 +16,10 @@ class IntentType(str, Enum):
     # aporte ou resgate de investimento: não é receita nem despesa, e o agente
     # não registra — orienta a usar "Transferir" no app (docs/adrs/0018).
     unsupported_movement = "unsupported_movement"
+    # Fase 2 (docs/plans/018): dar baixa em algo já lançado em aberto ("paguei a
+    # conta de luz", "recebi do cliente") e pagar a fatura do cartão.
+    settle_bill = "settle_bill"
+    pay_invoice = "pay_invoice"
     unknown = "unknown"
 
 
@@ -101,6 +105,9 @@ class FinancialIntent(BaseModel):
     )
     period_end: str | None = Field(
         default=None, description="No query_summary: fim do período (YYYY-MM-DD)"
+    )
+    card_name: str | None = Field(
+        default=None, description="No pay_invoice: o cartão da fatura, se citado"
     )
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     needs_confirmation: bool = False

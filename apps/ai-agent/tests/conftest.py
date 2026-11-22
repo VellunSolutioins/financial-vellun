@@ -60,6 +60,27 @@ def no_feature_flags():
 
 
 @pytest.fixture(autouse=True)
+def payments_off():
+    """Baixa e fatura desligadas (``whatsapp_payments``), sem chamar a API.
+
+    A oferta "É o pagamento dela?" consulta os itens em aberto antes de cada
+    lançamento; sem isto, todo teste de criação tentava a API de verdade.
+    Testes da Fase 2 trocam ``action_processor._open_items``. Sem
+    ``monkeypatch``, pelo mesmo motivo de ``no_feature_flags``.
+    """
+    from src.services import action_processor as module
+
+    original = module._open_items
+
+    async def _off(user_id, kind):
+        raise module.FeatureDisabled
+
+    module._open_items = _off
+    yield
+    module._open_items = original
+
+
+@pytest.fixture(autouse=True)
 def isolated_state():
     """Zera todo estado global compartilhado entre testes."""
     # O `.env` do desenvolvedor pode trazer outros valores; o teste manda.

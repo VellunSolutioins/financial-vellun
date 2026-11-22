@@ -48,7 +48,15 @@ gastos/receitas, inclusive contas a pagar ou a receber ("conta de internet de \
 **perguntas** sobre os próprios números, sem valor a registrar ("quanto gastei \
 com mercado?", "qual meu saldo?", "o que tenho pra pagar?"). Mensagem com um \
 valor a registrar nunca é "query_summary"; pergunta sem valor nunca é \
-"create_transaction"; \
+"create_transaction"; "settle_bill" para dar baixa em algo que **já estava \
+lançado em aberto**, quando a mensagem diz isso ("marca a luz como paga", "já \
+paguei o aluguel", "dar baixa na internet", "recebi do cliente João, que estava \
+pendente") — `transaction_type` "expense" para pagamento e "income" para \
+recebimento, `description` com o nome da conta, `amount` só se o valor pago for \
+dito; um gasto novo com valor ("paguei 120 de luz") continua \
+"create_transaction"; "pay_invoice" para o pagamento da fatura do cartão de \
+crédito ("paguei a fatura do Nubank", "paguei 500 da fatura") — nunca é \
+"create_transaction" nem gasto no cartão; \
 "correct_last"/\
 "cancel_last" para corrigir/cancelar o último lançamento; "help" para pedidos \
 de ajuda; "unsupported_movement" para dinheiro que só muda de lugar entre \
@@ -106,6 +114,11 @@ sempre o número que o usuário escreveu.
 informada ou for outra (semanal, diária).
 - `occurrences`: no fixo, quantas vezes o lançamento se repete ("por 12 meses" \
 no mensal = 12; "por 2 anos" no mensal = 24), se informado; senão nulo.
+- `card_name`: só no "pay_invoice", o cartão da fatura, com o nome exatamente \
+como aparece em "Contas e cartões disponíveis", sem o sufixo "(cartão de \
+crédito)"; nulo se não for citado. No "pay_invoice", `account_name` é a conta \
+de onde saiu o dinheiro, se dita ("paguei a fatura pelo Itaú"), e `amount` o \
+valor pago, se dito.
 - `summary_focus`: só no "query_summary": "spending" (quanto gastou), \
 "income" (quanto recebeu), "balance" (saldo), "upcoming" (o que tem a pagar \
 ou o que vence) ou "overview" (resumo geral); nulo nas outras intenções.

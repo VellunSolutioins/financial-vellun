@@ -9,6 +9,7 @@ import { BillingModule } from '../billing/billing.module';
 import { CreditCardsModule } from '../credit-cards/credit-cards.module';
 import { DashboardModule } from '../dashboard/dashboard.module';
 import { FeatureFlagsModule } from '../feature-flags/feature-flags.module';
+import { TransactionsModule } from '../transactions/transactions.module';
 import { WhatsappLinkModule } from '../whatsapp-link/whatsapp-link.module';
 
 @Module({
@@ -19,6 +20,7 @@ import { WhatsappLinkModule } from '../whatsapp-link/whatsapp-link.module';
     CreditCardsModule,
     DashboardModule,
     FeatureFlagsModule,
+    TransactionsModule,
   ],
   controllers: [InternalController, InternalActionsController],
   providers: [InternalService, InternalActionsService, AiRetentionService],

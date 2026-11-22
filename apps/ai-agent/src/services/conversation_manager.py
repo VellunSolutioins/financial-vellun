@@ -97,6 +97,31 @@ class ConversationManager:
             ),
         )
 
+    async def set_action(
+        self,
+        phone: str,
+        action: dict,
+        contact: dict | None = None,
+        *,
+        attempts: int = 0,
+    ) -> None:
+        """Guarda uma ação pendente (baixa, fatura) e o vínculo de quem a recebeu.
+
+        ``action`` é o estado do ``action_processor``; serializável em JSON.
+        """
+        contact = contact or {}
+        await self.store.save(
+            phone,
+            ConversationState(
+                awaiting_confirmation=True,
+                user_id=contact.get("userId"),
+                contact_id=contact.get("contactId"),
+                link_version=contact.get("linkVersion"),
+                attempts=attempts,
+                pending_action=action,
+            ),
+        )
+
     async def clear(self, phone: str) -> None:
         await self.store.clear(phone)
 

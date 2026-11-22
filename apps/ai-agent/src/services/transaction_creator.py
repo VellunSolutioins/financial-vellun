@@ -23,6 +23,7 @@ from .confirmation_rules import (
     format_brl,
     total_amount,
 )
+from .feature_flags import feature_flags
 from .metrics import metrics
 from .reply_parsers import match_names, normalize
 from .user_catalog import user_catalog
@@ -43,6 +44,11 @@ FREQUENCY_LABELS = {
     RecurrenceFrequencyEnum.semiannual: "semestral",
     RecurrenceFrequencyEnum.annual: "anual",
 }
+
+#: Fim da resposta de um lançamento que nasce em aberto. Com a flag
+#: ``whatsapp_payments`` ligada, vira ``TELL_ME_HERE``.
+REGISTER_IN_APP = ", registre no app."
+TELL_ME_HERE = ", é só me avisar aqui."
 
 NO_ACCOUNT_MESSAGE = (
     "Não encontrei uma conta para registrar. Cadastre uma conta no app "
@@ -109,7 +115,7 @@ class TransactionCreator:
         Chamado antes de registrar a extração como confirmada: a pergunta deixa
         o lançamento pendente, e a resposta volta por ``_merge_confirmation_reply``.
         """
-        account = await self._resolve_account(user_id, intent)
+        account = await self.resolve_account(user_id, intent)
         if isinstance(account, Question):
             return account
         category = await self._resolve_category(user_id, intent)
@@ -139,7 +145,7 @@ class TransactionCreator:
         lançamento foi completado por respostas a perguntas.
         """
         tx_type = _tx_type(intent)
-        account = await self._resolve_account(user_id, intent)
+        account = await self.resolve_account(user_id, intent)
         if not isinstance(account, dict):
             return {"ok": False, "message": NO_ACCOUNT_MESSAGE}
 
@@ -201,6 +207,10 @@ class TransactionCreator:
             logger.info("Lancamento ja existia para esta chave de idempotencia")
 
         message = self._success_message(intent, payload, account, category)
+        if message.endswith(REGISTER_IN_APP):
+            # Com a baixa pelo WhatsApp ligada, o próprio agente resolve.
+            if (await feature_flags.enabled()).get("whatsapp_payments"):
+                message = message[: -len(REGISTER_IN_APP)] + TELL_ME_HERE
         return {"ok": True, "message": message, "transaction": transaction}
 
     @staticmethod
@@ -238,14 +248,14 @@ class TransactionCreator:
             pending = (
                 " Ficou em aberto: quando "
                 + ("receber" if payload["type"] == "income" else "pagar")
-                + ", registre no app."
+                + REGISTER_IN_APP
             )
         return (
             f"Lançamento criado! {type_label} de {format_brl(total)} "
             f"em {category_label}, {destination}, em {when}.{pending}"
         )
 
-    async def _resolve_account(
+    async def resolve_account(
         self, user_id: str, intent: FinancialIntent
     ) -> dict | Question | None:
         """Conta comum ou cartão (a conta interna dele) do lançamento.
