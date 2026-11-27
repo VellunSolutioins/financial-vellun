@@ -170,7 +170,7 @@ export default function AssinaturaPage() {
 
       {!loading && showManagement && choosingAgain && (
         <>
-          <div className="rounded-md border border-gray-300 bg-gray-50 px-4 py-3 text-sm text-gray-700">
+          <div className="rounded-md border border-input bg-muted/50 px-4 py-3 text-sm text-foreground">
             O seu plano atual não é mais oferecido. Escolha um dos planos abaixo para regularizar.
           </div>
           <PlansList plans={plans} busy={busy} blocked={blocked} onSubscribe={handleSubscribe} />
@@ -183,7 +183,7 @@ export default function AssinaturaPage() {
 function ReturnNotice({ status }: { status: ReturnStatus }) {
   if (status === 'success') {
     return (
-      <div className="rounded-md border border-blue-300 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+      <div className="rounded-md border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 px-4 py-3 text-sm text-blue-900 dark:text-blue-300">
         Recebemos seu checkout. A ativação ocorre <strong>após a confirmação do pagamento</strong> e
         pode levar alguns instantes.
       </div>
@@ -191,14 +191,14 @@ function ReturnNotice({ status }: { status: ReturnStatus }) {
   }
   if (status === 'cancel') {
     return (
-      <div className="rounded-md border border-gray-300 bg-gray-50 px-4 py-3 text-sm text-gray-700">
+      <div className="rounded-md border border-input bg-muted/50 px-4 py-3 text-sm text-foreground">
         Checkout não concluído. Você pode tentar novamente quando quiser.
       </div>
     );
   }
   if (status === 'required') {
     return (
-      <div className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900">
+      <div className="rounded-md border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-900 dark:text-red-300">
         É necessária uma assinatura ativa para usar o produto.
       </div>
     );
@@ -223,7 +223,7 @@ function BillingProfileNotice({
   const list =
     labels.length > 1 ? `${labels.slice(0, -1).join(', ')} e ${labels.at(-1)}` : labels[0];
   return (
-    <div className="rounded-md border border-blue-300 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+    <div className="rounded-md border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 px-4 py-3 text-sm text-blue-900 dark:text-blue-300">
       Para assinar, complete seus dados de cobrança em Minha Conta: {list}.{' '}
       <Link href="/app/conta" className="font-semibold underline">
         Completar dados
@@ -260,7 +260,7 @@ function StatusNotice({
 }) {
   if (status === 'expired') {
     return (
-      <div className="rounded-md border border-gray-300 bg-gray-50 px-4 py-3 text-sm text-gray-700">
+      <div className="rounded-md border border-input bg-muted/50 px-4 py-3 text-sm text-foreground">
         A última tentativa de assinatura não foi concluída e nada foi cobrado. Escolha um plano para
         tentar de novo.
       </div>
@@ -268,7 +268,7 @@ function StatusNotice({
   }
   if (status === 'unpaid') {
     return (
-      <div className="rounded-md border border-yellow-300 bg-yellow-50 px-4 py-3 text-sm text-yellow-900">
+      <div className="rounded-md border border-yellow-300 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-950/40 px-4 py-3 text-sm text-yellow-900 dark:text-yellow-300">
         {failure
           ? `${paymentFailureText(failure.reason)} Escolha um plano para tentar de novo, se possível com outro cartão.`
           : 'Não conseguimos confirmar o seu pagamento. Escolha um plano para regularizar e voltar a usar o produto.'}
@@ -308,7 +308,7 @@ function ManagementCard({
       </CardHeader>
       <CardContent className="space-y-4">
         {state.status === 'past_due' && (
-          <div className="rounded-md border border-yellow-300 bg-yellow-50 px-3 py-2 text-sm text-yellow-900">
+          <div className="rounded-md border border-yellow-300 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-950/40 px-3 py-2 text-sm text-yellow-900 dark:text-yellow-300">
             Seu último pagamento não foi confirmado. Regularize para manter o acesso
             {state.graceUntil ? ` (garantido até ${formatDate(state.graceUntil)})` : ''}. Você
             informa o cartão de novo e a cobrança anterior é cancelada.
@@ -320,13 +320,13 @@ function ManagementCard({
               {paymentFailureText(state.lastPaymentFailure.reason)}
             </p>
           ) : (
-            <div className="rounded-md border border-yellow-300 bg-yellow-50 px-3 py-2 text-sm text-yellow-900">
+            <div className="rounded-md border border-yellow-300 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-950/40 px-3 py-2 text-sm text-yellow-900 dark:text-yellow-300">
               {paymentFailureText(state.lastPaymentFailure.reason)} Confira o cartão com o banco
               antes do próximo vencimento.
             </div>
           ))}
         {state.cancelAtPeriodEnd && (
-          <div className="rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-700">
+          <div className="rounded-md border border-input bg-muted/50 px-3 py-2 text-sm text-foreground">
             Cancelamento programado. Seu acesso continua até {formatDate(state.currentPeriodEnd)}.
           </div>
         )}

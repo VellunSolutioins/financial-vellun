@@ -103,7 +103,7 @@ export default function CartaoDetalhePage() {
       </div>
 
       {card?.needsSetup && (
-        <Card className="rounded-2xl border-amber-200">
+        <Card className="rounded-2xl border-amber-200 dark:border-amber-800">
           <CardContent className="p-4">
             <p className="mb-3 text-sm font-medium">Configurar fechamento</p>
             <CardSetupForm card={card} onSuccess={load} onCancel={() => undefined} />

@@ -3,11 +3,11 @@ import { ZELOO_SLOGAN } from '@/components/brand/zeloo-logo';
 import { cn } from '@/lib/utils';
 import { Brand } from './brand';
 import { CompanyInfo } from './company-info';
-import { homeSectionLinks, type HomePath } from './sections';
+import { HOME_SECTION_LINKS } from './sections';
 import { container, focusRing } from './styles';
 
-const footerGroups = (home: HomePath) => [
-  { title: 'Conheça', links: homeSectionLinks(home) },
+const FOOTER_GROUPS = [
+  { title: 'Conheça', links: HOME_SECTION_LINKS },
   {
     title: 'Sua conta',
     links: [
@@ -28,12 +28,12 @@ const footerGroups = (home: HomePath) => [
  * Rodapé das páginas públicas. Mobile: marca e, abaixo, os grupos de links em
  * duas colunas. A partir do `lg`, marca à esquerda e grupos lado a lado.
  */
-export function SiteFooter({ home = '/' }: { home?: HomePath }) {
+export function SiteFooter() {
   return (
     <footer className="border-t bg-background pb-[env(safe-area-inset-bottom)]">
       <div className={cn(container, 'grid gap-8 py-10 lg:grid-cols-[1fr_auto] lg:gap-16')}>
         <div>
-          <Brand href={home} />
+          <Brand />
           <p className="text-sm font-medium text-ink">{ZELOO_SLOGAN}</p>
           <p className="mt-1 text-sm text-ink-muted">
             © {new Date().getFullYear()} Zeloo. Todos os direitos reservados.
@@ -43,7 +43,7 @@ export function SiteFooter({ home = '/' }: { home?: HomePath }) {
           aria-label="Rodapé"
           className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 lg:gap-x-12"
         >
-          {footerGroups(home).map((group) => (
+          {FOOTER_GROUPS.map((group) => (
             <div key={group.title}>
               <h2 className="text-xs font-semibold uppercase tracking-wide text-ink">
                 {group.title}

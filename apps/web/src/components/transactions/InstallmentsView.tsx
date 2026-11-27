@@ -139,9 +139,9 @@ export function InstallmentsView() {
       className={cn(
         'shrink-0',
         i.status === 'active'
-          ? 'bg-blue-100 text-blue-700'
+          ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400'
           : i.status === 'finished'
-            ? 'bg-emerald-100 text-emerald-700'
+            ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400'
             : 'bg-muted text-muted-foreground',
       )}
     >

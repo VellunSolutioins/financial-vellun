@@ -45,7 +45,7 @@ export default function ContaDetalhePage() {
           <CardContent className="p-4">
             <p className="text-xs text-muted-foreground">Saldo atual</p>
             <p
-              className={`text-2xl font-bold ${account.currentBalance >= 0 ? 'text-green-600' : 'text-red-600'}`}
+              className={`text-2xl font-bold ${account.currentBalance >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}
             >
               {formatCurrency(account.currentBalance)}
             </p>

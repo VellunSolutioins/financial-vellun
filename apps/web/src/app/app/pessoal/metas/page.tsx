@@ -21,17 +21,17 @@ function formatCurrency(v: number) {
 const healthStyles: Record<string, { bar: string; badge: string; text: string }> = {
   excelente: {
     bar: 'bg-emerald-500',
-    badge: 'bg-emerald-100 text-emerald-700',
-    text: 'text-emerald-600',
+    badge: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400',
+    text: 'text-emerald-600 dark:text-emerald-400',
   },
-  saudavel: { bar: 'bg-blue-500', badge: 'bg-blue-100 text-blue-700', text: 'text-blue-600' },
-  atencao: { bar: 'bg-amber-500', badge: 'bg-amber-100 text-amber-700', text: 'text-amber-600' },
+  saudavel: { bar: 'bg-blue-500', badge: 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400', text: 'text-blue-600 dark:text-blue-400' },
+  atencao: { bar: 'bg-amber-500', badge: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400', text: 'text-amber-600 dark:text-amber-400' },
   apertado: {
     bar: 'bg-orange-500',
-    badge: 'bg-orange-100 text-orange-700',
-    text: 'text-orange-600',
+    badge: 'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-400',
+    text: 'text-orange-600 dark:text-orange-400',
   },
-  critico: { bar: 'bg-rose-500', badge: 'bg-rose-100 text-rose-700', text: 'text-rose-600' },
+  critico: { bar: 'bg-rose-500', badge: 'bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-400', text: 'text-rose-600 dark:text-rose-400' },
 };
 
 export default function MetasPage() {

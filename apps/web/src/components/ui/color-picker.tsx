@@ -104,7 +104,7 @@ export function ColorPicker({
               style={{ backgroundColor: color }}
             >
               {selected && (
-                <Check className={cn('h-4 w-4', isLight(color) ? 'text-black' : 'text-white')} />
+                <Check className={cn('h-4 w-4', isLight(color) ? 'text-foreground' : 'text-white')} />
               )}
             </button>
           );

@@ -67,7 +67,7 @@ export function PendingTransactionsView({ type, title }: Props) {
       header: 'Vencimento',
       cellClassName: 'text-muted-foreground',
       cell: (tx) => (
-        <span className={tx.isOverdue ? 'font-medium text-red-600' : undefined}>
+        <span className={tx.isOverdue ? 'font-medium text-red-600 dark:text-red-400' : undefined}>
           {formatDateBR(tx.transactionDate)}
           {tx.isOverdue && ' · vencido'}
         </span>
@@ -95,7 +95,7 @@ export function PendingTransactionsView({ type, title }: Props) {
       key: 'amount',
       header: 'Em aberto',
       align: 'right',
-      cellClassName: `font-semibold ${type === 'income' ? 'text-green-600' : 'text-red-600'}`,
+      cellClassName: `font-semibold ${type === 'income' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`,
       cell: (tx) => formatCurrency(Number(tx.remaining ?? tx.amount)),
     },
   ];
@@ -105,15 +105,15 @@ export function PendingTransactionsView({ type, title }: Props) {
       <h1 className="text-2xl font-bold">{title}</h1>
 
       {/* Total em destaque */}
-      <div className="bg-white rounded-lg border p-6">
+      <div className="bg-card rounded-lg border p-6">
         <p className="text-sm text-muted-foreground">Total em aberto</p>
         <p
-          className={`text-3xl font-bold ${type === 'income' ? 'text-green-600' : 'text-red-600'}`}
+          className={`text-3xl font-bold ${type === 'income' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}
         >
           {formatCurrency(total)}
         </p>
         {overdueCount > 0 && (
-          <p className="mt-1 text-xs text-red-600">
+          <p className="mt-1 text-xs text-red-600 dark:text-red-400">
             {overdueCount} vencido{overdueCount === 1 ? '' : 's'} e ainda não{' '}
             {type === 'income' ? 'recebido' : 'pago'}
             {overdueCount === 1 ? '' : 's'}
@@ -122,7 +122,7 @@ export function PendingTransactionsView({ type, title }: Props) {
       </div>
 
       {/* Filtros */}
-      <div className="bg-white rounded-lg border p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="bg-card rounded-lg border p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
         <Input type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} />
         <Input type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} />
         <Select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>

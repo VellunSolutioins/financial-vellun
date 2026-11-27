@@ -7,26 +7,12 @@ export const HOME_SECTIONS = [
 
 export type HomeSectionId = (typeof HOME_SECTIONS)[number]['id'];
 
-/**
- * Rotas da landing: a versão atual em `/` e a nova em `/v2`, publicadas lado a
- * lado para comparação. A nova tem três moedas em avaliação: partículas (`/v2`),
- * sólida (`/v2/solida`) e pixel (`/v2/pixel`). Cabeçalho, rodapé e logo de cada
- * rota apontam para ela mesma.
- */
-export type HomePath = '/' | '/v2' | '/v2/solida' | '/v2/pixel';
-export const HOME_PATHS: readonly string[] = ['/', '/v2', '/v2/solida', '/v2/pixel'];
-
-/** `/#id` (ou `/v2#id`): funciona de qualquer página pública, não só da home. */
-export function homeSectionLinks(home: HomePath = '/') {
-  const base = home === '/' ? '/' : home;
-  return HOME_SECTIONS.map((section) => ({
-    id: section.id,
-    href: `${base}#${section.id}`,
-    label: section.label,
-  }));
-}
-
-export const HOME_SECTION_LINKS = homeSectionLinks('/');
+/** `/#id`: funciona de qualquer página pública, não só da home. */
+export const HOME_SECTION_LINKS = HOME_SECTIONS.map((section) => ({
+  id: section.id,
+  href: `/#${section.id}`,
+  label: section.label,
+}));
 
 /** Alvo do link "Pular para o conteúdo". */
 export const MAIN_CONTENT_ID = 'conteudo';

@@ -1,7 +1,6 @@
 import { cn } from '@/lib/utils';
 import { Brand } from './brand';
 import { SkipLink } from './skip-link';
-import type { HomePath } from './sections';
 import { HeaderActions, SiteNav } from './site-nav';
 import { container } from './styles';
 
@@ -13,22 +12,14 @@ import { container } from './styles';
  * Toda página que usa este cabeçalho precisa de um `<main id={MAIN_CONTENT_ID}>`
  * para o link "Pular para o conteúdo".
  */
-export function SiteHeader({
-  home = '/',
-  themeToggle = true,
-}: {
-  /** Landing de referência para as âncoras e o logo (`/` ou `/v2`). */
-  home?: HomePath;
-  /** `false` na landing v1, que fica sempre no tema claro. */
-  themeToggle?: boolean;
-}) {
+export function SiteHeader() {
   return (
     <header className="sticky top-0 z-30 border-b bg-background">
       <SkipLink />
       <div className={cn(container, 'flex h-16 items-center justify-between gap-2')}>
-        <Brand withSlogan href={home} />
-        <SiteNav home={home} />
-        <HeaderActions home={home} themeToggle={themeToggle} />
+        <Brand withSlogan />
+        <SiteNav />
+        <HeaderActions />
       </div>
     </header>
   );

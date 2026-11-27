@@ -160,10 +160,10 @@ export function HowItWorks() {
             <div>
               <Eyebrow number="01">como funciona</Eyebrow>
               <h2 className="mt-3 text-balance text-3xl font-medium tracking-tight text-ink sm:text-4xl">
-                Três passos, <em className="font-bold italic">da mensagem ao painel.</em>
+                Três passos, <em className="text-emphasis">da mensagem ao painel.</em>
               </h2>
             </div>
-            <p className="font-mono text-xs lowercase text-ink-muted">uma etapa por vez</p>
+            <p className="font-mono text-xs lowercase text-primary">uma etapa por vez</p>
           </div>
 
           <div className="mt-8 overflow-hidden rounded-2xl border bg-card shadow-soft pin:mt-5">
@@ -191,7 +191,8 @@ export function HowItWorks() {
                     className={cn(
                       // Mobile: as três dividem a largura; a partir do `sm`, cada uma no seu tamanho.
                       'relative flex min-h-12 flex-1 items-center justify-center gap-2 border-r px-2 text-sm font-medium text-ink-muted last:border-r-0 hover:text-ink sm:flex-none sm:justify-start sm:px-5 sm:last:border-r',
-                      selected && 'bg-background text-ink',
+                      selected &&
+                        "bg-primary/[0.08] text-ink after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-primary after:content-['']",
                       focusRing,
                       'focus-visible:ring-inset focus-visible:ring-offset-0',
                     )}
@@ -203,11 +204,26 @@ export function HowItWorks() {
                         selected ? 'bg-primary' : 'bg-transparent',
                       )}
                     />
-                    <span className="hidden font-mono text-xs sm:inline">{pad(i + 1)}</span>
+                    <span
+                      className={cn(
+                        'hidden font-mono text-xs sm:inline',
+                        selected && 'text-primary',
+                      )}
+                    >
+                      {pad(i + 1)}
+                    </span>
                     {s.tab}
                   </button>
                 );
               })}
+            </div>
+
+            {/* Progresso das etapas, na cor da marca. */}
+            <div className="h-1 bg-muted" aria-hidden>
+              <div
+                className="h-full bg-primary transition-[width] duration-300 ease-out motion-reduce:transition-none"
+                style={{ width: `${((active + 1) / STEPS.length) * 100}%` }}
+              />
             </div>
 
             <div
@@ -237,15 +253,15 @@ export function HowItWorks() {
                 {step.facts.map(([key, value], i) => (
                   <Line key={key} n={4 + i}>
                     <p className="grid grid-cols-[5.5rem_1fr] font-mono text-sm">
-                      <span className="text-ink-muted">{key}</span>
+                      <span className="text-primary">{key}</span>
                       <span className="text-ink">{value}</span>
                     </p>
                   </Line>
                 ))}
               </ol>
 
-              <div className="overflow-hidden bg-surface/60 p-4 sm:p-6 pin:py-4">
-                <p className="mb-2 font-mono text-xs lowercase text-ink-muted">prévia</p>
+              <div className="overflow-hidden bg-[radial-gradient(70%_80%_at_70%_30%,hsl(var(--primary)/0.14),transparent_70%)] bg-primary/[0.05] p-4 sm:p-6 pin:py-4">
+                <p className="mb-2 font-mono text-xs lowercase text-primary">prévia</p>
                 {/* `key`: troca de etapa remonta a prévia e reinicia a animação dela. */}
                 <div key={active}>{step.preview}</div>
               </div>
@@ -253,7 +269,7 @@ export function HowItWorks() {
 
             <div className="flex items-center justify-between gap-4 border-t px-4 py-3 font-mono text-xs lowercase text-ink-muted sm:px-5">
               <span>
-                {pad(active + 1)} / {pad(STEPS.length)}
+                <span className="text-primary">{pad(active + 1)}</span> / {pad(STEPS.length)}
               </span>
               <span className="hidden pin:inline">
                 role para ver o próximo passo ·{' '}

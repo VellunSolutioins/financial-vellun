@@ -1,10 +1,9 @@
 'use client';
 import { useState } from 'react';
-import { Plus } from 'lucide-react';
+import { Pause, Plus } from 'lucide-react';
 
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { PageHeading, SectionHeading } from '@/components/dashboard/home-ledger';
 import { Dialog } from '@/components/ui/dialog';
 import { Pagination } from '@/components/ui/pagination';
 import { useToast } from '@/components/ui/toast';
@@ -14,7 +13,7 @@ import { RecurrenceForm } from '@/components/transactions/RecurrenceForm';
 import { TransactionForm, frequencyLabels } from '@/components/transactions/TransactionForm';
 import { useRecurrences, type Recurrence } from '@/hooks/useRecurrences';
 import { apiClient } from '@/lib/api-client';
-import { cn, formatDateBR } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 
 const PAGE_SIZE = 10;
 
@@ -75,142 +74,64 @@ export function RecurrencesView() {
     }
   };
 
-  const statusBadge = (r: Recurrence) => (
-    <button
-      type="button"
-      onClick={() => void toggleActive(r)}
-      title={r.isActive ? 'Pausar recorrência' : 'Reativar recorrência'}
-    >
-      <Badge
-        className={cn(
-          'cursor-pointer',
-          r.isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-muted text-muted-foreground',
-        )}
-      >
-        {r.isActive ? 'Ativa' : 'Pausada'}
-      </Badge>
-    </button>
-  );
-
-  const actions = (r: Recurrence) => (
-    <>
-      <Button size="sm" variant="ghost" onClick={() => setEditing(r)}>
-        Editar
-      </Button>
-      <Button
-        size="sm"
-        variant="ghost"
-        className="text-destructive"
-        onClick={() => void handleDelete(r)}
-      >
-        Excluir
-      </Button>
-    </>
-  );
-
-  const amountClass = (r: Recurrence) =>
-    cn('font-semibold', r.type === 'income' ? 'text-emerald-600' : 'text-foreground');
+  const activeCount = data.filter((r) => r.isActive).length;
 
   return (
-    <div className="space-y-4 sm:space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold sm:text-2xl">Despesas Fixas e Recorrências</h1>
-          <p className="text-sm text-muted-foreground">
-            Lançamentos que se repetem automaticamente.
-          </p>
-        </div>
-        <Button size="sm" onClick={() => setCreating(true)}>
-          <Plus className="mr-1 h-4 w-4" />
-          Nova recorrência
-        </Button>
-      </div>
+    <div className="space-y-6">
+      <PageHeading
+        eyebrow={
+          <>
+            <span className="text-primary">gastos fixos</span> · {activeCount}{' '}
+            {activeCount === 1 ? 'ativa' : 'ativas'}
+          </>
+        }
+        title="O que se repete"
+        emphasis="todo mês"
+        actions={
+          <Button onClick={() => setCreating(true)}>
+            <Plus className="h-4 w-4" />
+            Nova recorrência
+          </Button>
+        }
+      />
 
       <FixedSummary version={version} />
 
-      <Card className="rounded-2xl">
-        <CardContent className="p-0">
-          {error ? (
-            <div role="alert" className="p-6 text-sm text-destructive">
-              {error}
-            </div>
-          ) : loading ? (
-            <div className="p-10 text-center text-sm text-muted-foreground">Carregando...</div>
-          ) : data.length === 0 ? (
-            <div className="p-10 text-center text-sm text-muted-foreground">
-              Nenhuma recorrência cadastrada ainda.
-            </div>
-          ) : (
-            <>
-              {/* Mobile: um card por recorrência */}
-              <ul className="divide-y divide-border md:hidden">
-                {pageItems.map((r) => (
-                  <li key={r.seriesId} className="space-y-2 p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate font-medium">{r.description}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {r.type === 'income' ? 'Receita' : 'Despesa'} ·{' '}
-                          {frequencyLabels[r.frequency]} · Dia {r.dueDay}
-                        </p>
-                      </div>
-                      <span className={cn('shrink-0', amountClass(r))}>
-                        {formatCurrency(r.amount)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      {statusBadge(r)}
-                      <div className="-mr-2 flex">{actions(r)}</div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+      <section aria-labelledby="fixos-lista" className="space-y-3 border-t border-border pt-6">
+        <SectionHeading
+          id="fixos-lista"
+          number={2}
+          eyebrow="recorrências"
+          title="Suas"
+          emphasis="recorrências"
+          aside={
+            data.length > 0 ? (
+              <span className="shrink-0 font-mono text-xs lowercase text-muted-foreground">
+                {data.length} {data.length === 1 ? 'cadastrada' : 'cadastradas'}
+              </span>
+            ) : undefined
+          }
+        />
+        {error ? (
+          <div role="alert" className="py-6 text-sm text-destructive">
+            {error}
+          </div>
+        ) : loading ? (
+          <div className="py-10 text-center text-sm text-muted-foreground">Carregando...</div>
+        ) : data.length === 0 ? (
+          <div className="py-10 text-center text-sm text-muted-foreground">
+            Nenhuma recorrência cadastrada ainda.
+          </div>
+        ) : (
+          <ul className="divide-y divide-border">
+            {pageItems.map((r) => (
+              <RecurrenceRow key={r.seriesId} recurrence={r} onOpen={() => setEditing(r)} />
+            ))}
+          </ul>
+        )}
+      </section>
 
-              {/* Tablet/desktop: tabela */}
-              <table className="hidden w-full text-sm md:table">
-                <thead>
-                  <tr className="border-b border-border text-left text-xs font-medium text-muted-foreground">
-                    <th className="p-3">Descrição</th>
-                    <th className="p-3">Tipo</th>
-                    <th className="p-3">Frequência</th>
-                    <th className="p-3">Dia</th>
-                    <th className="p-3">Próxima</th>
-                    <th className="p-3 text-right">Valor</th>
-                    <th className="p-3">Status</th>
-                    <th className="p-3" />
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {pageItems.map((r) => (
-                    <tr key={r.seriesId} className="hover:bg-muted/40">
-                      <td className="p-3 font-medium">{r.description}</td>
-                      <td className="whitespace-nowrap p-3 text-muted-foreground">
-                        {r.type === 'income' ? 'Receita' : 'Despesa'}
-                      </td>
-                      <td className="whitespace-nowrap p-3 text-muted-foreground">
-                        {frequencyLabels[r.frequency]}
-                      </td>
-                      <td className="whitespace-nowrap p-3 text-muted-foreground">
-                        Dia {r.dueDay}
-                      </td>
-                      <td className="whitespace-nowrap p-3 text-muted-foreground">
-                        {r.isActive ? formatDateBR(r.nextDate) : '—'}
-                      </td>
-                      <td className={cn('whitespace-nowrap p-3 text-right', amountClass(r))}>
-                        {formatCurrency(r.amount)}
-                      </td>
-                      <td className="whitespace-nowrap p-3">{statusBadge(r)}</td>
-                      <td className="whitespace-nowrap p-3 text-right">{actions(r)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
-          )}
-        </CardContent>
-      </Card>
-
-      {data.length > 0 && (
+      {data.length > PAGE_SIZE && (
         <Pagination
           page={currentPage}
           totalPages={totalPages}
@@ -227,13 +148,88 @@ export function RecurrencesView() {
 
       <Dialog open={!!editing} onClose={() => setEditing(undefined)} title="Editar recorrência">
         {editing && (
-          <RecurrenceForm
-            recurrence={editing}
-            onSuccess={afterWrite}
-            onCancel={() => setEditing(undefined)}
-          />
+          <>
+            <RecurrenceForm
+              recurrence={editing}
+              onSuccess={afterWrite}
+              onCancel={() => setEditing(undefined)}
+            />
+            {/* Pausar e excluir saíram da lista: ficam aqui, com a recorrência aberta. */}
+            <div className="mt-4 flex flex-wrap justify-between gap-2 border-t border-border pt-4">
+              <Button type="button" variant="outline" onClick={() => void toggleActive(editing)}>
+                {editing.isActive ? 'Pausar recorrência' : 'Reativar recorrência'}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                className="text-destructive"
+                onClick={() => void handleDelete(editing)}
+              >
+                Excluir
+              </Button>
+            </div>
+          </>
         )}
       </Dialog>
     </div>
+  );
+}
+
+/**
+ * Uma recorrência: a próxima data vira o selo da esquerda ("05 dez"),
+ * frequência, dia, conta e categoria numa linha, e o valor à direita. Pausada,
+ * fica esmaecida e sem data. Tocar abre a edição (com pausar e excluir).
+ */
+function RecurrenceRow({ recurrence: r, onOpen }: { recurrence: Recurrence; onOpen: () => void }) {
+  const next = new Date(`${r.nextDate.slice(0, 10)}T00:00:00`);
+  const details = [
+    `${frequencyLabels[r.frequency].toLowerCase()} · dia ${r.dueDay}`,
+    r.category?.name,
+    r.isActive ? null : 'pausada',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onOpen}
+        className={cn(
+          'flex w-full items-center gap-3 py-3 text-left transition-colors hover:bg-muted/40',
+          !r.isActive && 'opacity-60',
+        )}
+      >
+        <span
+          aria-hidden
+          className="flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-xl border border-border bg-card leading-none"
+        >
+          {r.isActive ? (
+            <>
+              <span className="text-base font-bold tabular-nums">
+                {String(next.getDate()).padStart(2, '0')}
+              </span>
+              <span className="mt-0.5 font-mono text-[10px] lowercase text-muted-foreground">
+                {next.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '')}
+              </span>
+            </>
+          ) : (
+            <Pause className="h-4 w-4 text-muted-foreground" />
+          )}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-semibold">{r.description}</span>
+          <span className="block truncate text-xs text-muted-foreground">{details}</span>
+        </span>
+        <span
+          className={cn(
+            'shrink-0 text-sm font-bold tabular-nums',
+            r.type === 'income' && 'text-emerald-700 dark:text-emerald-400',
+          )}
+        >
+          {r.type === 'income' ? '+' : ''}
+          {formatCurrency(r.amount)}
+        </span>
+      </button>
+    </li>
   );
 }

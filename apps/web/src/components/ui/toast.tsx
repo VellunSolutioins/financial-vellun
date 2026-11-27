@@ -27,7 +27,7 @@ const AUTO_DISMISS_MS = 4000;
 let counter = 0;
 
 const variantStyles: Record<ToastVariant, string> = {
-  success: 'border-green-200 bg-green-50 text-green-800',
+  success: 'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950 text-green-800 dark:text-green-300',
   error: 'border-destructive/30 bg-destructive/10 text-destructive',
 };
 const variantIcon: Record<ToastVariant, string> = {

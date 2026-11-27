@@ -39,12 +39,12 @@ export function ZelooLogoThemed({ className, alt = 'Zeloo', priority }: LogoProp
         {...LOGO}
         alt={alt}
         priority={priority}
-        className={cn('h-7 w-auto public-dark:hidden', className)}
+        className={cn('h-7 w-auto dark:hidden', className)}
       />
       <Image
         {...LOGO_WHITE}
         alt={alt}
-        className={cn('hidden h-7 w-auto public-dark:block', className)}
+        className={cn('hidden h-7 w-auto dark:block', className)}
       />
     </>
   );

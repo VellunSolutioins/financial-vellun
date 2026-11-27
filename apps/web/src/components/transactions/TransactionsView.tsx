@@ -5,18 +5,14 @@ import { useEffect, useState, Suspense } from 'react';
 import {
   AlertTriangle,
   ArrowLeftRight,
-  CreditCard as CreditCardIcon,
-  Eye,
   Plus,
-  TrendingDown,
-  TrendingUp,
+  SlidersHorizontal,
   Undo2,
-  Wallet,
 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
+import { Amount, LedgerRow, PageHeading } from '@/components/dashboard/home-ledger';
 import { Input } from '@/components/ui/input';
 import { Select } from '@/components/ui/select';
 import { Dialog } from '@/components/ui/dialog';
@@ -84,19 +80,6 @@ const sourceLabels: Record<string, string> = {
   recurring: 'Recorrente',
 };
 
-const typeStyle = {
-  income: { icon: TrendingUp, tone: 'text-emerald-600 bg-emerald-50' },
-  expense: { icon: TrendingDown, tone: 'text-rose-600 bg-rose-50' },
-  refund: { icon: Undo2, tone: 'text-emerald-600 bg-emerald-50' },
-} as const;
-
-/** Pagamento de fatura (pernas `transfer`) e transferências antigas. */
-const transferStyle = { icon: ArrowLeftRight, tone: 'text-blue-600 bg-blue-50' };
-
-function styleOf(type: string) {
-  return typeStyle[type as keyof typeof typeStyle] ?? transferStyle;
-}
-
 /**
  * Origens que recebem o selo de destaque: o que foi registrado pela IA. O
  * pipeline do WhatsApp grava `whatsapp`, então checar só `ai` deixava esses
@@ -104,84 +87,14 @@ function styleOf(type: string) {
  */
 const REGISTRADO_PELA_IA = new Set<string>(['ai', 'whatsapp']);
 
-function TypeIcon({ tx }: { tx: Transaction }) {
-  const style = styleOf(tx.type);
-  const Icon = style.icon;
-  return (
-    <span
-      className={cn('flex h-7 w-7 shrink-0 items-center justify-center rounded-full', style.tone)}
-    >
-      <Icon className="h-3.5 w-3.5" />
-    </span>
-  );
-}
-
-/** Situação do pagamento: pago, a pagar, vencido, parcial, previsto. */
-function SettlementBadge({ tx }: { tx: Transaction }) {
-  if (tx.status === 'cancelled') return null;
-  const info = settlementLabel(tx);
-  if (!info) return null;
-  return (
-    <Badge variant={info.tone} className="px-1.5 py-0 text-[10px]">
-      {info.label}
-    </Badge>
-  );
-}
-
-function EntryBadges({ tx }: { tx: Transaction }) {
-  return (
-    <>
-      <SettlementBadge tx={tx} />
-      {!isEditableEntry(tx) && (
-        <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
-          {typeLabel(tx)}
-        </Badge>
-      )}
-      {REGISTRADO_PELA_IA.has(tx.source) && (
-        <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
-          IA
-        </Badge>
-      )}
-      {(tx.recurrenceType === 'parcelado' || tx.recurrenceType === 'fixo') && (
-        <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
-          {tx.recurrenceType === 'parcelado' && tx.installmentTotal
-            ? `${tx.installmentNumber}/${tx.installmentTotal}`
-            : 'Fixo'}
-        </Badge>
-      )}
-      {tx.advancedAt && (
-        <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
-          Adiantada
-        </Badge>
-      )}
-    </>
-  );
-}
-
-function AccountLabel({ tx, className }: { tx: Transaction; className?: string }) {
-  if (!tx.account) return <>—</>;
-  return (
-    <span className={cn('flex min-w-0 items-center gap-1.5', className)}>
-      {tx.account.type === 'credit_card' ? (
-        <CreditCardIcon className="h-3.5 w-3.5 shrink-0" aria-label="Cartão" />
-      ) : (
-        <Wallet className="h-3.5 w-3.5 shrink-0" aria-label="Conta" />
-      )}
-      <span className="truncate" title={tx.account.name}>
-        {tx.account.name}
-      </span>
-    </span>
-  );
-}
-
 function amountClass(tx: Transaction) {
   return cn(
     'whitespace-nowrap font-semibold',
     tx.type === 'transfer'
       ? 'text-foreground'
       : isInflow(tx)
-        ? 'text-emerald-600'
-        : 'text-rose-600',
+        ? 'text-emerald-600 dark:text-emerald-400'
+        : 'text-rose-600 dark:text-rose-400',
     tx.status === 'cancelled' && 'text-muted-foreground line-through',
   );
 }
@@ -194,19 +107,6 @@ function monthLabel(month: string) {
     timeZone: 'UTC',
   }).format(new Date(Date.UTC(year, monthNumber - 1, 1)));
   return label.charAt(0).toUpperCase() + label.slice(1);
-}
-
-/** Quanto falta para vencer, só para datas futuras: "amanhã", "em 5 dias". */
-function dueHint(transactionDate: string) {
-  const now = new Date();
-  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
-    now.getDate(),
-  ).padStart(2, '0')}`;
-  const days = Math.round(
-    (Date.parse(transactionDate.slice(0, 10)) - Date.parse(today)) / 86_400_000,
-  );
-  if (days === 1) return 'amanhã';
-  return days > 1 ? `em ${days} dias` : null;
 }
 
 function currentMonth() {
@@ -222,6 +122,99 @@ function monthRange(month: string) {
     endDate.getUTCDate(),
   ).padStart(2, '0')}`;
   return { start, end };
+}
+
+/** "hoje", "ontem", "amanhã" ou "qua, 18/11". */
+function dayLabel(day: string) {
+  const date = new Date(`${day}T00:00:00`);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diff = Math.round((date.getTime() - today.getTime()) / 86_400_000);
+  if (diff === 0) return 'hoje';
+  if (diff === -1) return 'ontem';
+  if (diff === 1) return 'amanhã';
+  const weekday = date.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', '');
+  return `${weekday}, ${date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}`;
+}
+
+/** Agrupa os lançamentos (já ordenados) por dia, com o total líquido de cada dia. */
+function groupByDay(items: Transaction[]) {
+  const groups: { day: string; label: string; total: number; items: Transaction[] }[] = [];
+  for (const tx of items) {
+    const day = tx.transactionDate.slice(0, 10);
+    let group = groups[groups.length - 1];
+    if (!group || group.day !== day) {
+      group = { day, label: dayLabel(day), total: 0, items: [] };
+      groups.push(group);
+    }
+    group.items.push(tx);
+    if (tx.status !== 'cancelled' && tx.type !== 'transfer') {
+      group.total += (isInflow(tx) ? 1 : -1) * Number(tx.amount);
+    }
+  }
+  return groups;
+}
+
+/**
+ * Um lançamento na lista: inicial da categoria, descrição, uma linha de
+ * detalhes (conta, categoria, origem) e o valor; só a ação de pagar/receber
+ * aparece na linha. Tocar abre o lançamento.
+ */
+function TransactionRow({
+  tx,
+  onOpen,
+  action,
+}: {
+  tx: Transaction;
+  onOpen: () => void;
+  action: React.ReactNode;
+}) {
+  const settlement = tx.status === 'cancelled' ? null : settlementLabel(tx);
+  const details = [
+    tx.account?.name,
+    tx.category?.name,
+    tx.recurrenceType === 'parcelado' && tx.installmentTotal
+      ? `parcela ${tx.installmentNumber}/${tx.installmentTotal}`
+      : tx.recurrenceType === 'fixo'
+        ? 'fixo'
+        : null,
+    tx.advancedAt ? 'adiantada' : null,
+    !isEditableEntry(tx) ? typeLabel(tx).toLowerCase() : null,
+    REGISTRADO_PELA_IA.has(tx.source) ? 'via WhatsApp' : null,
+    tx.status === 'cancelled' ? 'cancelado' : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const initial = (tx.category?.name ?? tx.description).trim().charAt(0).toUpperCase();
+  return (
+    <li
+      onClick={onOpen}
+      className="flex cursor-pointer items-center gap-3 py-3 transition-colors hover:bg-muted/40 active:bg-muted/40"
+    >
+      <span
+        aria-hidden
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold text-muted-foreground"
+      >
+        {tx.type === 'transfer' ? <ArrowLeftRight className="h-4 w-4" /> : initial}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-semibold">{tx.description}</p>
+        <p className="truncate text-xs text-muted-foreground">{details || '—'}</p>
+        {settlement && (
+          <Badge variant={settlement.tone} className="mt-1 px-1.5 py-0 text-[10px]">
+            {settlement.label}
+          </Badge>
+        )}
+      </div>
+      <div className="flex shrink-0 flex-col items-end gap-1">
+        <span className={cn('text-sm', amountClass(tx))}>
+          {signOf(tx)}
+          {formatCurrency(Number(tx.amount))}
+        </span>
+        {action}
+      </div>
+    </li>
+  );
 }
 
 function TransacoesContent() {
@@ -240,6 +233,7 @@ function TransacoesContent() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editingTx, setEditingTx] = useState<Transaction | undefined>();
   const [viewingTx, setViewingTx] = useState<Transaction | undefined>();
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [refundingTx, setRefundingTx] = useState<Transaction | undefined>();
   // Parcela de compra parcelada: a exclusão pergunta o escopo (parcela, futuras, compra).
   const [deletingParcel, setDeletingParcel] = useState<Transaction | undefined>();
@@ -415,49 +409,22 @@ function TransacoesContent() {
     }
   };
 
-  // Linha/card inteiro abre o lançamento; os botões não podem propagar o clique.
-  const actions = (tx: Transaction) => (
-    <>
-      {tx.status === 'confirmed' && canSettle(tx) && (
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 px-2"
-          onClick={(e) => {
-            e.stopPropagation();
-            setSettlingTx(tx);
-          }}
-        >
-          {tx.type === 'income' ? 'Receber' : 'Pagar'}
-        </Button>
-      )}
+  // Só o que pede ação fica na linha (pagar/receber); ver e excluir ficam no
+  // lançamento aberto, para a lista não virar uma fileira de botões.
+  const settleAction = (tx: Transaction) =>
+    tx.status === 'confirmed' && canSettle(tx) ? (
       <Button
         size="sm"
-        variant="ghost"
+        variant="outline"
+        className="h-8 px-3"
         onClick={(e) => {
           e.stopPropagation();
-          setViewingTx(tx);
+          setSettlingTx(tx);
         }}
-        title="Ver detalhes"
-        aria-label="Ver detalhes"
       >
-        <Eye className="h-4 w-4" />
+        {tx.type === 'income' ? 'Receber' : 'Pagar'}
       </Button>
-      {!isMovement(tx) && (
-        <Button
-          size="sm"
-          variant="ghost"
-          className="text-destructive"
-          onClick={(e) => {
-            e.stopPropagation();
-            void handleDelete(tx);
-          }}
-        >
-          Excluir
-        </Button>
-      )}
-    </>
-  );
+    ) : null;
 
   const reverseTransfer = async (tx: Transaction) => {
     const ok = await confirm({
@@ -479,39 +446,45 @@ function TransacoesContent() {
     }
   };
 
+  const activeFilters = [
+    filters.search,
+    filters.type,
+    filters.status,
+    filters.categoryId,
+    filters.settlement,
+    order !== defaultOrder ? order : '',
+  ].filter(Boolean).length;
+  const filtersVisible = filtersOpen || activeFilters > 0;
+  const groups = groupByDay(data);
+
   return (
-    <div className="space-y-4 sm:space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-bold sm:text-2xl">Lançamentos</h1>
-          <p className="text-sm text-muted-foreground">
-            O que entra e o que sai no mês, e o que já foi pago ou recebido.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <ResourceFilter resources={resources} value={selection} onChange={setSelection} />
-          <Input
-            type="month"
-            aria-label="Mês dos lançamentos"
-            value={selectedMonth}
-            onChange={(e) => e.target.value && setParam('month', e.target.value)}
-            className="h-9 w-auto text-sm"
-          />
-          <Button size="sm" variant="outline" onClick={() => setTransferOpen(true)}>
-            <ArrowLeftRight className="mr-1 h-4 w-4" />
-            Transferir
-          </Button>
-          <Button size="sm" onClick={openNew}>
-            <Plus className="mr-1 h-4 w-4" />
-            Lançamento
-          </Button>
-        </div>
-      </div>
+    <div className="space-y-6">
+      <PageHeading
+        eyebrow={
+          <>
+            <span className="text-primary">lançamentos</span> · {monthLabel(selectedMonth)}
+          </>
+        }
+        title="O que entrou e"
+        emphasis="o que saiu"
+        actions={
+          <>
+            <Button variant="outline" onClick={() => setTransferOpen(true)}>
+              <ArrowLeftRight className="h-4 w-4" />
+              Transferir
+            </Button>
+            <Button onClick={openNew}>
+              <Plus className="h-4 w-4" />
+              Lançamento
+            </Button>
+          </>
+        }
+      />
 
       {toReview > 0 && (
         <Link
           href="/app/conta/conciliacao"
-          className="flex items-start gap-2 rounded-2xl border border-yellow-300 bg-yellow-50 p-3 text-sm text-yellow-900"
+          className="flex items-start gap-2 rounded-2xl border border-yellow-300 bg-yellow-50 p-3 text-sm text-yellow-900 dark:border-yellow-800 dark:bg-yellow-950/40 dark:text-yellow-300"
         >
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>
@@ -521,130 +494,75 @@ function TransacoesContent() {
         </Link>
       )}
 
-      {/* Filters */}
-      <Card className="rounded-2xl">
-        <CardContent className="grid grid-cols-2 gap-3 p-4 md:grid-cols-7">
-          <Input
-            placeholder="Buscar descrição..."
-            defaultValue={filters.search}
-            onChange={(e) => setParams({ search: e.target.value }, 'replace')}
-            className="col-span-2 md:col-span-2"
-          />
-          <Select defaultValue={filters.type} onChange={(e) => setParam('type', e.target.value)}>
-            <option value="">Todos os tipos</option>
-            <option value="income">Receita</option>
-            <option value="expense">Despesa</option>
-          </Select>
-          <Select
-            defaultValue={filters.status}
-            onChange={(e) => setParam('status', e.target.value)}
-          >
-            <option value="">Todos os status</option>
-            <option value="confirmed">Confirmado</option>
-            <option value="cancelled">Cancelado</option>
-          </Select>
-          <Select
-            defaultValue={filters.categoryId}
-            onChange={(e) => setParam('categoryId', e.target.value)}
-          >
-            <option value="">Todas categorias</option>
-            <option value="uncategorized">Sem categoria</option>
-            {categories.map((category) => (
-              <option key={category.id} value={category.id}>
-                {category.name}
-              </option>
-            ))}
-          </Select>
-          <Select
-            aria-label="Situação do pagamento"
-            value={filters.settlement ?? ''}
-            onChange={(e) => setParam('settlement', e.target.value)}
-          >
-            <option value="">Qualquer situação</option>
-            <option value="open">Em aberto</option>
-            <option value="overdue">Vencidos</option>
-            <option value="partial">Pagos em parte</option>
-            <option value="settled">Pagos</option>
-            <option value="forecast">Previsões</option>
-          </Select>
-          <Select
-            aria-label="Ordenação por data"
-            value={order}
-            onChange={(e) =>
-              setParam('order', e.target.value === defaultOrder ? '' : e.target.value)
-            }
-          >
-            {timing === 'past' ? (
-              <>
-                <option value="desc">Mais recentes primeiro</option>
-                <option value="asc">Mais antigos primeiro</option>
-              </>
-            ) : (
-              <>
-                <option value="asc">Vence primeiro</option>
-                <option value="desc">Vence por último</option>
-              </>
-            )}
-          </Select>
-        </CardContent>
-      </Card>
-
+      {/* Resumo do mês em linhas de extrato: o dinheiro que de fato entrou e saiu (ADR 0020). */}
       {totals && (
-        <div className="space-y-2">
-          {/* Dinheiro que de fato entrou e saiu (docs/adrs/0020). */}
-          {/* Celular: um bloco por linha, rótulo à esquerda e valor à direita; a partir do tablet, três colunas. */}
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-4">
-            {[
-              { label: 'Recebido', value: totals.received, tone: 'text-emerald-600' },
-              { label: 'Pago', value: totals.paid, tone: 'text-rose-600' },
-              totals.leftover >= 0
-                ? { label: 'Sobrou', value: totals.leftover, tone: 'text-foreground' }
-                : { label: 'Faltou', value: -totals.leftover, tone: 'text-rose-600' },
-            ].map((item) => (
-              <Card key={item.label} className="rounded-2xl">
-                <CardContent className="flex items-center justify-between gap-3 px-4 py-3 sm:block sm:p-4">
-                  <p className="text-sm text-muted-foreground sm:text-xs">{item.label}</p>
-                  <p className={cn('truncate text-base font-bold sm:text-lg', item.tone)}>
-                    {formatCurrency(item.value)}
-                  </p>
-                </CardContent>
-              </Card>
-            ))}
+        <section
+          aria-label="Resumo do mês"
+          className="bg-glow-page space-y-3 rounded-3xl border border-border p-5 shadow-sm sm:p-6"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="font-mono text-xs lowercase tracking-wide text-muted-foreground">
+              <span className="text-primary">o mês</span> · pela data de vencimento
+            </p>
+            <Input
+              type="month"
+              aria-label="Mês dos lançamentos"
+              value={selectedMonth}
+              onChange={(e) => e.target.value && setParam('month', e.target.value)}
+              className="h-9 w-auto rounded-full text-sm"
+            />
           </div>
+          <LedgerRow label="Recebido">
+            <Amount
+              value={totals.received}
+              className="text-lg font-bold text-emerald-700 dark:text-emerald-400"
+            />
+          </LedgerRow>
+          <LedgerRow label="Pago">
+            <Amount
+              value={totals.paid}
+              className="text-lg font-bold text-rose-600 dark:text-rose-400"
+            />
+          </LedgerRow>
+          <LedgerRow label={totals.leftover >= 0 ? 'Sobrou' : 'Faltou'}>
+            <Amount
+              value={Math.abs(totals.leftover)}
+              className={cn(
+                'text-2xl font-bold',
+                totals.leftover < 0 && 'text-rose-600 dark:text-rose-400',
+              )}
+            />
+          </LedgerRow>
           {(totals.toReceive > 0 || totals.toPay > 0 || totals.onCard > 0) && (
-            <div className="flex flex-wrap gap-2 text-xs">
-              {totals.toReceive > 0 && (
-                <span className="rounded-full border bg-background px-2.5 py-1">
-                  {formatCurrency(totals.toReceive)} a receber
-                </span>
-              )}
-              {totals.toPay > 0 && (
-                <span className="rounded-full border bg-background px-2.5 py-1">
-                  {formatCurrency(totals.toPay)} a pagar
-                </span>
-              )}
+            <p className="border-t border-border pt-3 font-mono text-xs text-muted-foreground">
+              {[
+                totals.toReceive > 0 && `${formatCurrency(totals.toReceive)} a receber`,
+                totals.toPay > 0 && `${formatCurrency(totals.toPay)} a pagar`,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
               {totals.onCard > 0 && (
-                <Link
-                  href="/app/pessoal/faturas"
-                  className="rounded-full border bg-background px-2.5 py-1 hover:bg-muted"
-                >
-                  {formatCurrency(totals.onCard)} no cartão — entra em &quot;Pago&quot; quando a
-                  fatura for paga
-                </Link>
+                <>
+                  {(totals.toReceive > 0 || totals.toPay > 0) && ' · '}
+                  <Link
+                    href="/app/pessoal/faturas"
+                    className="text-primary underline-offset-4 hover:underline"
+                  >
+                    {formatCurrency(totals.onCard)} no cartão
+                  </Link>{' '}
+                  (entra em &quot;pago&quot; quando a fatura for paga)
+                </>
               )}
-            </div>
+            </p>
           )}
-          <p className="text-xs text-muted-foreground">
-            Lançamentos com vencimento em {monthLabel(selectedMonth).toLowerCase()}.
-          </p>
-        </div>
+        </section>
       )}
 
       {totals && totals.overdueCount > 0 && filters.settlement !== 'overdue' && (
         <button
           type="button"
           onClick={() => setParams({ settlement: 'overdue', aba: '', order: '' })}
-          className="flex w-full items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-left text-sm text-rose-900"
+          className="flex w-full items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-left text-sm text-rose-900 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300"
         >
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <span>
@@ -666,155 +584,182 @@ function TransacoesContent() {
         </div>
       )}
 
-      {/* Abas: o que já aconteceu × o que vem até o fim do mês. */}
-      {tabs && (
-        <div
-          role="tablist"
-          aria-label="Lançamentos até hoje ou próximos"
-          className="grid grid-cols-2 gap-1 rounded-lg border border-border bg-muted/40 p-1 sm:inline-grid"
-        >
-          {(
-            [
-              { key: 'past', label: 'Até hoje', count: totals?.pastCount },
-              { key: 'upcoming', label: 'Próximos', count: totals?.upcomingCount },
-            ] as const
-          ).map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              role="tab"
-              aria-selected={timing === tab.key}
-              onClick={() => timing !== tab.key && setTab(tab.key)}
-              className={cn(
-                'rounded-md px-4 py-1.5 text-sm transition-colors',
-                timing === tab.key
-                  ? 'bg-background font-medium text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground',
-              )}
+      {/* Abas, conta/cartão e "Buscar e filtrar" numa linha; os filtros abrem embaixo. */}
+      <div className="space-y-3 border-t border-border pt-6">
+        <div className="flex flex-wrap items-center gap-2">
+          {tabs && (
+            <div
+              role="tablist"
+              aria-label="Lançamentos até hoje ou próximos"
+              className="inline-grid grid-cols-2 gap-1 rounded-full border border-border bg-muted/40 p-1"
             >
-              {tab.label}
-              {tab.count !== undefined && ` (${tab.count})`}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* List: na troca de aba/página, a lista anterior fica esmaecida até a nova chegar. */}
-      <Card
-        className={cn('rounded-2xl transition-opacity', refreshing && 'opacity-60')}
-        aria-busy={refreshing}
-      >
-        <CardContent className="p-0">
-          {error ? (
-            <div role="alert" className="p-6 text-sm text-destructive">
-              {error}
+              {(
+                [
+                  { key: 'past', label: 'Até hoje', count: totals?.pastCount },
+                  { key: 'upcoming', label: 'Próximos', count: totals?.upcomingCount },
+                ] as const
+              ).map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={timing === tab.key}
+                  onClick={() => timing !== tab.key && setTab(tab.key)}
+                  className={cn(
+                    'rounded-full px-4 py-1.5 text-sm transition-colors',
+                    timing === tab.key
+                      ? 'bg-background font-medium text-foreground shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  {tab.label}
+                  {tab.count !== undefined && (
+                    <span className="ml-1 font-mono text-xs text-muted-foreground">
+                      {tab.count}
+                    </span>
+                  )}
+                </button>
+              ))}
             </div>
-          ) : loading ? (
-            <div className="p-10 text-center text-sm text-muted-foreground">Carregando...</div>
-          ) : data.length === 0 ? (
-            <div className="p-10 text-center text-sm text-muted-foreground">
-              {tabs && timing === 'upcoming'
-                ? 'Nada vence até o fim do mês.'
-                : 'Nenhum lançamento encontrado.'}
-            </div>
-          ) : (
-            <>
-              {/* Mobile: um card por lançamento */}
-              <ul className="divide-y divide-border md:hidden">
-                {data.map((tx) => (
-                  <li
-                    key={tx.id}
-                    onClick={() => openTx(tx)}
-                    className="cursor-pointer space-y-2 p-4 transition-colors active:bg-muted/40"
-                  >
-                    {/* Conta na linha da data; selos e ações abaixo, com quebra quando não cabem. */}
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex min-w-0 items-start gap-2">
-                        <TypeIcon tx={tx} />
-                        <div className="min-w-0 space-y-0.5">
-                          <p className="truncate font-medium">{tx.description}</p>
-                          <p className="truncate text-xs text-muted-foreground">
-                            {[
-                              formatDateBR(tx.transactionDate),
-                              dueHint(tx.transactionDate),
-                              tx.category?.name,
-                            ]
-                              .filter(Boolean)
-                              .join(' · ')}
-                          </p>
-                          <AccountLabel tx={tx} className="text-xs text-muted-foreground" />
-                        </div>
-                      </div>
-                      <span className={cn('shrink-0', amountClass(tx))}>
-                        {signOf(tx)}
-                        {formatCurrency(Number(tx.amount))}
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pl-9">
-                      <div className="flex flex-wrap items-center gap-1.5 empty:hidden">
-                        <EntryBadges tx={tx} />
-                      </div>
-                      <div className="-mr-2 ml-auto flex shrink-0 items-center">{actions(tx)}</div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-
-              {/* Tablet/desktop: tabela */}
-              <div className="hidden overflow-x-auto md:block">
-                <table className="w-full min-w-[760px] text-sm">
-                  <thead>
-                    <tr className="border-b border-border text-left text-xs font-medium text-muted-foreground">
-                      <th className="p-3">Descrição</th>
-                      <th className="p-3">Categoria</th>
-                      <th className="p-3">Conta/Cartão</th>
-                      <th className="p-3 text-right">Valor</th>
-                      <th className="p-3" />
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {data.map((tx) => (
-                      <tr
-                        key={tx.id}
-                        onClick={() => openTx(tx)}
-                        className="cursor-pointer transition-colors hover:bg-muted/40"
-                      >
-                        <td className="p-3">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <TypeIcon tx={tx} />
-                            <div className="min-w-0">
-                              <p className="truncate font-medium">{tx.description}</p>
-                              <div className="flex items-center gap-1.5">
-                                <p className="whitespace-nowrap text-xs text-muted-foreground">
-                                  {formatDateBR(tx.transactionDate)}
-                                  {dueHint(tx.transactionDate) &&
-                                    ` · ${dueHint(tx.transactionDate)}`}
-                                </p>
-                                <EntryBadges tx={tx} />
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="whitespace-nowrap p-3 text-muted-foreground">
-                          {tx.category?.name ?? '—'}
-                        </td>
-                        <td className="p-3 text-muted-foreground">
-                          <AccountLabel tx={tx} className="max-w-[12rem]" />
-                        </td>
-                        <td className={cn('p-3 text-right', amountClass(tx))}>
-                          {signOf(tx)}
-                          {formatCurrency(Number(tx.amount))}
-                        </td>
-                        <td className="whitespace-nowrap p-3 text-right">{actions(tx)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
           )}
-        </CardContent>
-      </Card>
+          <ResourceFilter resources={resources} value={selection} onChange={setSelection} />
+          <Button
+            variant="outline"
+            className="rounded-full"
+            aria-expanded={filtersVisible}
+            aria-controls="tx-filtros"
+            onClick={() => setFiltersOpen((v) => !v)}
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+            Buscar e filtrar
+            {activeFilters > 0 && (
+              <span className="rounded-full bg-primary px-1.5 font-mono text-[11px] text-primary-foreground">
+                {activeFilters}
+              </span>
+            )}
+          </Button>
+        </div>
+
+        {filtersVisible && (
+          <div
+            id="tx-filtros"
+            className="grid grid-cols-2 gap-3 rounded-2xl border bg-card p-4 md:grid-cols-6"
+          >
+            <Input
+              placeholder="Buscar descrição..."
+              defaultValue={filters.search}
+              onChange={(e) => setParams({ search: e.target.value }, 'replace')}
+              className="col-span-2 md:col-span-6"
+            />
+            <Select
+              aria-label="Tipo"
+              defaultValue={filters.type}
+              onChange={(e) => setParam('type', e.target.value)}
+            >
+              <option value="">Todos os tipos</option>
+              <option value="income">Receita</option>
+              <option value="expense">Despesa</option>
+            </Select>
+            <Select
+              aria-label="Status"
+              defaultValue={filters.status}
+              onChange={(e) => setParam('status', e.target.value)}
+            >
+              <option value="">Todos os status</option>
+              <option value="confirmed">Confirmado</option>
+              <option value="cancelled">Cancelado</option>
+            </Select>
+            <Select
+              aria-label="Categoria"
+              defaultValue={filters.categoryId}
+              onChange={(e) => setParam('categoryId', e.target.value)}
+              className="md:col-span-2"
+            >
+              <option value="">Todas categorias</option>
+              <option value="uncategorized">Sem categoria</option>
+              {categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </Select>
+            <Select
+              aria-label="Situação do pagamento"
+              value={filters.settlement ?? ''}
+              onChange={(e) => setParam('settlement', e.target.value)}
+            >
+              <option value="">Qualquer situação</option>
+              <option value="open">Em aberto</option>
+              <option value="overdue">Vencidos</option>
+              <option value="partial">Pagos em parte</option>
+              <option value="settled">Pagos</option>
+              <option value="forecast">Previsões</option>
+            </Select>
+            <Select
+              aria-label="Ordenação por data"
+              value={order}
+              onChange={(e) =>
+                setParam('order', e.target.value === defaultOrder ? '' : e.target.value)
+              }
+            >
+              {timing === 'past' ? (
+                <>
+                  <option value="desc">Mais recentes primeiro</option>
+                  <option value="asc">Mais antigos primeiro</option>
+                </>
+              ) : (
+                <>
+                  <option value="asc">Vence primeiro</option>
+                  <option value="desc">Vence por último</option>
+                </>
+              )}
+            </Select>
+          </div>
+        )}
+      </div>
+
+      {/* Lista agrupada por dia, com o total do dia; na troca de aba/página, a anterior esmaece. */}
+      <div className={cn('transition-opacity', refreshing && 'opacity-60')} aria-busy={refreshing}>
+        {error ? (
+          <div role="alert" className="py-6 text-sm text-destructive">
+            {error}
+          </div>
+        ) : loading ? (
+          <div className="py-10 text-center text-sm text-muted-foreground">Carregando...</div>
+        ) : data.length === 0 ? (
+          <div className="py-10 text-center text-sm text-muted-foreground">
+            {tabs && timing === 'upcoming'
+              ? 'Nada vence até o fim do mês.'
+              : 'Nenhum lançamento encontrado.'}
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {groups.map((group) => (
+              <section key={group.day} aria-label={group.label}>
+                <div className="flex items-baseline justify-between gap-3 pb-1">
+                  <h2 className="font-mono text-xs lowercase tracking-wide text-muted-foreground">
+                    <span className="text-primary">{group.label}</span>
+                  </h2>
+                  <span className="font-mono text-xs tabular-nums text-muted-foreground">
+                    {group.total > 0 ? '+' : group.total < 0 ? '−' : ''}
+                    {formatCurrency(Math.abs(group.total))}
+                  </span>
+                </div>
+                <ul className="divide-y divide-border border-y border-border">
+                  {group.items.map((tx) => (
+                    <TransactionRow
+                      key={tx.id}
+                      tx={tx}
+                      onOpen={() => openTx(tx)}
+                      action={settleAction(tx)}
+                    />
+                  ))}
+                </ul>
+              </section>
+            ))}
+          </div>
+        )}
+      </div>
 
       {meta.total > 0 && (
         <Pagination
@@ -1013,6 +958,24 @@ function TransacoesContent() {
             >
               <Undo2 className="mr-1 h-4 w-4" />
               Estornar
+            </Button>
+          </div>
+        )}
+        {/* Estorno não abre no formulário de edição: excluir fica aqui. */}
+        {viewingTx && !isMovement(viewingTx) && !isEditableEntry(viewingTx) && (
+          <div className="mt-4 flex justify-end">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="text-destructive"
+              onClick={() => {
+                const tx = viewingTx;
+                setViewingTx(undefined);
+                void handleDelete(tx);
+              }}
+            >
+              Excluir
             </Button>
           </div>
         )}
