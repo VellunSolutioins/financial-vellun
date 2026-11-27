@@ -2,7 +2,8 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { ZelooLogo, ZelooSymbol } from '@/components/brand/zeloo-logo';
+import { ZelooLogoThemed, ZelooSymbol } from '@/components/brand/zeloo-logo';
+import { ThemeSelect } from '@/components/theme/theme-select';
 import {
   LayoutDashboard,
   Receipt,
@@ -49,7 +50,7 @@ function SubscriptionBanner({
   // Liberado por grace (past_due): alerta amarelo.
   if (access.allowed && access.reason === 'grace_period') {
     return (
-      <div className="mb-4 rounded-md border border-yellow-300 bg-yellow-50 px-4 py-3 text-sm text-yellow-900">
+      <div className="mb-4 rounded-md border border-yellow-300 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-950/40 px-4 py-3 text-sm text-yellow-900 dark:text-yellow-300">
         Seu último pagamento não foi confirmado. Regularize para não perder o acesso.{' '}
         <Link href={ASSINATURA_PATH} className="font-semibold underline">
           Ver assinatura
@@ -61,7 +62,7 @@ function SubscriptionBanner({
   // Sem acesso: alerta vermelho.
   if (!access.allowed) {
     return (
-      <div className="mb-4 rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900">
+      <div className="mb-4 rounded-md border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/40 px-4 py-3 text-sm text-red-900 dark:text-red-300">
         Sua assinatura não está ativa. Contrate um plano para usar o produto.{' '}
         <Link href={ASSINATURA_PATH} className="font-semibold underline">
           Assinar agora
@@ -79,7 +80,7 @@ const VERIFICAR_WHATSAPP_PATH = '/app/verificar-whatsapp';
 function WhatsappBanner({ verified, pathname }: { verified?: boolean; pathname: string }) {
   if (verified || pathname === VERIFICAR_WHATSAPP_PATH || pathname === '/app/conta') return null;
   return (
-    <div className="mb-4 rounded-md border border-blue-300 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+    <div className="mb-4 rounded-md border border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 px-4 py-3 text-sm text-blue-900 dark:text-blue-300">
       Seu WhatsApp ainda não está verificado: o bot só registra lançamentos depois disso.{' '}
       <Link href={VERIFICAR_WHATSAPP_PATH} className="font-semibold underline">
         Verificar agora
@@ -194,18 +195,20 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     cn(
       'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
       collapsed && 'lg:justify-center lg:px-2',
-      active ? 'bg-primary/10 text-primary' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+      active
+        ? 'bg-primary/10 text-primary'
+        : 'text-muted-foreground hover:bg-muted hover:text-foreground',
     );
 
   return (
     <div className="min-h-screen lg:flex lg:h-screen">
       {/* Top bar (mobile) */}
-      <header className="lg:hidden sticky top-0 z-30 flex h-14 items-center justify-between border-b bg-white px-4">
+      <header className="lg:hidden sticky top-0 z-30 flex h-14 items-center justify-between border-b bg-card px-4">
         <button
           type="button"
           aria-label="Abrir menu"
           onClick={() => setSidebarOpen(true)}
-          className="-ml-2 inline-flex h-10 w-10 items-center justify-center rounded-md text-gray-700 hover:bg-gray-100"
+          className="-ml-2 inline-flex h-10 w-10 items-center justify-center rounded-md text-foreground hover:bg-muted"
         >
           <svg
             width="22"
@@ -220,7 +223,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <line x1="3" y1="18" x2="21" y2="18" />
           </svg>
         </button>
-        <ZelooLogo priority className="h-6" />
+        <ZelooLogoThemed priority className="h-6" />
         <span className="w-10" aria-hidden />
       </header>
 
@@ -236,7 +239,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       {/* Sidebar */}
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-50 flex w-64 transform flex-col border-r bg-white transition-all duration-200 ease-in-out lg:sticky lg:top-0 lg:z-auto lg:h-screen lg:shrink-0 lg:translate-x-0',
+          'fixed inset-y-0 left-0 z-50 flex w-64 transform flex-col border-r bg-card transition-all duration-200 ease-in-out lg:sticky lg:top-0 lg:z-auto lg:h-screen lg:shrink-0 lg:translate-x-0',
           sidebarOpen ? 'translate-x-0' : '-translate-x-full',
           collapsed && 'lg:w-20',
         )}
@@ -248,7 +251,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           )}
         >
           <div className={cn('min-w-0', collapsed && 'lg:hidden')}>
-            <ZelooLogo className="h-7" />
+            <ZelooLogoThemed className="h-7" />
             <p className="text-xs text-muted-foreground mt-2 truncate">{user.name}</p>
           </div>
           {collapsed && <ZelooSymbol className="hidden h-8 shrink-0 lg:block" />}
@@ -256,7 +259,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             type="button"
             aria-label="Fechar menu"
             onClick={() => setSidebarOpen(false)}
-            className="-mr-2 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-gray-700 hover:bg-gray-100 lg:hidden"
+            className="-mr-2 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-foreground hover:bg-muted lg:hidden"
           >
             <svg
               width="20"
@@ -304,6 +307,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <Sparkles className="h-4 w-4 shrink-0" />
             <span className={cn(collapsed && 'lg:hidden')}>Assinatura</span>
           </Link>
+          {/* Tema: segue o sistema por padrão; dá para fixar claro ou escuro. */}
+          <div className={cn('px-1 pb-2 pt-1', collapsed && 'lg:hidden')}>
+            <p className="mb-1.5 px-2 text-xs font-medium text-muted-foreground">Tema</p>
+            <ThemeSelect />
+          </div>
+          {collapsed && (
+            <div className="hidden justify-center pb-1 lg:flex">
+              <ThemeSelect compact />
+            </div>
+          )}
           <Button
             variant="ghost"
             onClick={logout}
@@ -319,7 +332,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             type="button"
             onClick={toggleCollapsed}
             className={cn(
-              'hidden w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 lg:flex',
+              'hidden w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:flex',
               collapsed && 'lg:justify-center lg:px-2',
             )}
           >
@@ -334,7 +347,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto bg-gray-50 min-w-0 lg:h-screen lg:min-h-0">
+      <main className="flex-1 overflow-auto bg-surface min-w-0 lg:h-screen lg:min-h-0">
         <div className="mx-auto max-w-6xl p-4 sm:p-6 lg:p-8">
           <SubscriptionBanner access={subscriptionAccess} pathname={pathname} />
           <WhatsappBanner verified={user.whatsappVerified} pathname={pathname} />

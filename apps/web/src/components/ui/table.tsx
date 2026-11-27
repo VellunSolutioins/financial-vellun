@@ -43,7 +43,7 @@ export interface DataTableProps<T> {
  * Extraída do padrão que estava copiado em quatro telas (lançamentos, contatos,
  * categorias e pendências) — mesmas classes, mesma estrutura, mesmas mensagens.
  *
- * Usa **apenas tokens de cor** (`bg-card`, `bg-muted`), não `bg-white`/`bg-gray-50`.
+ * Usa **apenas tokens de cor** (`bg-card`, `bg-muted`), não `bg-card`/`bg-muted/50`.
  * Em tema claro o resultado é idêntico ao que havia; a diferença aparece no dark
  * mode, que está configurado no Tailwind e hoje é inutilizável.
  */

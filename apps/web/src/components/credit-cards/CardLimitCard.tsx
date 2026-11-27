@@ -73,7 +73,7 @@ export function CardLimitDetails({ card, editHref }: { card: CreditCard; editHre
         </p>
       )}
       {(card.credit ?? 0) > 0 && (
-        <p className="text-xs text-emerald-700">
+        <p className="text-xs text-emerald-700 dark:text-emerald-400">
           Você tem {formatCurrency(card.credit ?? 0)} de crédito neste cartão.
         </p>
       )}

@@ -127,7 +127,7 @@ export function WhatsappVerification({
 
   if (phase === 'verified') {
     return (
-      <div className="rounded-md border border-green-300 bg-green-50 px-4 py-3 text-sm text-green-900">
+      <div className="rounded-md border border-green-300 dark:border-green-800 bg-green-50 dark:bg-green-950/40 px-4 py-3 text-sm text-green-900 dark:text-green-300">
         WhatsApp verificado! Já enviamos uma mensagem de boas-vindas para você.
       </div>
     );
@@ -202,7 +202,7 @@ export function WhatsappVerification({
 
         {challenge.waLink ? (
           <div className="hidden flex-col items-center gap-2 md:flex">
-            <div className="rounded-lg border bg-white p-3">
+            <div className="rounded-lg border bg-card p-3">
               <QRCodeSVG value={challenge.waLink} size={176} level="M" />
             </div>
             <p className="max-w-[12rem] text-center text-xs text-muted-foreground">

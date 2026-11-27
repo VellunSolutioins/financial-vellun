@@ -28,7 +28,7 @@ export function ChatPanel({ chat = demoChat }: { chat?: ChatMessages }) {
         </div>
       </div>
       <div className="space-y-3 bg-surface p-4">
-        <div className="reveal ml-auto w-fit max-w-[85%] rounded-2xl rounded-br-[6px] bg-emerald-100 px-3.5 py-2.5 [--reveal-delay:150ms] public-dark:bg-emerald-900/60">
+        <div className="reveal ml-auto w-fit max-w-[85%] rounded-2xl rounded-br-[6px] bg-emerald-100 px-3.5 py-2.5 [--reveal-delay:150ms] dark:bg-emerald-900/60">
           <p className="text-[15px] leading-snug text-ink">
             <span className="sr-only">Você: </span>
             {chat.userMessage}

@@ -129,7 +129,7 @@ export function WhatsappCard() {
               <span className="text-sm font-medium">{user.phone ?? 'Nenhum número'}</span>
               <span
                 className={`w-fit rounded-full px-2 py-0.5 text-xs font-medium ${
-                  verified ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
+                  verified ? 'bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-300' : 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-800 dark:text-yellow-300'
                 }`}
               >
                 {verified ? 'Verificado' : 'Não verificado'}

@@ -25,7 +25,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     // `data-scroll-behavior`: o Next desliga a rolagem suave (ligada nas páginas
     // públicas, ver globals.css) durante a troca de rota.
     // `suppressHydrationWarning`: o script abaixo põe `data-theme` antes do React.
-    <html lang="pt-BR" data-scroll-behavior="smooth" suppressHydrationWarning>
+    // `data-palette="verde"`: teste do verde #10B981 como cor primária (globals.css).
+    // Tirar o atributo volta para o azul.
+    <html lang="pt-BR" data-palette="verde" data-scroll-behavior="smooth" suppressHydrationWarning>
       <head>
         {/* Tema das páginas públicas aplicado antes da primeira pintura. */}
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />

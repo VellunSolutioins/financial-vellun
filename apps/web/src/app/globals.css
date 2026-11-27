@@ -35,28 +35,6 @@
     --shadow-soft: 0 1px 2px rgb(15 23 42 / 0.04), 0 4px 12px rgb(15 23 42 / 0.05);
     --shadow-card: 0 2px 4px rgb(15 23 42 / 0.04), 0 16px 40px rgb(15 23 42 / 0.08);
   }
-
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 224.3 76.3% 48%;
-  }
 }
 
 @layer base {
@@ -120,23 +98,16 @@ html:has([data-public-page]) {
 }
 
 /*
- * Tema escuro das páginas públicas (landing, legais, login/cadastro, 404).
- * `data-theme-locked` mantém uma página sempre clara (a landing v1 em `/`).
- * O script em `app/layout.tsx` põe `data-theme="dark"` no <html> antes da
- * primeira pintura; as cores só mudam em páginas com `[data-public-page]`,
- * então o app continua no tema claro. Paleta derivada da marca (azul-marinho
+ * Tema escuro do site inteiro: páginas públicas, app e operações. O script em
+ * `app/layout.tsx` põe `data-theme="dark"` no <html> antes da primeira
+ * pintura: segue o sistema por padrão e respeita a escolha manual, quando há
+ * (`lib/public-theme.ts`). As utilidades `dark:` do Tailwind usam o mesmo
+ * atributo (`tailwind.config.ts`). Paleta derivada da marca (azul-marinho
  * #0F172A e azul #2563EB), com contraste AA conferido para texto sobre fundo,
  * superfície e card. O azul fica mais claro (#60A5FA) e os botões ganham texto
  * escuro: branco sobre azul claro não passa no AA.
- *
- * Vale no wrapper e no <html>: toasts e diálogos abrem fora do wrapper (root
- * layout). `:is()` tolera seletor desconhecido, então sem `:has()` só o wrapper
- * escurece, e tem o peso do seletor mais forte, o que vence o `:root` claro.
  */
-:is(
-  html[data-theme='dark'] [data-public-page]:not([data-theme-locked]),
-  html[data-theme='dark']:has([data-public-page]:not([data-theme-locked]))
-) {
+html[data-theme='dark'] {
   color-scheme: dark;
   --background: 222.9 48.8% 8.4%; /* #0B1120 */
   --foreground: 214.3 31.8% 91.4%; /* #E2E8F0 */
@@ -168,7 +139,7 @@ html:has([data-public-page]) {
 }
 
 /* Fundo do <html> no tema escuro: sem isto, o "elástico" da rolagem mostra branco. */
-html[data-theme='dark']:has([data-public-page]:not([data-theme-locked])) {
+html[data-theme='dark'] {
   background-color: #0b1120;
   color-scheme: dark;
 }
@@ -216,4 +187,63 @@ html[data-theme-switching] * {
     radial-gradient(60% 120% at 100% 0%, hsl(0 0% 100% / 0.14), transparent 65%),
     radial-gradient(70% 130% at 0% 100%, hsl(var(--ink) / 0.18), transparent 70%),
     hsl(var(--primary));
+}
+
+/*
+ * Gráficos (recharts): eixos, grade, cursor e tooltip vêm com cinza e branco
+ * fixos. CSS vence os atributos do SVG, então daqui eles seguem o tema.
+ */
+.recharts-cartesian-axis-tick-value {
+  fill: hsl(var(--muted-foreground));
+}
+.recharts-cartesian-grid line,
+.recharts-cartesian-axis-line,
+.recharts-cartesian-axis-tick-line {
+  stroke: hsl(var(--border));
+}
+.recharts-tooltip-cursor {
+  fill: hsl(var(--muted) / 0.6);
+}
+.recharts-default-tooltip {
+  background-color: hsl(var(--popover)) !important;
+  border-color: hsl(var(--border)) !important;
+  border-radius: 0.5rem;
+  color: hsl(var(--popover-foreground));
+}
+.recharts-legend-item-text {
+  color: hsl(var(--muted-foreground)) !important;
+}
+
+/*
+ * Destaque das frases: a mesma fonte do texto, em itálico e na cor da marca.
+ * Fica em `components` para uma cor utilitária (ex.: vermelho) vencer.
+ */
+@layer components {
+  .text-emphasis {
+    font-style: italic;
+    color: hsl(var(--primary));
+  }
+}
+
+/*
+ * Paleta em teste: verde #10B981 como cor primária (`data-palette="verde"` no
+ * <html>). O texto sobre o verde é o azul-marinho da marca: branco sobre
+ * #10B981 fica em 2,5:1 e não passa no AA; o marinho fica acima de 7:1.
+ */
+html[data-palette='verde'] {
+  --primary: 160.1 84.1% 39.4%; /* #10B981 */
+  --primary-foreground: 222.2 47.4% 11.2%; /* #0F172A */
+  --primary-hover: 161.4 93.5% 30.4%; /* #059669 */
+  --ring: 160.1 84.1% 39.4%;
+}
+/* Texto pequeno em verde sobre fundo claro: #10B981 fica em 2,5:1, então o
+   texto usa o verde escuro #047857 (5,5:1); os preenchimentos seguem #10B981. */
+html[data-palette='verde']:not([data-theme='dark']) :is(.text-primary, .text-emphasis) {
+  color: hsl(163.1 93.5% 24.3%); /* #047857 */
+}
+html[data-theme='dark'][data-palette='verde'] {
+  --primary: 160.1 84.1% 39.4%; /* #10B981 */
+  --primary-foreground: 222.9 48.8% 8.4%;
+  --primary-hover: 158.1 64.4% 51.6%; /* #34D399 */
+  --ring: 160.1 84.1% 39.4%;
 }

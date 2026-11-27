@@ -64,12 +64,12 @@ export function ResourcePeriodView({ selection, basis = 'competence' }: Props) {
 
       <div className="grid grid-cols-3 gap-2 sm:gap-4">
         {[
-          { label: 'Receitas', value: summary?.income ?? 0, tone: 'text-emerald-600' },
-          { label: 'Despesas', value: summary?.expense ?? 0, tone: 'text-rose-600' },
+          { label: 'Receitas', value: summary?.income ?? 0, tone: 'text-emerald-600 dark:text-emerald-400' },
+          { label: 'Despesas', value: summary?.expense ?? 0, tone: 'text-rose-600 dark:text-rose-400' },
           {
             label: 'Resultado',
             value: summary?.net ?? 0,
-            tone: (summary?.net ?? 0) >= 0 ? 'text-foreground' : 'text-rose-600',
+            tone: (summary?.net ?? 0) >= 0 ? 'text-foreground' : 'text-rose-600 dark:text-rose-400',
           },
         ].map((item) => (
           <Card key={item.label} className="rounded-2xl">
@@ -147,7 +147,7 @@ export function ResourcePeriodView({ selection, basis = 'competence' }: Props) {
                     <span
                       className={cn(
                         'shrink-0 text-sm font-semibold',
-                        isInflow(tx) ? 'text-emerald-600' : 'text-rose-600',
+                        isInflow(tx) ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400',
                       )}
                     >
                       {signOf(tx)}

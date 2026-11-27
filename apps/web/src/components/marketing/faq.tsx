@@ -58,29 +58,18 @@ const QUESTIONS: { question: string; answer: Answer }[] = [
   },
 ];
 
-/**
- * `v1`: visual de antes do redesenho (servido em `/`); `v2`: rótulo de extrato,
- * perguntas numeradas e fundo com gradiente (servido em `/v2`).
- */
-export async function Faq({ variant = 'v2' }: { variant?: 'v1' | 'v2' }) {
-  const v1 = variant === 'v1';
+export async function Faq() {
   const features = await getPublicFeatures();
 
   return (
-    <section id="duvidas" className={v1 ? 'bg-surface' : 'bg-glow-surface'}>
+    <section id="duvidas" className="bg-glow-surface">
       <Reveal className={cn(container, 'py-14 lg:py-24')}>
-        {v1 ? (
-          <h2 className="reveal text-3xl font-bold tracking-tight text-ink sm:text-4xl">
-            Perguntas frequentes
+        <div className="reveal">
+          <Eyebrow number="03">dúvidas</Eyebrow>
+          <h2 className="mt-3 text-3xl font-medium tracking-tight text-ink sm:text-4xl">
+            Perguntas <em className="font-bold italic">frequentes.</em>
           </h2>
-        ) : (
-          <div className="reveal">
-            <Eyebrow number="03">dúvidas</Eyebrow>
-            <h2 className="mt-3 text-3xl font-medium tracking-tight text-ink sm:text-4xl">
-              Perguntas <em className="font-bold italic">frequentes.</em>
-            </h2>
-          </div>
-        )}
+        </div>
         <div className="mt-8 max-w-3xl space-y-3">
           {QUESTIONS.map((item, index) => (
             <details key={item.question} className="reveal group rounded-2xl border bg-card">
@@ -91,11 +80,9 @@ export async function Faq({ variant = 'v2' }: { variant?: 'v1' | 'v2' }) {
                 )}
               >
                 <span className="flex gap-3">
-                  {!v1 && (
-                    <span aria-hidden className="pt-0.5 font-mono text-xs text-primary">
-                      {String(index + 1).padStart(2, '0')}
-                    </span>
-                  )}
+                  <span aria-hidden className="pt-0.5 font-mono text-xs text-primary">
+                    {String(index + 1).padStart(2, '0')}
+                  </span>
                   {item.question}
                 </span>
                 <ChevronDown

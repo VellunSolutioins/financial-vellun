@@ -10,8 +10,8 @@ const variantClasses = {
   secondary: 'bg-secondary text-secondary-foreground',
   destructive: 'bg-destructive text-destructive-foreground',
   outline: 'border border-input text-foreground',
-  success: 'bg-green-100 text-green-800',
-  warning: 'bg-yellow-100 text-yellow-800',
+  success: 'bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-300',
+  warning: 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-800 dark:text-yellow-300',
 };
 
 function Badge({ className, variant = 'default', ...props }: BadgeProps) {

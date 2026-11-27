@@ -7,17 +7,14 @@ import { focusRing } from './styles';
 export function Brand({
   className,
   withSlogan = false,
-  href = '/',
 }: {
   className?: string;
-  /** Home de destino (`/v2` na landing nova). */
-  href?: string;
   /** Slogan em uma linha pequena abaixo do logo. */
   withSlogan?: boolean;
 }) {
   return (
     <Link
-      href={href}
+      href="/"
       aria-label="Zeloo — página inicial"
       className={cn(
         'inline-flex min-h-11 shrink-0 flex-col items-start justify-center rounded-lg',

@@ -203,7 +203,7 @@ export default function ContasPage() {
               </CardHeader>
               <CardContent>
                 <p
-                  className={`text-2xl font-bold ${Number(acc.currentBalance) >= 0 ? 'text-green-600' : 'text-red-600'}`}
+                  className={`text-2xl font-bold ${Number(acc.currentBalance) >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}
                 >
                   {formatCurrency(Number(acc.currentBalance))}
                 </p>
@@ -240,7 +240,7 @@ export default function ContasPage() {
                   variant="ghost"
                   className={cn(
                     'mt-2 h-8 px-2 text-xs',
-                    acc.id === preferredAccountId && 'font-medium text-amber-600',
+                    acc.id === preferredAccountId && 'font-medium text-amber-600 dark:text-amber-400',
                   )}
                   title={
                     acc.id === preferredAccountId

@@ -111,13 +111,13 @@ function EmpresaDashboardContent() {
           {/* Summary cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             {[
-              { label: 'Saldo Total', value: data.totalBalance, color: 'text-blue-600' },
-              { label: 'Receitas', value: data.totalIncome, color: 'text-green-600' },
-              { label: 'Despesas', value: data.totalExpense, color: 'text-red-600' },
+              { label: 'Saldo Total', value: data.totalBalance, color: 'text-blue-600 dark:text-blue-400' },
+              { label: 'Receitas', value: data.totalIncome, color: 'text-green-600 dark:text-green-400' },
+              { label: 'Despesas', value: data.totalExpense, color: 'text-red-600 dark:text-red-400' },
               {
                 label: 'Resultado',
                 value: data.netResult,
-                color: data.netResult >= 0 ? 'text-green-600' : 'text-red-600',
+                color: data.netResult >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400',
               },
             ].map((card) => (
               <Card key={card.label}>
@@ -199,7 +199,7 @@ function EmpresaDashboardContent() {
               count={data.accountsReceivable.count}
               items={data.accountsReceivable.items}
               href="/app/empresa/contas-a-receber"
-              accent="text-green-600"
+              accent="text-green-600 dark:text-green-400"
             />
             <PendingWidget
               title="Contas a Pagar"
@@ -207,7 +207,7 @@ function EmpresaDashboardContent() {
               count={data.accountsPayable.count}
               items={data.accountsPayable.items}
               href="/app/empresa/contas-a-pagar"
-              accent="text-red-600"
+              accent="text-red-600 dark:text-red-400"
             />
           </div>
 
@@ -227,7 +227,7 @@ function EmpresaDashboardContent() {
                         <span>{c.categoryName}</span>
                         <span className="font-medium">{formatCurrency(c.total)}</span>
                       </div>
-                      <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                      <div className="h-2 bg-muted rounded-full overflow-hidden">
                         <div className="h-full bg-red-500" style={{ width: `${c.percentage}%` }} />
                       </div>
                     </div>

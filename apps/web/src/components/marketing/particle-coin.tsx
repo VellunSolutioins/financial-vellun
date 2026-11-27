@@ -14,21 +14,60 @@ import {
 
 /**
  * Moeda de partículas 3D: milhares de pontos formam a moeda (o logo mais denso
- * e brilhante que o campo, o aro e a borda), com a mesma geometria, giro e luz
- * das outras versões (`coin-mask.ts`). O canvas cobre a seção inteira do hero:
- * as partículas chegam espalhadas por ela e se juntam na moeda, e outras
- * continuam soltas pelo fundo, subindo devagar. Assim não há "caixa" visível
- * em volta da moeda. A luz orbita sozinha; o mouse não mexe na cena.
+ * e brilhante que o campo, o aro e a borda), com a geometria, o giro e a luz de
+ * `coin-mask.ts`. O canvas cobre a seção inteira do hero, então não há
+ * "caixa" visível em volta da moeda: ela cai do alto, mais perto do centro da
+ * tela e inclinada, pousa no lugar e quica rolando para a direita, até parar
+ * com o logo reto. Depois, segue o mouse de leve (parallax no hover) e anda um
+ * pouco mais devagar que a página na rolagem. Outras partículas ficam soltas
+ * pelo fundo, subindo devagar. A luz orbita sozinha.
  *
  * WebGL puro (pontos redondos, sem biblioteca). A posição da moeda vem do
  * quadro `[data-coin-anchor]` do hero. Sem WebGL, avisa a página
- * (`COIN_FALLBACK_EVENT`) para mostrar a versão em pixels.
+ * (`COIN_FALLBACK_EVENT`), que esconde o quadro da moeda.
  * Pausa fora da tela e com a aba oculta; com movimento reduzido, fica parada.
  */
 
 export const COIN_FALLBACK_EVENT = 'zeloo-coin-fallback';
 
 const KIND = { field: 0, relief: 1, rim: 2, side: 3, ambient: 4 } as const;
+
+/*
+ * Entrada da moeda: cai do alto da seção, já inclinada e mais perto do centro
+ * da tela, pousa na própria posição e quica, rolando para a direita até parar
+ * com o logo reto. Valores em px CSS (multiplicados pelo DPR do canvas) e
+ * segundos.
+ */
+/** Gravidade da queda: mais baixa que a "real" na tela, para a queda ser lida. */
+const GRAVITY = 2400;
+/** Quanto da velocidade sobra a cada quique (quiques macios, que somem logo). */
+const RESTITUTION = 0.36;
+/** Abaixo desta velocidade de impacto, a moeda para de quicar. */
+const MIN_BOUNCE_SPEED = 90;
+/**
+ * Rolagem até a posição. A distância é a que falta até o centro da tela,
+ * limitada a este tanto de raios (uma "leve rolada"); no tablet, com a moeda
+ * já centralizada, ela não rola.
+ */
+const MAX_ROLL_RADII = 1.1;
+/**
+ * Atrito da rolagem, como uma mola criticamente amortecida: começa com o
+ * embalo do impacto e freia até parar no lugar, sem passar do ponto.
+ */
+const ROLL_STIFFNESS = 3.6;
+/** Fração do embalo que a moeda leva do impacto para a rolagem. */
+const ROLL_KICK = 0.6;
+/** Parallax com a rolagem da página: a moeda anda 15% mais devagar. */
+const PARALLAX = 0.15;
+/**
+ * Parallax com o mouse sobre o hero: a moeda se inclina e se desloca de leve
+ * na direção do ponteiro. Ângulos em rad, deslocamento em px CSS.
+ */
+const HOVER_TURN = 0.22;
+const HOVER_TILT = 0.16;
+const HOVER_SHIFT = 12;
+/** Rapidez com que a moeda acompanha o ponteiro (maior = mais rápido). */
+const HOVER_EASE = 5;
 
 const VERTEX = `
 attribute vec3 aPos;
@@ -40,13 +79,22 @@ uniform float uR;
 uniform vec4 uRot;
 uniform float uCam;
 uniform float uT;
-uniform float uForm;
+uniform float uLift;      // deslocamento vertical da moeda (queda, quique, flutuação), px
+uniform float uShiftX;    // deslocamento horizontal da moeda (rolagem até a área), px
+uniform vec2 uRoll;       // cos/sin do giro no próprio eixo (rolagem)
+uniform float uScroll;    // rolagem da página, px (parallax)
 uniform float uDpr;
 uniform vec3 uLight;
 uniform vec3 uInk;
 uniform vec3 uAccent;
 uniform float uLightTheme;
 varying vec4 vColor;
+
+// Giro no plano da face (em torno do eixo da moeda). Com y para baixo, ângulo
+// positivo é horário: o sentido de uma moeda rolando para a direita.
+vec3 rollFace(vec3 v) {
+  return vec3(v.x * uRoll.x - v.y * uRoll.y, v.x * uRoll.y + v.y * uRoll.x, v.z);
+}
 
 vec3 toWorld(vec3 v) {
   float x1 = v.x * uRot.x + v.z * uRot.y;
@@ -65,7 +113,8 @@ void main() {
     // Ambiente: soltas pela seção inteira, subindo devagar, em três "planos".
     float depth = aPos.z;
     float x = aPos.x * uRes.x + sin(uT * (0.05 + 0.1 * w) + w * 40.0) * 30.0 * uDpr * (0.5 + depth);
-    float y = mod(aPos.y * uRes.y - uT * (4.0 + 10.0 * depth) * uDpr, uRes.y);
+    // Parallax: as mais próximas sobem mais rápido com a rolagem da página.
+    float y = mod(aPos.y * uRes.y - uT * (4.0 + 10.0 * depth) * uDpr - uScroll * (0.08 + 0.22 * depth), uRes.y);
     pos = vec2(x, y);
     size = (0.8 + 1.4 * depth) * uDpr;
     float dist = length((pos - uCenter) / uR);
@@ -76,22 +125,16 @@ void main() {
   } else {
     // Moeda: posição na face/borda, com um respiro leve e o giro 3D.
     vec3 local = aPos + vec3(sin(uT * 0.9 + w * 50.0), cos(uT * 0.8 + w * 31.0), sin(uT * 0.7 + w * 17.0)) * 0.005;
+    // Rolagem: a moeda gira no próprio eixo (o da face), como uma roda.
+    local = rollFace(local);
     vec3 world = toWorld(local);
     float persp = uCam / (uCam - world.z);
-    vec2 formed = uCenter + world.xy * persp * uR;
-
-    // Montagem: começam espalhadas pela seção e chegam em espiral, cada uma no seu tempo.
-    vec2 scattered = vec2(aSeed.x * uRes.x, aSeed.y * uRes.y);
-    float f = clamp(uForm * 1.6 - w * 0.6, 0.0, 1.0);
-    f = f * f * (3.0 - 2.0 * f);
-    vec2 rel = scattered - formed;
-    float ang = (1.0 - f) * 2.2 * (w - 0.5);
-    rel = vec2(rel.x * cos(ang) - rel.y * sin(ang), rel.x * sin(ang) + rel.y * cos(ang));
-    pos = formed + rel * (1.0 - f);
+    // A moeda inteira se move junto: queda, quique, rolagem e flutuação.
+    pos = uCenter + vec2(uShiftX, uLift) + world.xy * persp * uR;
 
     // Luz: a normal gira com a moeda (face para a frente, borda para fora).
     vec3 nLocal = aKind > 2.5 ? vec3(normalize(aPos.xy), 0.0) : vec3(aPos.xy * 0.35, 1.0);
-    vec3 n = normalize(toWorld(nLocal));
+    vec3 n = normalize(toWorld(rollFace(nLocal)));
     float diff = max(dot(n, normalize(uLight)), 0.0);
     float strength = aKind < 0.5 ? 0.32 : (aKind < 1.5 ? 1.0 : (aKind < 2.5 ? 0.8 : 0.55));
     // O relevo nunca apaga de todo: é ele que mantém o logo legível no giro.
@@ -102,8 +145,6 @@ void main() {
     // A metade de trás da borda fica escondida atrás da face.
     if (aKind > 2.5) alpha *= smoothstep(-0.15, 0.25, n.z);
     if (aKind > 0.5 && aKind < 1.5 && aSeed.z > 0.985) col = uAccent;
-    // Enquanto chegam, ainda soltas, ficam mais apagadas.
-    alpha *= mix(0.35, 1.0, f);
     // Com milhares de pontos somando, cada um entra mais fraco: é o acúmulo
     // que acende a forma, sem estourar no branco.
     alpha *= 0.6;
@@ -264,7 +305,10 @@ export function ParticleCoin() {
       rot: u('uRot'),
       cam: u('uCam'),
       t: u('uT'),
-      form: u('uForm'),
+      lift: u('uLift'),
+      shiftX: u('uShiftX'),
+      roll: u('uRoll'),
+      scroll: u('uScroll'),
       dpr: u('uDpr'),
       light: u('uLight'),
       ink: u('uInk'),
@@ -275,7 +319,21 @@ export function ParticleCoin() {
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const buffer = gl.createBuffer();
     let count = 0;
-    let formStart = 0;
+    // Posição da moeda em relação ao lugar dela (px do canvas) e giro da rolagem.
+    const motion = {
+      phase: 'waiting' as 'waiting' | 'moving' | 'resting',
+      y: 0,
+      vy: 0,
+      x: 0,
+      vx: 0,
+      angle: 0,
+      landed: false,
+      grounded: false,
+      last: 0,
+    };
+    // Parallax do mouse: alvo (-1..1) e valor suavizado.
+    const hover = { tx: 0, ty: 0, x: 0, y: 0 };
+    let scrollPx = 0;
     let dpr = 1;
     let center = { x: 0, y: 0 };
     let radius = 0;
@@ -283,7 +341,7 @@ export function ParticleCoin() {
     let running = false;
     let visible = false;
     const start = performance.now();
-    // Luz orbitando sozinha (sem reação ao mouse).
+    // Luz orbitando sozinha.
     const light = { x: -0.5, y: -0.6 };
 
     let colors = { ink: [0, 0, 0], accent: [0, 0, 1], dark: false };
@@ -315,6 +373,64 @@ export function ParticleCoin() {
         };
         radius = Math.min(a.width, a.height) * COIN_RADIUS * dpr;
       }
+      scrollPx = window.scrollY * dpr;
+    };
+
+    /**
+     * Avança a física um quadro: queda, quiques e rolagem ao mesmo tempo, como
+     * uma moeda de verdade. Em passos pequenos, para a mola da rolagem não
+     * oscilar quando um quadro demora.
+     */
+    const step = (now: number) => {
+      const frame = Math.min(0.05, (now - motion.last) / 1000);
+      motion.last = now;
+
+      // O mouse é suavizado sempre, até com a moeda parada.
+      const ease = 1 - Math.exp(-HOVER_EASE * frame);
+      hover.x += (hover.tx - hover.x) * ease;
+      hover.y += (hover.ty - hover.y) * ease;
+
+      if (motion.phase !== 'moving') return;
+      const g = GRAVITY * dpr;
+      const w = ROLL_STIFFNESS;
+      const steps = 4;
+      const dt = frame / steps;
+      for (let i = 0; i < steps; i++) {
+        // Vertical: o "chão" é a posição de repouso (y = 0).
+        if (!motion.grounded) {
+          motion.vy += g * dt;
+          motion.y += motion.vy * dt;
+          if (motion.y >= 0) {
+            motion.y = 0;
+            if (!motion.landed) {
+              // Primeiro impacto: parte do embalo vira rolagem para a direita.
+              motion.landed = true;
+              motion.vx = -motion.x * w * ROLL_KICK;
+            }
+            if (motion.vy < MIN_BOUNCE_SPEED * dpr) {
+              motion.vy = 0;
+              motion.grounded = true;
+            } else {
+              motion.vy = -motion.vy * RESTITUTION;
+            }
+          }
+        }
+        // Horizontal: depois do primeiro impacto, rola (inclusive entre quiques).
+        if (motion.landed) {
+          const ax = -w * w * motion.x - 2 * w * motion.vx;
+          motion.vx += ax * dt;
+          motion.x += motion.vx * dt;
+        }
+      }
+      // Rola sem deslizar: o giro é a distância dividida pelo raio, então em
+      // x = 0 o logo está reto na horizontal.
+      motion.angle = radius > 0 ? motion.x / radius : 0;
+      if (motion.grounded && Math.abs(motion.x) < 0.5 && Math.abs(motion.vx) < 4) {
+        motion.x = 0;
+        motion.vx = 0;
+        motion.angle = 0;
+        motion.phase = 'resting';
+      }
     };
 
     const setup = (maskData: Uint8ClampedArray | null, size: number) => {
@@ -333,7 +449,24 @@ export function ParticleCoin() {
       attr('aPos', 3, 0);
       attr('aKind', 1, 3);
       attr('aSeed', 4, 4);
-      formStart = performance.now();
+      // Com movimento reduzido, a moeda já aparece no lugar, parada.
+      if (reduced) {
+        motion.phase = 'resting';
+        motion.y = 0;
+      } else {
+        motion.phase = 'moving';
+        // Nasce acima da seção, fora da tela, mais perto do centro da tela e já
+        // inclinada: a inclinação é a que a rolagem até a área vai desfazer.
+        const rect = canvas.getBoundingClientRect();
+        const screenCenterX = (window.innerWidth / 2 - rect.left) * dpr;
+        const toCenter = Math.max(0, center.x - screenCenterX);
+        motion.x = -Math.min(toCenter, radius * MAX_ROLL_RADII);
+        motion.angle = radius > 0 ? motion.x / radius : 0;
+        motion.y = -(center.y + radius * 1.4);
+        motion.vy = 0;
+        motion.vx = 0;
+        motion.last = performance.now();
+      }
     };
 
     const draw = (now: number) => {
@@ -342,18 +475,23 @@ export function ParticleCoin() {
       const idle = idleLight(t);
       light.x = idle.x;
       light.y = idle.y;
-      const form = reduced ? 1 : Math.min(1, (now - formStart) / 2600);
-      const phi = coinSpin(t, reduced);
+      // Giro de vaivém + o quanto a moeda "olha" para o ponteiro.
+      const phi = coinSpin(t, reduced) + hover.x * HOVER_TURN;
+      const tilt = COIN_TILT - hover.y * HOVER_TILT;
 
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
       gl.uniform2f(uni.res, canvas.width, canvas.height);
       gl.uniform2f(uni.center, center.x, center.y);
       gl.uniform1f(uni.r, radius);
-      gl.uniform4f(uni.rot, Math.cos(phi), Math.sin(phi), Math.cos(COIN_TILT), Math.sin(COIN_TILT));
+      gl.uniform4f(uni.rot, Math.cos(phi), Math.sin(phi), Math.cos(tilt), Math.sin(tilt));
       gl.uniform1f(uni.cam, CAMERA_DISTANCE);
       gl.uniform1f(uni.t, reduced ? 0 : t);
-      gl.uniform1f(uni.form, form);
+      const parallax = reduced ? 0 : scrollPx * PARALLAX;
+      gl.uniform1f(uni.lift, motion.y + parallax + hover.y * HOVER_SHIFT * dpr);
+      gl.uniform1f(uni.shiftX, motion.x + hover.x * HOVER_SHIFT * dpr);
+      gl.uniform2f(uni.roll, Math.cos(motion.angle), Math.sin(motion.angle));
+      gl.uniform1f(uni.scroll, reduced ? 0 : scrollPx);
       gl.uniform1f(uni.dpr, dpr);
       gl.uniform3f(uni.light, light.x, light.y, 0.9);
       gl.uniform3fv(uni.ink, colors.ink);
@@ -363,12 +501,15 @@ export function ParticleCoin() {
     };
 
     const loop = (now: number) => {
+      step(now);
       draw(now);
       raf = requestAnimationFrame(loop);
     };
     const play = () => {
       if (running || reduced || !visible || document.hidden) return;
       running = true;
+      // Sem salto de física ao voltar de uma pausa.
+      motion.last = performance.now();
       raf = requestAnimationFrame(loop);
     };
     const pause = () => {
@@ -377,6 +518,23 @@ export function ParticleCoin() {
     };
 
     const onVisibility = () => (document.hidden ? pause() : play());
+    const onScroll = () => {
+      scrollPx = window.scrollY * dpr;
+    };
+    // Parallax no hover: só com mouse (no toque não há "passar por cima").
+    const onPointerMove = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse' || radius === 0) return;
+      const rect = canvas.getBoundingClientRect();
+      const px = (e.clientX - rect.left) * dpr;
+      const py = (e.clientY - rect.top) * dpr;
+      // Normalizado por 3 raios: no centro da moeda é 0, nas bordas do hero ~±1.
+      hover.tx = Math.max(-1, Math.min(1, (px - center.x) / (radius * 3)));
+      hover.ty = Math.max(-1, Math.min(1, (py - center.y) / (radius * 3)));
+    };
+    const onPointerLeave = () => {
+      hover.tx = 0;
+      hover.ty = 0;
+    };
     const onContextLost = (e: Event) => {
       e.preventDefault();
       pause();
@@ -401,6 +559,11 @@ export function ParticleCoin() {
     observer.observe(canvas);
     resizeObserver.observe(section);
     document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    if (!reduced) {
+      section.addEventListener('pointermove', onPointerMove, { passive: true });
+      section.addEventListener('pointerleave', onPointerLeave);
+    }
     canvas.addEventListener('webglcontextlost', onContextLost);
 
     let cancelled = false;
@@ -425,6 +588,9 @@ export function ParticleCoin() {
       resizeObserver.disconnect();
       unsubscribeTheme();
       document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('scroll', onScroll);
+      section.removeEventListener('pointermove', onPointerMove);
+      section.removeEventListener('pointerleave', onPointerLeave);
       canvas.removeEventListener('webglcontextlost', onContextLost);
       gl.deleteBuffer(buffer);
       gl.deleteProgram(program);

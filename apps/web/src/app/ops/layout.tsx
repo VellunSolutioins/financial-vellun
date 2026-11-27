@@ -33,7 +33,7 @@ const roleLabels: Record<string, string> = {
  * Layout da área de operações.
  *
  * Usa **apenas tokens de cor** (`bg-background`, `bg-card`,
- * `text-muted-foreground`). O resto do app usa `bg-white`/`bg-gray-50`
+ * `text-muted-foreground`). O resto do app usa `bg-card`/`bg-muted/50`
  * hard-coded, o que torna o dark mode configurado no Tailwind inutilizável — o
  * painel novo não vai fundo nessa dívida.
  */

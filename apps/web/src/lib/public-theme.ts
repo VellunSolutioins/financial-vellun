@@ -1,9 +1,13 @@
 /**
- * Tema (claro/escuro) das páginas públicas. A escolha fica no `localStorage`;
- * sem escolha, segue o sistema. O valor efetivo vive em `<html data-theme>`,
- * aplicado antes da primeira pintura por `THEME_INIT_SCRIPT`.
+ * Tema (claro/escuro) do site inteiro. Por padrão segue o sistema; a pessoa
+ * pode fixar claro ou escuro, e a escolha fica no `localStorage`. "Sistema"
+ * apaga a escolha e volta a acompanhar o aparelho. O valor efetivo vive em
+ * `<html data-theme>`, aplicado antes da primeira pintura por
+ * `THEME_INIT_SCRIPT`.
  */
 export type PublicTheme = 'light' | 'dark';
+/** O que a pessoa escolheu: um tema fixo ou seguir o sistema. */
+export type ThemePreference = PublicTheme | 'system';
 
 export const THEME_STORAGE_KEY = 'zeloo-theme';
 
@@ -20,8 +24,26 @@ export function readTheme(): PublicTheme {
   return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
 }
 
-export function applyTheme(theme: PublicTheme) {
+const systemTheme = (): PublicTheme =>
+  window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+
+/** A escolha salva, ou `system` quando não há (ou o armazenamento falha). */
+export function readPreference(): ThemePreference {
+  try {
+    const saved = localStorage.getItem(THEME_STORAGE_KEY);
+    return saved === 'light' || saved === 'dark' ? saved : 'system';
+  } catch {
+    return 'system';
+  }
+}
+
+/**
+ * Aplica uma preferência: tema fixo (salvo) ou `system` (apaga a escolha e
+ * volta a seguir o aparelho, inclusive nas mudanças com a página aberta).
+ */
+export function applyPreference(preference: ThemePreference) {
   const root = document.documentElement;
+  const theme = preference === 'system' ? systemTheme() : preference;
   // Sem transições durante a troca: senão cada borda e fundo anima no seu tempo.
   root.setAttribute('data-theme-switching', '');
   root.dataset.theme = theme;
@@ -30,12 +52,18 @@ export function applyTheme(theme: PublicTheme) {
   // sem isto o navegador nunca chegaria a ver o atributo presente.
   void window.getComputedStyle(document.body).opacity;
   try {
-    localStorage.setItem(THEME_STORAGE_KEY, theme);
+    if (preference === 'system') localStorage.removeItem(THEME_STORAGE_KEY);
+    else localStorage.setItem(THEME_STORAGE_KEY, preference);
   } catch {
     // Modo privado ou armazenamento cheio: vale só nesta visita.
   }
   window.dispatchEvent(new Event('zeloo-theme-change'));
   setTimeout(() => root.removeAttribute('data-theme-switching'), 1);
+}
+
+/** Fixa claro ou escuro (o botão de sol/lua das páginas públicas). */
+export function applyTheme(theme: PublicTheme) {
+  applyPreference(theme);
 }
 
 export function subscribeTheme(onChange: () => void) {

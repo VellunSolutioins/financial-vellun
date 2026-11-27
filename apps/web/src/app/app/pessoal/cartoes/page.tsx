@@ -146,7 +146,7 @@ export default function CartoesPage() {
                   </div>
 
                   {card.needsSetup ? (
-                    <div className="space-y-2 rounded-xl bg-amber-50 p-3 text-xs text-amber-900">
+                    <div className="space-y-2 rounded-xl bg-amber-50 dark:bg-amber-950/40 p-3 text-xs text-amber-900 dark:text-amber-300">
                       <p>
                         Sem fechamento configurado: os lançamentos aparecem no período, mas ainda
                         não formam faturas nem contam no limite.
@@ -177,7 +177,7 @@ export default function CartoesPage() {
                       variant="ghost"
                       className={cn(
                         'h-7 min-w-0 px-2 text-xs',
-                        card.isPreferred && 'font-medium text-amber-600',
+                        card.isPreferred && 'font-medium text-amber-600 dark:text-amber-400',
                       )}
                       title={
                         card.isPreferred
