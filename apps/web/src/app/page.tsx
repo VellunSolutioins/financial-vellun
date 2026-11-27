@@ -3,8 +3,8 @@ import { ZELOO_SLOGAN } from '@/components/brand/zeloo-logo';
 import { Faq } from '@/components/marketing/faq';
 import { FinalCta } from '@/components/marketing/final-cta';
 import { Hero } from '@/components/marketing/hero';
-import { HowItWorks } from '@/components/marketing/how-it-works';
-import { ProductOverview } from '@/components/marketing/product-overview';
+import { ChatFlow } from '@/components/marketing/chat-flow';
+import { MoneyFlow } from '@/components/marketing/money-flow';
 import { MAIN_CONTENT_ID } from '@/components/marketing/sections';
 import { SiteFooter } from '@/components/marketing/site-footer';
 import { SiteHeader } from '@/components/marketing/site-header';
@@ -21,8 +21,8 @@ export default function HomePage() {
       <SiteHeader />
       <main id={MAIN_CONTENT_ID} tabIndex={-1} className="focus:outline-none">
         <Hero />
-        <HowItWorks />
-        <ProductOverview />
+        <ChatFlow />
+        <MoneyFlow />
         <Faq />
         <FinalCta />
       </main>

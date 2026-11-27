@@ -1,7 +1,7 @@
 /** Seções da home com âncora. Cabeçalho, menu e rodapé usam esta mesma lista. */
 export const HOME_SECTIONS = [
   { id: 'como-funciona', label: 'Como funciona' },
-  { id: 'recursos', label: 'Recursos' },
+  { id: 'organizacao', label: 'Organização' },
   { id: 'duvidas', label: 'Dúvidas' },
 ] as const;
 

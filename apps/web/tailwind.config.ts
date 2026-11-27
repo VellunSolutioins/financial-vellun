@@ -19,6 +19,7 @@ const config: Config = {
           hover: 'hsl(var(--primary-hover))',
         },
         surface: 'hsl(var(--surface))',
+        brand: 'hsl(var(--brand) / <alpha-value>)',
         ink: {
           DEFAULT: 'hsl(var(--ink))',
           muted: 'hsl(var(--ink-muted))',

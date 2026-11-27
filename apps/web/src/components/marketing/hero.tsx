@@ -2,25 +2,21 @@ import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { HeroCoin } from './hero-coin';
-import { ParticleCoinGate } from './particle-coin-gate';
+import { HeroWallet } from './hero-wallet';
 import { LiveClock } from './live-clock';
 import { container } from './styles';
 
 /**
- * Promessa + moeda. Mobile: status, título, texto e botões, sem a moeda (a
- * animação só existe a partir do tablet). No tablet, a moeda vem abaixo do
- * texto; a partir do `lg`, vai para a direita. O canvas de partículas cobre a
- * seção inteira, atrás do texto.
+ * Promessa + fig. 01. No celular e no tablet, a carteira animada vem abaixo do
+ * texto e dos botões; a partir do `lg`, vai para a direita.
  */
 export function Hero() {
   return (
     <section className="bg-glow-hero relative overflow-hidden">
-      <ParticleCoinGate />
       <div
         className={cn(
           container,
-          'grid gap-6 pb-10 pt-8 sm:pb-16 sm:pt-12 lg:min-h-[calc(100svh-4rem)] lg:grid-cols-[1.05fr_1fr] lg:items-center lg:gap-10 lg:py-16',
+          'grid gap-6 pb-10 pt-8 sm:pb-16 sm:pt-12 lg:min-h-[calc(100svh-4rem)] lg:grid-cols-[1.05fr_1fr] lg:items-center lg:gap-10 lg:py-16 xl:grid-cols-[minmax(0,46rem)_minmax(0,1fr)]',
         )}
       >
         <div className="relative z-10">
@@ -36,8 +32,12 @@ export function Hero() {
               <LiveClock /> em brasília
             </span>
           </p>
-          <h1 className="mt-6 text-balance text-[clamp(2.5rem,1.6rem+3.8vw,4.5rem)] font-medium leading-[1.04] tracking-tight text-ink">
-            Seu controle financeiro <em className="font-bold italic">começa com uma mensagem.</em>
+          <h1 className="mt-6 text-balance text-[clamp(2.5rem,1.6rem+3.8vw,4.5rem)] font-medium xl:text-[4.15rem] leading-[1.04] tracking-tight text-ink">
+            {/* A partir do xl, "Seu controle financeiro" fica em uma linha só. */}
+            <span className="xl:whitespace-nowrap">
+              Seu controle <em className="text-brand-gradient font-bold italic">financeiro</em>
+            </span>{' '}
+            começa com uma <em className="text-brand-gradient font-bold italic">mensagem</em>.
           </h1>
           <p className="mt-6 max-w-xl text-lg leading-relaxed text-ink-muted">
             Registre seus gastos pelo WhatsApp e acompanhe tudo organizado em um só lugar.
@@ -54,7 +54,9 @@ export function Hero() {
             </Button>
           </div>
         </div>
-        <HeroCoin />
+        {/* A cena tem fundo transparente: no xl ela avança sobre a margem da
+            direita e o vão do grid, para ganhar tamanho sem apertar o texto. */}
+        <HeroWallet className="lg:justify-self-end xl:-ml-10 xl:-mr-10 xl:w-[calc(100%+5rem)]" />
       </div>
     </section>
   );

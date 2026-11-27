@@ -17,7 +17,7 @@ export function Eyebrow({
     <p className={cn('font-mono text-xs lowercase tracking-wide text-ink-muted', className)}>
       {number && (
         <>
-          <span className="text-primary">nº {number}</span>
+          <span className="text-brand">nº {number}</span>
           <span aria-hidden> — </span>
         </>
       )}
