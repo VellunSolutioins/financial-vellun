@@ -2,7 +2,8 @@ import type { Config } from 'tailwindcss';
 import plugin from 'tailwindcss/plugin';
 
 const config: Config = {
-  darkMode: ['class'],
+  // `dark:` segue o tema do site, que o script do <html> aplica (`lib/public-theme.ts`).
+  darkMode: ['selector', '[data-theme="dark"]'],
   content: ['./src/**/*.{ts,tsx}'],
   theme: {
     extend: {
@@ -18,6 +19,7 @@ const config: Config = {
           hover: 'hsl(var(--primary-hover))',
         },
         surface: 'hsl(var(--surface))',
+        brand: 'hsl(var(--brand) / <alpha-value>)',
         ink: {
           DEFAULT: 'hsl(var(--ink))',
           muted: 'hsl(var(--ink-muted))',
@@ -70,12 +72,6 @@ const config: Config = {
       // Variante, e não `screens`: um screen `raw` faz o Tailwind 3 parar de gerar
       // as variantes arbitrárias `min-[...]:`/`max-[...]:` do projeto inteiro.
       addVariant('pin', '@media (min-width: 1024px) and (min-height: 760px)');
-      // `public-dark:` — tema escuro das páginas públicas. O tema vale só dentro de
-      // `[data-public-page]`, para não alcançar o app (ver `globals.css`).
-      addVariant(
-        'public-dark',
-        'html[data-theme="dark"] [data-public-page]:not([data-theme-locked]) &',
-      );
     }),
   ],
 };

@@ -197,7 +197,7 @@ export function PayInvoiceForm({
         </div>
       </div>
       {beforeClosing && (
-        <p className="rounded-md bg-amber-50 p-2 text-xs text-amber-900">
+        <p className="rounded-md bg-amber-50 dark:bg-amber-950/40 p-2 text-xs text-amber-900 dark:text-amber-300">
           Esta fatura ainda está aberta: compras feitas até{' '}
           {formatDateBR(
             new Date(new Date(invoice.closingDate).getTime() - 86_400_000).toISOString(),

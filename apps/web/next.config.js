@@ -47,6 +47,15 @@ const nextConfig = {
   async headers() {
     return [{ source: '/:path*', headers: securityHeaders }];
   },
+  // A landing nova saiu de `/v2` (e das variantes `/v2/solida` e `/v2/pixel`,
+  // usadas na comparação) e virou a home. Links já compartilhados caem nela.
+  // Temporário (307): `/v2` fica livre para reúso sem cache preso no navegador.
+  async redirects() {
+    return [
+      { source: '/v2', destination: '/', permanent: false },
+      { source: '/v2/:path*', destination: '/', permanent: false },
+    ];
+  },
 };
 
 module.exports = nextConfig;

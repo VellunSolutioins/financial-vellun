@@ -34,12 +34,12 @@ function formatCurrency(v: number) {
 
 /** Mesmas cores da barra de limite na tela de Cartões (faixas de card-health.ts na API). */
 const healthStyles: Record<string, { bar: string; badge: string }> = {
-  tranquilo: { bar: 'bg-emerald-500', badge: 'bg-emerald-100 text-emerald-700' },
-  saudavel: { bar: 'bg-blue-500', badge: 'bg-blue-100 text-blue-700' },
-  atencao: { bar: 'bg-amber-500', badge: 'bg-amber-100 text-amber-700' },
-  apertado: { bar: 'bg-orange-500', badge: 'bg-orange-100 text-orange-700' },
-  no_limite: { bar: 'bg-rose-500', badge: 'bg-rose-100 text-rose-700' },
-  limite_atingido: { bar: 'bg-rose-600', badge: 'bg-rose-100 text-rose-700' },
+  tranquilo: { bar: 'bg-emerald-500', badge: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400' },
+  saudavel: { bar: 'bg-blue-500', badge: 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-400' },
+  atencao: { bar: 'bg-amber-500', badge: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400' },
+  apertado: { bar: 'bg-orange-500', badge: 'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-400' },
+  no_limite: { bar: 'bg-rose-500', badge: 'bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-400' },
+  limite_atingido: { bar: 'bg-rose-600', badge: 'bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-400' },
 };
 const noLimitStyle = { bar: 'bg-muted-foreground/40', badge: 'bg-muted text-muted-foreground' };
 

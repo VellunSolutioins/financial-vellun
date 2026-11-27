@@ -18,7 +18,8 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
-    "db:seed:loadtest": "ts-node prisma/seed-loadtest.ts"
+    "db:seed:loadtest": "ts-node prisma/seed-loadtest.ts",
+    "db:seed:usability": "ts-node prisma/seed-usability.ts"
   },
   "prisma": {
     "seed": "ts-node prisma/seed.ts"

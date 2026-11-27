@@ -25,9 +25,9 @@ function formatDate(v: string) {
 }
 
 const statusStyles: Record<Reminder['derivedStatus'], { label: string; badge: string }> = {
-  paid: { label: 'Pago', badge: 'bg-emerald-100 text-emerald-700' },
-  overdue: { label: 'Vencido', badge: 'bg-rose-100 text-rose-700' },
-  pending: { label: 'Pendente', badge: 'bg-amber-100 text-amber-700' },
+  paid: { label: 'Pago', badge: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400' },
+  overdue: { label: 'Vencido', badge: 'bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-400' },
+  pending: { label: 'Pendente', badge: 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400' },
 };
 
 const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];

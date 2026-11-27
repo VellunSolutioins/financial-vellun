@@ -83,7 +83,7 @@ export function MobileMenu({ links, themeToggle = false }: MobileMenuProps) {
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => setOpen(false)}
           // No escuro `ink` é claro: o fundo clarearia a página em vez de escurecer.
-          className="absolute inset-x-0 top-full h-[100dvh] bg-ink/30 public-dark:bg-black/50"
+          className="absolute inset-x-0 top-full h-[100dvh] bg-ink/30 dark:bg-black/50"
         />
       )}
       <nav

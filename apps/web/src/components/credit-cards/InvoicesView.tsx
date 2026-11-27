@@ -87,7 +87,7 @@ function ItemAmount({ item }: { item: InvoiceItem }) {
     <span
       className={cn(
         'whitespace-nowrap font-medium',
-        isCreditItem(item) && 'text-emerald-600',
+        isCreditItem(item) && 'text-emerald-600 dark:text-emerald-400',
         item.isForecast && 'text-muted-foreground',
       )}
     >
@@ -118,7 +118,7 @@ const paymentLabel = (row: { early: boolean }) =>
 
 function PaymentAmount({ payment }: { payment: InvoicePayment }) {
   return (
-    <span className="whitespace-nowrap font-medium text-emerald-600">
+    <span className="whitespace-nowrap font-medium text-emerald-600 dark:text-emerald-400">
       −{formatCurrency(payment.amount)}
     </span>
   );
@@ -327,7 +327,7 @@ export function InvoicesView() {
       {header}
 
       {card.needsSetup ? (
-        <Card className="rounded-2xl border-amber-200">
+        <Card className="rounded-2xl border-amber-200 dark:border-amber-800">
           <CardContent className="space-y-3 p-4 text-sm">
             <p>
               Para ver as faturas de <span className="font-medium">{card.name}</span>, informe o dia
@@ -344,7 +344,7 @@ export function InvoicesView() {
             <button
               type="button"
               onClick={() => setParams({ mes: otherOverdue.referenceMonth })}
-              className="flex w-full items-start gap-2 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-left text-sm text-rose-900"
+              className="flex w-full items-start gap-2 rounded-2xl border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 p-3 text-left text-sm text-rose-900 dark:text-rose-300"
             >
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               <span>
@@ -442,7 +442,7 @@ export function InvoicesView() {
                       </dl>
                     )}
                     {invoice.unappliedSurplus > 0 && (
-                      <p className="text-xs text-emerald-700">
+                      <p className="text-xs text-emerald-700 dark:text-emerald-400">
                         Você pagou {formatCurrency(invoice.unappliedSurplus)} a mais: vira crédito
                         na próxima fatura.
                       </p>
@@ -619,7 +619,7 @@ export function InvoicesView() {
                         <tbody className="divide-y divide-border">
                           {pageRows.map((row) =>
                             row.kind === 'payment' ? (
-                              <tr key={row.key} className="bg-emerald-50/40 hover:bg-emerald-50">
+                              <tr key={row.key} className="bg-emerald-50/40 hover:bg-emerald-50 dark:hover:bg-emerald-950/40">
                                 <td className="whitespace-nowrap p-3 text-muted-foreground">
                                   {formatDateBR(row.payment.paymentDate)}
                                 </td>

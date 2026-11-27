@@ -1,11 +1,11 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
-import { HOME_PATHS, HOME_SECTIONS, type HomeSectionId } from './sections';
+import { HOME_SECTIONS, type HomeSectionId } from './sections';
 
 /**
  * Seção da home que está sob o cabeçalho agora, para destacar o link dela.
- * Fora da home (`/` ou `/v2`), ou no topo (hero), não há seção ativa.
+ * Fora da home, ou no topo (hero), não há seção ativa.
  *
  * A faixa observada é estreita e fica logo abaixo do cabeçalho fixo: a seção
  * ativa é a que cruza essa linha, e não a que ocupa mais espaço na tela.
@@ -15,7 +15,7 @@ export function useActiveSection(): HomeSectionId | null {
   const [active, setActive] = useState<HomeSectionId | null>(null);
 
   useEffect(() => {
-    if (!HOME_PATHS.includes(pathname) || typeof IntersectionObserver === 'undefined') {
+    if (pathname !== '/' || typeof IntersectionObserver === 'undefined') {
       setActive(null);
       return;
     }

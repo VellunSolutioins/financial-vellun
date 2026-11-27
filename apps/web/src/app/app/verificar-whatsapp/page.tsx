@@ -33,7 +33,7 @@ export default function VerificarWhatsappPage() {
         </CardHeader>
         <CardContent className="space-y-6">
           {user.whatsappVerified && !justVerified ? (
-            <div className="rounded-md border border-green-300 bg-green-50 px-4 py-3 text-sm text-green-900">
+            <div className="rounded-md border border-green-300 dark:border-green-800 bg-green-50 dark:bg-green-950/40 px-4 py-3 text-sm text-green-900 dark:text-green-300">
               Seu WhatsApp já está verificado. Para trocar o número, use Minha Conta.
             </div>
           ) : (

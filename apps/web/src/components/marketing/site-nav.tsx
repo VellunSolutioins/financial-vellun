@@ -5,18 +5,18 @@ import { useAuth } from '@/contexts/auth-context';
 import { appHomePath } from '@/lib/auth';
 import { cn } from '@/lib/utils';
 import { MobileMenu } from './mobile-menu';
-import { homeSectionLinks, type HomePath } from './sections';
+import { HOME_SECTION_LINKS } from './sections';
 import { focusRing } from './styles';
 import { ThemeToggle } from './theme-toggle';
 import { useActiveSection } from './use-active-section';
 
 /** Âncoras da home no cabeçalho (a partir do `md`), com a seção atual destacada. */
-export function SiteNav({ home = '/' }: { home?: HomePath }) {
+export function SiteNav() {
   const active = useActiveSection();
 
   return (
     <nav aria-label="Principal" className="hidden md:flex md:items-center md:gap-1 lg:gap-2">
-      {homeSectionLinks(home).map((link) => {
+      {HOME_SECTION_LINKS.map((link) => {
         const current = link.id === active;
         return (
           <Link
@@ -44,20 +44,13 @@ export function SiteNav({ home = '/' }: { home?: HomePath }) {
  * "Ir para o app". Enquanto a sessão carrega, mostra a versão de visitante, que
  * é o caso da maioria de quem chega à home.
  */
-export function HeaderActions({
-  home = '/',
-  themeToggle = true,
-}: {
-  home?: HomePath;
-  /** `false` na landing v1, que fica sempre no tema claro. */
-  themeToggle?: boolean;
-}) {
+export function HeaderActions() {
   const { user, loading } = useAuth();
   const active = useActiveSection();
   const appHref = !loading && user ? appHomePath(user) : null;
 
   const menuLinks = [
-    ...homeSectionLinks(home).map((link) => ({ ...link, current: link.id === active })),
+    ...HOME_SECTION_LINKS.map((link) => ({ ...link, current: link.id === active })),
     appHref
       ? { href: appHref, label: 'Ir para o app', current: false }
       : { href: '/login', label: 'Entrar', current: false },
@@ -66,7 +59,7 @@ export function HeaderActions({
   return (
     <div className="flex items-center gap-1 md:gap-2">
       {/* No celular, o tema fica dentro do menu: aqui não cabe em 320 px. */}
-      {themeToggle && <ThemeToggle className="hidden md:inline-flex" />}
+      <ThemeToggle className="hidden md:inline-flex" />
       {appHref ? (
         <Button asChild className="h-11 rounded-xl px-3 hover:bg-primary-hover sm:px-5">
           <Link href={appHref}>Ir para o app</Link>
@@ -81,7 +74,7 @@ export function HeaderActions({
           </Button>
         </>
       )}
-      <MobileMenu links={menuLinks} themeToggle={themeToggle} />
+      <MobileMenu links={menuLinks} themeToggle />
     </div>
   );
 }

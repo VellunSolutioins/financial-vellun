@@ -33,15 +33,15 @@ export function invoiceStatus(invoice: CardInvoice): InvoiceStatus {
   const due = shortDate(invoice.dueDate);
   if (invoice.isOpening && invoice.remaining > 0) {
     return invoice.isOverdue
-      ? { label: 'Vencida', detail: `venceu em ${due}`, className: 'bg-rose-100 text-rose-800' }
-      : { label: 'Fechada', detail: `vence em ${due}`, className: 'bg-amber-100 text-amber-800' };
+      ? { label: 'Vencida', detail: `venceu em ${due}`, className: 'bg-rose-100 dark:bg-rose-900/40 text-rose-800 dark:text-rose-300' }
+      : { label: 'Fechada', detail: `vence em ${due}`, className: 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300' };
   }
   if (invoice.isFuture) {
     return invoice.remaining === 0 && invoice.total > 0
       ? {
           label: 'Paga',
           detail: 'paga antes de fechar',
-          className: 'bg-emerald-100 text-emerald-800',
+          className: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300',
         }
       : {
           label: 'Futura',
@@ -50,7 +50,7 @@ export function invoiceStatus(invoice: CardInvoice): InvoiceStatus {
         };
   }
   if (invoice.isOverdue) {
-    return { label: 'Vencida', detail: `venceu em ${due}`, className: 'bg-rose-100 text-rose-800' };
+    return { label: 'Vencida', detail: `venceu em ${due}`, className: 'bg-rose-100 dark:bg-rose-900/40 text-rose-800 dark:text-rose-300' };
   }
   if (invoice.state === 'open') {
     // Paga antes do fechamento (docs/adrs/0021): continua aberta, e o que
@@ -60,14 +60,14 @@ export function invoiceStatus(invoice: CardInvoice): InvoiceStatus {
       return {
         label: 'Paga até agora',
         detail: `${closes} · novas compras ainda entram`,
-        className: 'bg-emerald-100 text-emerald-800',
+        className: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300',
       };
     }
     return {
       label: 'Aberta',
       detail:
         invoice.payments > 0 ? `${closes} · ${formatCurrency(invoice.payments)} já pago` : closes,
-      className: 'bg-blue-100 text-blue-800',
+      className: 'bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300',
     };
   }
   switch (invoice.paymentStatus) {
@@ -76,19 +76,19 @@ export function invoiceStatus(invoice: CardInvoice): InvoiceStatus {
       return {
         label: 'Paga',
         detail: `vencimento em ${due}`,
-        className: 'bg-emerald-100 text-emerald-800',
+        className: 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300',
       };
     case 'partial':
       return {
         label: 'Paga em parte',
         detail: `falta ${formatCurrency(invoice.remaining)} · vence em ${due}`,
-        className: 'bg-amber-100 text-amber-800',
+        className: 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300',
       };
     default:
       return {
         label: 'Fechada',
         detail: `vence em ${due}`,
-        className: 'bg-amber-100 text-amber-800',
+        className: 'bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-300',
       };
   }
 }
